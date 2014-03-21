@@ -13,14 +13,17 @@ CITATION
     update!
 
 VERSIONS
-    0.2.0 : August 29, 2012. THIS VERSION. Major update. Annotation of
-    non-miRNA hairpin RNAS (hpRNAs) is much improved, with many fewer
-    "borderline" cases. Multiple internal modificaitons changed the method
-    for dealing with these loci. In addition, as of this version, ShortStack
-    takes in a file of inverted repeats in the form of a .inv file produced
-    by einverted (from the EMBOSS package). Using inverted repeats
-    complements the usage of RNALfold to find hairpins. In particular, the
-    use of einverted-derived inverted repeat annotations enables the correct
+    0.2.1 : September 14, 2012. THIS VERSION. Speed improvements during the
+    merging of einverted-derived hairpins with RNALfold-derived hairpins.
+
+    0.2.0 : August 29, 2012. Major update. Annotation of non-miRNA hairpin
+    RNAS (hpRNAs) is much improved, with many fewer "borderline" cases.
+    Multiple internal modificaitons changed the method for dealing with
+    these loci. In addition, as of this version, ShortStack takes in a file
+    of inverted repeats in the form of a .inv file produced by einverted
+    (from the EMBOSS package). Using inverted repeats complements the usage
+    of RNALfold to find hairpins. In particular, the use of
+    einverted-derived inverted repeat annotations enables the correct
     annotation of very large hairpin-derived small RNA genes, such as
     Arabidopsis thaliana IR71.
 

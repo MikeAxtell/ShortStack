@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.2.0";
+my $version = "0.2.1";
 #####
 
 ##### get options and validate them
@@ -1899,10 +1899,17 @@ sub range_overlap {
     my @q_sorted = sort {$a <=> $b} @$q_range;
     my @s_sorted = sort {$a <=> $b} @$s_range;  ## sorting is necessary to deal with minus-strand hairpins
     my $x;
-    for($x = $q_sorted[0]; $x <= $q_sorted[1]; ++$x) {
-	if(($x >= $s_sorted[0]) and
-	   ($x <= $s_sorted[1])) {
-	    $answer = 1;
+    # first check .. don't do the time-consuming enumeration if you can easily tell there is no overlap at all.
+    if(($q_sorted[1] < $s_sorted[0]) or
+       ($s_sorted[1] < $q_sorted[0])) {
+	$answer = 0;
+    } else {
+	for($x = $q_sorted[0]; $x <= $q_sorted[1]; ++$x) {
+	    if(($x >= $s_sorted[0]) and
+	       ($x <= $s_sorted[1])) {
+		$answer = 1;
+		last;
+	    }
 	}
     }
     return $answer;
@@ -4523,17 +4530,19 @@ sub merge_inv {
 	@c_coords = split ("-", $c_fields[1]);
 	foreach $ir_entry (@$irs) {
 	    @ir_fields = split ("\t", $ir_entry);
-	    @ir_subfields = split (",", $ir_fields[2]);
-	    @ir_lefts = split ("-", $ir_subfields[0]);
-	    @ir_rights = split ("-", $ir_subfields[1]);
-	    $left_overlap = range_overlap(\@c_coords,\@ir_lefts);
-	    $right_overlap = range_overlap(\@c_coords,\@ir_rights);
-	    if((($left_overlap) or ($right_overlap)) and
-	       ($c_chr eq $ir_fields[4])) {
-		$junk = pop @ir_fields; ## remove Chr from the entry, to conform with the hash style
-		$new_entry = join ("\t", @ir_fields);
-		++$merged;
-		push(@{$$true_hps{$clus}}, $new_entry);
+	    ## only continue if the two are on the same chromosome
+	    if($ir_fields[4] eq $c_chr) {
+		@ir_subfields = split (",", $ir_fields[2]);
+		@ir_lefts = split ("-", $ir_subfields[0]);
+		@ir_rights = split ("-", $ir_subfields[1]);
+		$left_overlap = range_overlap(\@c_coords,\@ir_lefts);
+		$right_overlap = range_overlap(\@c_coords,\@ir_rights);
+		if(($left_overlap) or ($right_overlap)) {
+		    $junk = pop @ir_fields; ## remove Chr from the entry, to conform with the hash style
+		    $new_entry = join ("\t", @ir_fields);
+		    ++$merged;
+		    push(@{$$true_hps{$clus}}, $new_entry);
+		}
 	    }
 	}
     }
@@ -4620,7 +4629,9 @@ A manuscript describing the ShortStack package has been written and submitted as
 
 =head1 VERSIONS
 
-0.2.0 : August 29, 2012.  THIS VERSION.  Major update.  Annotation of non-miRNA hairpin RNAS (hpRNAs) is much improved, with many fewer "borderline" cases.  Multiple internal modificaitons changed the method for dealing with these loci.  In addition, as of this version, ShortStack takes in a file of inverted repeats in the form of a .inv file produced by einverted (from the EMBOSS package).  Using inverted repeats complements the usage of RNALfold to find hairpins.  In particular, the use of einverted-derived inverted repeat annotations enables the correct annotation of very large hairpin-derived small RNA genes, such as Arabidopsis thaliana IR71.
+0.2.1 : September 14, 2012.  THIS VERSION.  Speed improvements during the merging of einverted-derived hairpins with RNALfold-derived hairpins.
+
+0.2.0 : August 29, 2012.  Major update.  Annotation of non-miRNA hairpin RNAS (hpRNAs) is much improved, with many fewer "borderline" cases.  Multiple internal modificaitons changed the method for dealing with these loci.  In addition, as of this version, ShortStack takes in a file of inverted repeats in the form of a .inv file produced by einverted (from the EMBOSS package).  Using inverted repeats complements the usage of RNALfold to find hairpins.  In particular, the use of einverted-derived inverted repeat annotations enables the correct annotation of very large hairpin-derived small RNA genes, such as Arabidopsis thaliana IR71.
 
 0.1.4 : June 28, 2012.   Prep_bam.pl helper script updated to deal with .sam lines corresponding to unmapped reads without breaking.  This also enables "one-step" mapping and .bam file preparation using bowtie (see 'Quick Start' section below).  ShortStack.pl also updated to prevent breaking upon encountering .sam lines corresponding to unmapped reads.  Coloring of .bed files now dynamically adjusts to make a nice 'rainbow' (from red through green to blue) regardless of the size of the dicer range.  Finally, an additional filter was added to prevent excessive splitting of initial de-novo clusters into hairpin-associated clusters ... initial clusters are now prevented from splitting if they would spawn more than --maxsplit child hairpins (default, 3).  This prevents inappropriate splitting of very large clusters that might harbor a number of sub-optimal hairpins.
 
