@@ -6,7 +6,7 @@ use strict;
 
 ############### MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.1.0";
+my $version = "0.1.1";
 #####
 
 ##### get options and validate them
@@ -4041,7 +4041,6 @@ sub parse_cigar {
 
 
 __END__
-
 =head1 LICENSE
 
 ShortStack.pl
@@ -4071,11 +4070,13 @@ If you use ShortStack in your work, please cite
 
 Axtell MJ. (2012) ShortStack: Comprehensive annotation and quantification of small RNA genes.  In prep.
 
-A manuscript describing ShortStack will be submitted sometime in the Spring/Summer of 2012, so check Pubmed first or look for an update!
+A manuscript describing the ShortStack package will be submitted sometime in the Spring/Summer of 2012, so check Pubmed first or look for an update!
 
 =head1 VERSIONS
 
-0.1.0 : This version. Initial release. April 29, 2012
+0.1.1 : This version. May 4, 2012.  Added helper script "miR_homologs.pl" to package.  No change to ShortStack.pl code itself except version change.
+
+0.1.0 : Initial release. April 29, 2012
 
 =head1 AUTHOR
 
@@ -4126,7 +4127,7 @@ Shortstack.pl [options] [in.bam] [genome.fasta]
 
 =head1 OPTIONS
 
---outdir [string] : Name of directory to be created to receive results of the run.  Deafults to "ShortStack_[time]", where time is the number of non-leap seconds since Jan 1, 1970 UTC, if not provided   
+--outdir [string] : Name of directory to be created to receive results of the run.  Deafults to "ShortStack_[time]", where time is the number of non-leap seconds since Jan 1, 1970 UCT, if not provided   
                                       
 --reads [integer] : Number of reads (NOT mappings) in the input .bam file.  No default.  Reads are required to output quantifications in mappings per million mapped, instead of in raw rads.  If not provided, the run will be forced into "--raw" mode, because mappings per million mapped reads cannot be calculated.
 

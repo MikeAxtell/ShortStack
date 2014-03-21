@@ -1,21 +1,3 @@
-LICENSE
-    ShortStack.pl
-
-    Copyright (C) 2012 Michael J. Axtell
-
-    This program is free software: you can redistribute it and/or modify it
-    under the terms of the GNU General Public License as published by the
-    Free Software Foundation, either version 3 of the License, or (at your
-    option) any later version.
-
-    This program is distributed in the hope that it will be useful, but
-    WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
-    Public License for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program. If not, see <http://www.gnu.org/licenses/>.
-
 SYNOPSIS
     Annotation and quantification of small RNA genes based upon
     reference-aligned small RNA sequences
@@ -26,11 +8,16 @@ CITATION
     Axtell MJ. (2012) ShortStack: Comprehensive annotation and
     quantification of small RNA genes. In prep.
 
-    A manuscript describing ShortStack will be submitted sometime in the
-    Spring/Summer of 2012, so check Pubmed first or look for an update!
+    A manuscript describing the ShortStack package will be submitted
+    sometime in the Spring/Summer of 2012, so check Pubmed first or look for
+    an update!
 
 VERSIONS
-    0.1.0 : This version. Initial release. April 29, 2012
+    0.1.1 : This version. May 4, 2012. Added helper script "miR_homologs.pl"
+    to package. No change to ShortStack.pl code itself except version
+    change.
+
+    0.1.0 : Initial release. April 29, 2012
 
 AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
@@ -94,7 +81,7 @@ QUICK START
 OPTIONS
     --outdir [string] : Name of directory to be created to receive results
     of the run. Deafults to "ShortStack_[time]", where time is the number of
-    non-leap seconds since Jan 1, 1970 UTC, if not provided
+    non-leap seconds since Jan 1, 1970 UCT, if not provided
 
     --reads [integer] : Number of reads (NOT mappings) in the input .bam
     file. No default. Reads are required to output quantifications in

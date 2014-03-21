@@ -1,0 +1,207 @@
+SYNOPSIS
+    Annotation of putative MIRNA loci based on alignments of known mature
+    miRNAs, and analysis of predicted secondary structure.
+
+VERSIONS
+    0.1 : This version. Initial release. May 4, 2012
+
+AUTHOR
+    Michael J. Axtell, Penn State University, mja18@psu.edu
+
+INSTALL
+    install samtools from <http://samtools.sourceforge.net/> and ensure that
+    samtools is in your PATH
+
+    install the ViennaRNA package <http://www.tbi.univie.ac.at/~ivo/RNA/>
+    and ensure that RNALfold is in your PATH
+
+    ensure the script is executable
+
+        chmod +x miR_homologs.pl                                                         
+                                                                                                 
+    ensure the script is in your PATH (examples):
+
+        sudo cp miR_homologs.pl /usr/bin/                                                
+                                                                                                 
+    OR just for one session assuming script is in your working directory:
+
+        PATH=$PATH:.                                                                                 
+                                                                                                 
+    ensure 'perl' is located in /usr/bin/ .. if not, edit line 1 of script
+    accordingly
+
+USAGE
+    miR_homologs.pl [options] [alignments.bam] [genome.fasta]
+
+QUICK START
+    1. Install miR_homologs.pl and required third-party tools per above
+    instructions
+
+    2. Gather a set of mature miRNAs to use as queries against your
+    reference genome. It's better to use a non-redundant set (in terms of
+    sequences).
+
+    3. Ensure the chromosome names of the reference genome are short and
+    sweet, containing no whitespace or metacharacters (see below)
+
+    4. Align your reads to the reference genome, and output the results in
+    sam/bam format. Suggested aligner is bowtie 1 (0.12.7) but method that
+    outputs in sam/bam format is fine.
+
+    5. Ensure your alignments have intact CIGAR strings, not just "*"
+    placeholders (see SAM specification). Bowtie 1's SAM output is fine;
+    check for other aligners.
+
+    6. Convert the alignment to a .bam file sorted by chromosomal position.
+    See samtools documentation for methods.
+
+    7. To run with default parameters, call "miR_homologs.pl [in.bam]
+    [genome.fasta]". See OPTIONS below for other options and run modes.
+
+OPTIONS
+    --outdir [string] : Name of directory to be created to receive results
+    of the run. Deafults to "miR_homologs_[time]", where time is the number
+    of non-leap seconds since Jan 1, 1970 UCT, if not provided
+
+    --foldwindow [integer] : Size of window to fold. Window is centered on
+    the alignment. Default: 300
+
+    --maxhpsep [integer] : Maximum allowed span for a base-pair during
+    hairpin search (Option -L for RNALfold). Default = 300. Must be between
+    50 and 2000.
+
+    --minfracpaired [float] : Minimum fraction of paired nucleotides
+    required within a valid hairpin structure. Default = 0.67. Allowed
+    values are greater than 0 and less than or equal to 1.
+
+    --minntspaired [integer] : Minimum absolute number of paired nucleotides
+    required within a valid hairpin structure. Default = 30. Allowed values
+    are greater than zero and less than or equal to --maxhpsep
+
+KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
+  Input .bam file
+
+    The aligned queries in the input .bam file must be sorted by chromosomal
+    location, and indexed using the samtools index command -- specifically,
+    miR_homologs will look for the [prefix].bam.bai file in the same
+    directory as the input [prefix].bam file.
+
+    Each mapped read must have the CIGAR string set (column 6 in the SAM
+    specification) -- miR_homologs.pl determines the small RNA lengths by
+    parsing the CIGAR string .. if any mappings have "*" entered instead of
+    a valid CIGAR string miR_homologs.pl will exit and complain.
+
+    Finally, it is critical that the chromosome names referenced in the .bam
+    file correspond exactly to those present in the genome.fasta file.
+
+  Input genome.fasta file
+
+    It is critical that this be the precise genome to which the reads in the
+    input .bam file were mapped.
+
+    Additionally, the chromosome names in the FASTA headers must be kept
+    SIMPLE. Specifically, miR_homologs.pl at several points parses locus
+    information by the regex /^(\S+):(\d+)-(\d+)$/ or some variant thereof,
+    where the first pattern is the chromosome name. Therefore, the
+    chromosome names must match (\S+) .. e.g. a single string of one or more
+    non-white-space characters, with no metacharacters. So, ">Chr1" in your
+    reference genome is good, but ">Chr1 | XM00023 | this is a bunch of
+    annotation blah blah blah" is bad. This same concern applies to the
+    input .bam file, so your chromosome names should be shortened BEFORE
+    mapping your reads, so that they are short and they are exactly
+    reflected in the .bam file.
+
+    If not already present, a .fai index file for the genome will be created
+    using samtools faidx at the beginning of the run.
+
+SUGGESTED WORKFLOW
+  Queries
+
+    Typcially queries should be a set of non-redundant mature miRNA
+    sequences, all upper-case, with U's turned into T's prior to alignment,
+    in FASTA format. The FASTA headers should be short and purged of
+    whitespace and metacharacters. For instance, ">ath-miR172B* MIMAT00101"
+    should not be used because it has both whitespace and a metacharacter
+    ('*'). Convert to ">ath-miR172bstar".
+
+  Reference (genome)
+
+    FASTA headers should be short and devoid of whitespace, as described
+    above. Repeat-masking not necessary if strategy below is used. Index the
+    genome file by typing
+
+    samtools index [genome]
+
+    Since the suggested workflow uses bowtie 0.12.7 as the aligner, you also
+    need to build a bowtie index for the genome.
+
+    ./bowtie-build [genome] [prefix]
+
+  Alignment
+
+    We currently use bowtie version 1 (0.12.7) for alignments. Settings -f
+    -v 0 -a -m 20 -S (fasta formatted input, retain only exact matches,
+    retain all valid alignments subject to a cap of 20, queries with 20 or
+    more alignments are suppressed, output in SAM format). We also find it
+    helpful to scrub the results on the fly with a awk command to omit .sam
+    lines corresponding to unmapped queries. An example aligner call might
+    look like:
+
+    ./bowtie -f -v 0 -a -m 20 -S [index] [queries.fasta] | awk '$3!="*"' >
+    [output.sam]
+
+  Processing alignments
+
+    After the above, we are left with a read-sorted .sam file, and we need
+    to get a chrosomal-sorted .bam file. Use samtools to manipulate the
+    alignment as follows:
+
+    samtools view -b -S [output.sam] > [output_unsorted.bam]
+
+    samtools sort [output_unsorted.bam] [output_sorted_prefix]
+
+    samtools index [output_sorted_prefix.bam]
+
+    The resulting [output_sorted_prefix.bam] file is ready for use by
+    miR_homologs.
+
+  Run
+
+    ./miR_homologs.pl [options] [output_sorted_prefix.bam] [genome.fasta]
+
+OUTPUT
+    Each MIRNA locus that passes the analysis will have its own simple text
+    file to display the details of the locus. These text files all show A)
+    the Name and genomic coordinates of the locus, B) the sequence, in RNA
+    form, C) the identified hairpin structure, in dot-bracket notation, and
+    D) the aligned mature miRNA
+
+    A brief description of the results, including overlapping loci, is also
+    provided on STDERR.
+
+    Finally, a file called "Resuts.txt" is created in the outdir. This is a
+    tab-delimited file where describing each non-redudndant locus. The file
+    is compatiable with input into ShortStack under --count mode.
+
+METHODS
+    miR_homologs.pl uses code borrowed from ShortStack in order to determine
+    whether an alignment could correspond to a qualifyin MIRNA locus. Loci
+    that are positively identified conform the criteria outlined in Meyers
+    et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682, EXCEPT that
+    actual expression is not taken into account. In order to be annotated as
+    a potential MIRNA homolog by miR_homologs.pl, identified locus must meet
+    the following criteria:
+
+    1. The putative hairpin must have a valid structure per options
+    --minfracpaired and --minntspaired.
+
+    2. The aligned query (the putative mature miRNA) must contain no more
+    than 4 unpaired nts (excepting the 2nts on the 3' end), and they must
+    not span a loop (i.e., no base-pairs to themselves).
+
+    3. The predicted miRNA* of the candidate mature miRNA must contain no
+    more than 4 unpaired nts (excepting the 2nts on the 3' end), and it must
+    not span a loop (i.e., no base-pairs to themselves). Predicted miRNA*'s
+    are based on identifying the small RNA that would form a miR/miR* duplex
+    with a canonical 2nt, 3' overhang.
+
