@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "1.2.1";   ## adding option for multiple cores during bowtie alignments
+my $version_num = "1.2.2";
 
 
 ##### get options and validate them
@@ -6393,29 +6393,47 @@ sub get_islands {
 }
 
 sub check_RNALfold {
-    (open(RL, "RNALfold --version |")) || return 0;
+    (open(PA, "which RNALfold |")) || return 0;
+    my $path = <PA>;
+    chomp $path;
+    close PA;
+    (open(RL, "RNALfold --version 2> /dev/null  |")) || return $path;
     my $version = <RL>;
-    chomp $version;
-    close RL;
-    if($version =~ /RNALfold \d/) {
-	return $version;
+    if($version) {
+	chomp $version;
+	close RL;
+	if($version =~ /RNALfold \d/) {
+	    $path .= " $version";
+	    return $path;
+	} else {
+	    return $path;
+	}
     } else {
-	return 0;
+	return $path;
     }
 }
 
 sub check_RNAeval {
-    (open(RE, "RNAeval --version |")) || return 0;
-    my $version = <RE>;
-    chomp $version;
-    close RE;
-    if($version =~ /RNAeval \d/) {
-	return $version;
+    (open(PA, "which RNAeval |")) || return 0;
+    my $path = <PA>;
+    chomp $path;
+    close PA;
+    (open(RL, "RNAeval --version 2> /dev/null |")) || return $path;
+    my $version = <RL>;
+    if($version) {
+	chomp $version;
+	close RL;
+	if($version =~ /RNAeval \d/) {
+	    $path .= " $version";
+	    return $path;
+	} else {
+	    return $path;
+	}
     } else {
-	return 0;
+	return $path;
     }
 }
-
+    
 sub check_bowtie {
     (open(B, "bowtie --version |")) || return 0;
     my $version = <B>;
@@ -7209,7 +7227,7 @@ Shahid S., Axtell MJ. (2013) Identification and annotation of small RNA genes us
 
 =head1 VERSION
 
-1.2.1 :: Released October 23, 2013
+1.2.2 :: Released October 26, 2013
 
 =head1 AUTHOR
 
