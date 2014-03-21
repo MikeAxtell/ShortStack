@@ -28,22 +28,18 @@ CITATION
     doi:10.1261/rna.035279.112
 
 VERSION
-    1.1.0 :: Released October 1, 2013
+    1.2.0 :: Released October 16, 2013
 
 AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
 
 DEPENDENCIES
-            perl
-            samtools
-            RNAeval
-            RNALfold
-            bowtie (0.12.x OR 1.x) [only if aligning reads]
-            bowtie-build (0.12.x OR 1.x) [only if aligning reads]
+    perl samtools RNAeval RNALfold bowtie (0.12.x OR 1.x) [only if aligning
+    reads] bowtie-build (0.12.x OR 1.x) [only if aligning reads]
 
     ShortStack.pl is a perl script, so it needs perl to compile. It expects
     to find perl at /usr/bin/perl. If this is not where your perl is, modify
-    line 1 of ShortStacl.pl (the hashbang) accordingly. It also requires the
+    line 1 of ShortStack.pl (the hashbang) accordingly. It also requires the
     package Getopt::Long, which I think is standard in most Perl
     distributions. If this package is not installed, get it from CPAN.
 
@@ -69,10 +65,10 @@ INSTALL
                                                                                                  
     For convenience, you can add it to your PATH .. for instance
 
-            sudo cp ShortStack.pl /usr/bin/
+        sudo cp ShortStack.pl /usr/bin/
 
 USAGE
-            Shortstack.pl [options] [genome.fasta] 
+        Shortstack.pl [options] [genome.fasta] 
 
     There are three modes which differ in the the types of pre-analysis that
     are performed. Each of the modes has a different set of REQUIRED
@@ -81,19 +77,19 @@ USAGE
     Mode 1: Trim small RNA-seq reads to remove 3' adapter seqeuence, align
     them, and then analyze. Required options:
 
-            --untrimmedFA OR --untrimmedFQ
-        
-            --adapter
+        --untrimmedFA OR --untrimmedFQ OR --untrimmedCS
+    
+        --adapter
 
     Mode 2: Align pre-trimmed small RNA-seq reads, and then analyze.
     Required options:
 
-            --trimmedFA OR --trimmedFQ
+        --trimmedFA OR --trimmedFQ OR --trimmedCS
 
     Mode 3: Analyze a pre-existing BAM alignment of small RNA-seq reads.
     Require option:
 
-            --bamfile
+        --bamfile
 
     Additionally, in modes 1 or 2, the option --align_only will terminate
     analysis after making the alignment file.
@@ -117,6 +113,15 @@ OPTIONS
     --untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ
     format. Multiple datasets can be provided as a comma-delimited list.
 
+    --untrimmedCS [string] : Path to untrimmed small RNA-seq data is
+    Colorpsace-FASTA format. Multiple datasets can be provided as a
+    comma-delimited list.
+
+    --untrimmedCSQV [string] : Path to untrimmed small RNA-seq quality
+    values from SOLiD datasets, corresponding to colorspace-fasta files
+    given in option --untrimmedCS. Multiple datasets can be provided as a
+    comma-delimited list.
+
     --adapter [string] : Sequence of 3' adapter to search for during adapter
     trimming. Must be at least 8 nts in length, and all ATGC characters.
     Required if either --untrimmedFA or --untrimmedFQ are specified.
@@ -129,6 +134,15 @@ OPTIONS
 
     --trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq
     data in FASTQ format. Multiple datasets can be provided as a
+    comma-delimited list.
+
+    --trimmedCS [string] : Path to trimmed and ready to map small RNA-seq
+    data in Colorspace-FASTA format. Multiple datasets can be provided as a
+    comma-delimited list.
+
+    --trimmedCSQV [string] : Path to trimmed color-space quality value
+    files, corresponding to trimmed colorspace-fasta files provided in
+    option --trimmedCS. Multiple datasets can be provided as a
     comma-delimited list.
 
     --align_only : Exits program after completion of small RNA-seq data
@@ -264,12 +278,18 @@ KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
     If not already present, a .fai index file for the genome will be created
     using samtools faidx at the beginning of the run.
 
-  Small RNA-seq reads in FASTA or FASTQ format
+  Small RNA-seq reads.
 
     FASTA or FASTQ data should be devoid of comment lines and conform to
     FASTA or FASTQ specs. In addition, ShortStack.pl assumes that each read
     will occupy a single line in the file. There is no support for
-    paired-end reads.
+    paired-end reads. Colorspace-FASTA formatted data (from SOLiD) can have
+    comment lines. Format is assumed to conform to colorspace-FASTA
+    specifications (beginning with a nucleotide, followed by a string of
+    colors [0,1,2,3] or ambiguity codes [.]. For SOLiD data, the quality
+    value files can also be input (with option --untrimmedCSQV or
+    --trimmedCSQV); these files are expected to be space delimited list of
+    integers, in the same order as the corresponding colorspace-fasta files.
 
   Input .bam file
 
@@ -373,7 +393,7 @@ OUTPUT
     To import this into R, here's a tip to deal with the first line, which
     has the headers but begins with a "#" character.
 
-            >results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
+        >results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
 
     Column 1: Locus : The genome-browser-friendly coordinates of the
     clusters. Coordinates are one-based, inclusive (e.g. Chr1:1-100 refers
@@ -528,7 +548,7 @@ OUTPUT
     presented, regardless of whether it is complex or not.
 
 KEY METHODS
-  Adapter trimming
+  Adapter trimming (FASTA or FASTQ)
 
     Adapter trimming by ShortStack searches for the right-most occurence of
     the string given in the option --adapter. If found, the adapter is
@@ -538,12 +558,28 @@ KEY METHODS
     is performed by a simple regex and allows for no mismatches. If the
     input file is in FASTQ format, the quality values are trimmed as well.
 
+  Adapter trimming (Colorspace-FASTA)
+
+    Adapter trimming of colorspace data first translates the input adapter
+    sequence to colorspace. The right-most occurence of the color-space
+    adapter sequence is identified. Trimming begins 1 color BEFORE the match
+    to the color-space adapter. This removes the 'hybrid' color
+    corresponding to the dinucleotide at the junction of the small RNA and
+    the adapter. Reads where no adapter is found are discarded, as are those
+    shorter than 15 colors after trimming. Finally, any reads that contain
+    non-0123 colors after trimming are also discarded. Adapter-matching is
+    performed by a simple regex and allows for no mismatches. If SOLiD
+    formatted quality values were provided (via option --untrimmedCSQV), the
+    quality values are also trimmed at the corresponding position.
+
   Alignments
 
-    Alignments are performed with the bowtie settings -v 1 -a --best
-    --strata -S, and then parsed by ShortStack to retain just ONE randomly
-    selected valid alignment per read. After this selection, and the
-    addition of the XX tag (indicating the total number of possible
+    FASTA and FASTQ alignments are performed with the bowtie settings -v 1
+    -a --best --strata -S. Color-space alignments use bowtie settings -C -f
+    --col-keepends (and if quality values are available, -Q) -v 1 -a --best
+    --strata -S. Initial alignments are parsed by ShortStack to retain just
+    ONE randomly selected valid alignment per read. After this selection,
+    and the addition of the XX tag (indicating the total number of possible
     positions for the read), the data are then piped through samtools view
     and samtools sort to create a sorted BAM formatted file. The header is
     also modified to note ShortStack processing. Note that unmapped reads
@@ -560,10 +596,15 @@ KEY METHODS
   Multiple libraries
 
     As of version 1.1.0, ShortStack supports input of multiple FASTA or
-    FASTQ datasets, either trimmed or untrimmed. These are passed in via the
-    options --untrimmedFA, --untrimmedFQ, --trimmedFA, or --trimmedFQ as
-    comma-delimited lists. If the input is untrimmed, option --adapter also
-    allows input of a corresponding comma-delimited list of adapters. The
+    FASTQ datasets (and as of version 1.2.0, multiple colorspace-FASTA
+    datasets as well), either trimmed or untrimmed. These are passed in via
+    the options --untrimmedFA, --untrimmedFQ, --untrimmedCS, --trimmedFA,
+    --trimmedFQ, or --trimmedCS as comma-delimited lists. If the input is
+    untrimmed, option --adapter also allows input of a corresponding
+    comma-delimited list of adapters. If the data are colorspace, options
+    --untrimmedCSQV and --trimmedCSQV allow input of comma-delimited lists
+    of quality value files corresponding to their colorspace FASTA
+    coutnerparts given by options --untrimmedCS or --trimmedCS. The
     untrimmed files and the adapters are assumed to be in the same order. If
     all untrimmed files have the same adapter, just one sequence for option
     --adapter is acceptable, and will be used to guide trimming for all
@@ -704,27 +745,7 @@ KEY METHODS
     comprises at least 20% of the total abundance of small RNAs mapped to
     the hairpin.
 
-    - Duplex: Both partners in a candidate miRNA/miRNA* duplex must not span
-    any loops (i.e. neither is allowed to have base-pairs to itself). In
-    addition, there must be <= [--maxmiRUnpaired] unpaired mature miRNA nts
-    in the miRNA/miRNA* duplex, and <= [--maxmiRUnpaired] unpaired miRNA*
-    nts in the miRNA/miRNA* duplex.
-
-    - Star: The exact predicted miRNA*s of candidate miRNAs must have at
-    least one mapped read, and the total abundance of any candidate mature
-    miRNA/miRNA* pair must be at least 25% of the total small RNA abundance
-    at the locus. Finally, redundant candidate mature miRNAs are removed, as
-    the steps above initially might classify a small RNA as both a miRNA*
-    and mature miRNA. In such cases, the partner with the higher abundance
-    is called the miRNA, the other the miRNA*.
-
-    Hairpin loci passing all four of these loci are annotated as MIRNAs.
-    Those failing one or more are reported as HP loci instead.
-
-  Quantification of clusters
-
-    All mappings with at lease one nt of overlap within the cluster are
-    tallied as being within the cluster. Thus, for a cluster located at
+    - Duplex: Both partners in a candidate miRNA/m, for a cluster located at
     Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and 2000-2021 are
     all counted as being within the cluster during quantification. Note that
     it's possible to count the same mapping within non-overlapping clusters.

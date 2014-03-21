@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "1.1.0";  ## October 1, 2013
+my $version_num = "1.2.0"; 
 
 
 ##### get options and validate them
@@ -57,6 +57,11 @@ my $align_only;
 ## New in 1.1.0
 my $read_group;
 
+## New in 1.2.0 .. support of colorspace data
+my $untrimmedCS;
+my $trimmedCS;
+my $untrimmedCSQV;
+my $trimmedCSQV;
 
 # get user options from command line
 GetOptions ('outdir=s' => \$outdir,
@@ -83,9 +88,13 @@ GetOptions ('outdir=s' => \$outdir,
 	    'maxLoopLength=i' => \$maxLoopLength,
 	    'untrimmedFA=s' => \$untrimmedFA,
 	    'untrimmedFQ=s' => \$untrimmedFQ,
+	    'untrimmedCS=s' => \$untrimmedCS,
+	    'untrimmedCSQV=s' => \$untrimmedCSQV,
 	    'adapter=s' => \$adapter,
 	    'trimmedFA=s' => \$trimmedFA,
 	    'trimmedFQ=s' => \$trimmedFQ,
+	    'trimmedCS=s' => \$trimmedCS,
+	    'trimmedCSQV=s' => \$trimmedCSQV,
 	    'bamfile=s' => \$bamfile,
 	    'align_only' => \$align_only,
 	    'read_group=s' => \$read_group,
@@ -98,7 +107,7 @@ if($help) {
     die "\n$long_help\n";
 }
 
-# If version, print version and quite
+# If version, print version and quit
 if($version) {
     die "ShortStack.pl version $version_num\n";
 }
@@ -127,7 +136,7 @@ log_it($logfile, "ShortStack log file at $logfile\n\nBeginning initial checks");
 my $mode;
 # Mode 1: Trim, align, then analyze.
 # Expect either untrimmedFA or untrimmed FQ, but not both:
-if(($untrimmedFA) or ($untrimmedFQ)) {
+if(($untrimmedFA) or ($untrimmedFQ) or ($untrimmedCS)) {
     # Should be mode 1. Ensure adapter specified and valid .. must be 8nts, ATCG
     unless($adapter) {
 	log_it($logfile,"FATAL: Option --adapter must be specified in conjunction with untrimmed reads\n\n$usage\n");
@@ -139,13 +148,24 @@ if(($untrimmedFA) or ($untrimmedFQ)) {
 	log_it($logfile,"FATAL: Option --adapter must be a string of at least 8 ATGC characters .. case-insensitive or comma delimited set of such\n\n$usage\n");
 	exit;
     }
-    # Cant have both
-    if(($untrimmedFA) and ($untrimmedFQ)) {
-	log_it($logfile,"FATAL: Must specifiy either --untrimmedFA OR --untrimmedFQ, but not both\n\n$usage\n");
+    # Cant have more than one
+    if((($untrimmedFA) and ($untrimmedFQ)) or
+       (($untrimmedFA) and ($untrimmedCS)) or
+       (($untrimmedFQ) and ($untrimmedCS))) {
+	log_it($logfile,"FATAL: Must specifiy either --untrimmedFA OR --untrimmedFQ OR --untrimmedCS, but not more than one type\n\n$usage\n");
 	exit;
     }
     $mode = 1;
-
+    
+    # If both untrimmedCS and untrimmedCSQV are specified, they must have the same number of files .. and they all must be readable
+    if(($untrimmedCS) and ($untrimmedCSQV)) {
+	my $csqv_check = check_csqv($untrimmedCS,$untrimmedCSQV);
+	unless($csqv_check) {
+	    exit;
+	}
+    }
+    
+    
     # Warn about irrelevant options
     if($trimmedFA) {
 	log_it($logfile,"\nWARNING: in mode 1 option --trimmedFA is irrelvant. It is being ignored\n");
@@ -153,14 +173,19 @@ if(($untrimmedFA) or ($untrimmedFQ)) {
     if($trimmedFQ) {
 	log_it($logfile,"\nWARNING: in mode 1 option --trimmedFQ is irrelvant. It is being ignored\n");
     }
+    if($trimmedCS) {
+	log_it($logfile,"\nWARNING: in mode 1 option --trimmedCS is irrelvant. It is being ignored\n");
+    }
     if($bamfile) {
 	log_it($logfile,"\nWARNING: in mode 1 option --bamfile is irrelvant. It is being ignored\n");
     }
-} elsif (($trimmedFA) or ($trimmedFQ)) {
+} elsif (($trimmedFA) or ($trimmedFQ) or ($trimmedCS)) {
     # Should be mode 2. 
     # Cant have both
-    if(($trimmedFA) and ($trimmedFQ)) {
-	log_it($logfile,"FATAL: Must specify either --trimmedFA OR --trimmedFQ for mode 2, but not both\n\n$usage\n");
+    if((($trimmedFA) and ($trimmedFQ)) or
+       (($trimmedFA) and ($trimmedCS)) or
+       (($trimmedFQ) and ($trimmedCS))) {
+	log_it($logfile,"FATAL: Must specify either --trimmedFA OR --trimmedFQ OR --trimmedCS for mode 2, but not more than one type\n\n$usage\n");
 	exit;
     }
     $mode = 2;
@@ -407,16 +432,27 @@ if($mode == 1) {
     log_it($logfile,": Trim reads, then align trimmed reads, \n\tUntrimmed Reads: ");
     if($untrimmedFA) {
 	log_it($logfile,"$untrimmedFA\n");
-    } else {
+    } elsif($untrimmedFQ) {
 	log_it($logfile,"$untrimmedFQ\n");
+    } else {
+	log_it($logfile,"$untrimmedCS\n");
+	if($untrimmedCSQV) {
+	    log_it($logfile,"\tUntrimmed Qual values: $untrimmedCSQV\n");
+	}
     }
+	
     log_it($logfile, "\tAdapter: $adapter\n");
 } elsif ($mode == 2) {
     log_it($logfile,"Align pre-trimmed reads\n\tTrimmed Reads: ");
     if($trimmedFA) {
 	log_it($logfile,"$trimmedFA\n");
-    } else {
+    } elsif ($trimmedFQ) {
 	log_it($logfile,"$trimmedFQ\n");
+    } else {
+	log_it($logfile,"$trimmedCS\n");
+	if($trimmedCSQV) {
+	    log_it($logfile,"\tTrimmed Qual values: $trimmedCSQV\n");
+	}
     }
 } elsif ($mode == 3) {
     log_it($logfile,"Analyze pre-existing BAM alignment\n\tAlignments: $bamfile\n");
@@ -505,14 +541,19 @@ log_it ($logfile," done\n\n");
 # pre-analysis
 my @trimmed_FAs = ();
 my @trimmed_FQs = ();
+my @trimmed_CSs = ();
+
 
 if($mode == 1) {
     if($untrimmedFA) {
 	@trimmed_FAs = trim_FA($untrimmedFA,$adapter);
     } elsif ($untrimmedFQ) {
 	@trimmed_FQs = trim_FQ($untrimmedFQ,$adapter);
+    } elsif ($untrimmedCS) {
+	@trimmed_CSs = trim_CS($untrimmedCS,$adapter,$untrimmedCSQV);  ## if there were input qual files, the entries in the array are concatenated pairs of trimmedCS and trimmedQV with ":::"
+	
     } else {
-	log_it($logfile,"FATAL: mode 1 but neither --untrimmedFA nor --untrimmedFQ found\?\n\n");
+	log_it($logfile,"FATAL: mode 1 but neither --untrimmedFA nor --untrimmedFQ nor --untrimmedCS found\?\n\n");
 	exit;
     }
 } elsif ($mode == 2) {
@@ -520,6 +561,17 @@ if($mode == 1) {
 	@trimmed_FAs = split (",",$trimmedFA);
     } elsif ($trimmedFQ) {
 	@trimmed_FQs = split (",",$trimmedFQ);
+    } elsif ($trimmedCS) {
+	if($trimmedCSQV) {
+	    my @initial_CSs = split (",", $trimmedCS);
+	    my @initial_QVs = split (",", $trimmedCSQV);
+	    for(my $x = 0; $x < (scalar @initial_CSs); ++$x) {
+		my $concat = "$initial_CSs[$x]" . ":::" . "$initial_QVs[$x]";
+		push(@trimmed_CSs, $concat);
+	    }
+	} else {
+	    @trimmed_CSs = split (",",$trimmedCS);
+	}
     }
 }
 
@@ -533,8 +585,11 @@ if(($mode == 1) or ($mode == 2)) {
     } elsif (@trimmed_FQs) {
 	$filetype = "q";
 	@to_align_files = @trimmed_FQs;
+    } elsif (@trimmed_CSs) {
+	$filetype = "c";
+	@to_align_files = @trimmed_CSs;
     } else {
-	log_it($logfile,"\nFATAL: Failed to ID filetype between fastq or fasta for some reason\n\n");
+	log_it($logfile,"\nFATAL: Failed to ID filetype between fastq or fasta or csfasta for some reason\n\n");
 	exit;
     }
     my @bamfiles = ();
@@ -947,8 +1002,8 @@ sub usage {
 USAGE: ShortStack.pl \[options\] genome.fasta
 
 MODES:
-1. Trim, align, and analyze: Requires --untrimmedFA OR --untrimmedFQ. Also requires --adapter. To stop after alignments, specify --align_only
-2. Align, and analyze: Requires --trimmedFA OR --trimmedFQ. To stop after alignments, specify --align_only
+1. Trim, align, and analyze: Requires --untrimmedFA OR --untrimmedFQ OR --untrimmedCS. Also requires --adapter. To stop after alignments, specify --align_only
+2. Align, and analyze: Requires --trimmedFA OR --trimmedFQ OR --trimmedCS. To stop after alignments, specify --align_only
 3. Analyze: Requires --bamfile
 
 Type \'ShortStack.pl --help\' for full list of options
@@ -965,8 +1020,8 @@ sub full_help {
 USAGE: ShortStack.pl \[options\] genome.fasta
 
 MODES:
-1. Trim, align, and analyze: Requires --untrimmedFA OR --untrimmedFQ. Also requires --adapter. To stop after alignments, specify --align_only
-2. Align, and analyze: Requires --trimmedFA OR --trimmedFQ. To stop after alignments, specify --align_only
+1. Trim, align, and analyze: Requires --untrimmedFA OR --untrimmedFQ OR --untrimmedCS. Also requires --adapter. To stop after alignments, specify --align_only
+2. Align, and analyze: Requires --trimmedFA OR --trimmedFQ OR --trimmedCS. To stop after alignments, specify --align_only
 3. Analyze: Requires --bamfile
 
 DOCUMENTATION: type \'perldoc ShortStack.pl\'
@@ -982,11 +1037,19 @@ OPTIONS:
 
 --untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ format.  Multiple datasets can be provided as a comma-delimited list.
 
+--untrimmedCS [string] : Path to untrimmed small RNA-seq data is Colorpsace-FASTA format. Multiple datasets can be provided as a comma-delimited list.
+
+--untrimmedCSQV [string] : Path to untrimmed small RNA-seq quality values from SOLiD datasets, corresponding to colorspace-fasta files given in option --untrimmedCS. Multiple datasets can be provided as a comma-delimited list.
+
 --adapter [string] : Sequence of 3' adapter to search for during adapter trimming. Must be at least 8 nts in length, and all ATGC characters. Required if either --untrimmedFA or --untrimmedFQ are specified. Multiple adapters (for when multiple input untrimmedFA/FQ files are specified) can be provided as a comma-delimited list.
 
 --trimmedFA [string] : Path to trimmed and ready to map small RNA-seq data in FASTA format. Multiple datasets can be provided as a comma-delimited list.
 
 --trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq data in FASTQ format. Multiple datasets can be provided as a comma-delimited list.
+
+--trimmedCS [string] : Path to trimmed and ready to map small RNA-seq data in Colorspace-FASTA format. Multiple datasets can be provided as a comma-delimited list.
+
+--trimmedCSQV [string] : Path to trimmed color-space quality value files, corresponding to trimmed colorspace-fasta files provided in option --trimmedCS. Multiple datasets can be provided as a comma-delimited list.
 
 --align_only : Exits program after completion of small RNA-seq data alignment, creating BAM file.
 
@@ -6532,24 +6595,33 @@ sub perform_alignment {
     log_it($logfile, "\tCheck for ebwt bowtie indices for the genome: ");
     
     # Search for the bowtie indices
-    my $ebwt_check = check_ebwt($genome);
+    my $ebwt_check = check_ebwt($genome,$type);
     # If absent, call bowtie-build
     if($ebwt_check) {
 	log_it($logfile, "PRESENT\n");
     } else {
 	log_it($logfile, "ABSENT. Attempting to build with bowtie-build... ");
-	my $bb_log = bowtie_build($genome);
+	my $bb_log = bowtie_build($genome,$type);
 	log_it($logfile, "Done.\n\tSee $bb_log for output from bowtie-build\n");
     }
     
     # build bowtie query string
     my $bowtie = "bowtie";
     if($type eq "a") {
-	$bowtie .= " -f";
+	$bowtie .= " -f -v 1 -a --best --strata -S $genome $infile";
     } elsif ($type eq "q") {
-	$bowtie .= " -q";
+	$bowtie .= " -q -v 1 -a --best --strata -S $genome $infile";
+    } elsif ($type eq "c") {
+	$bowtie .= " -f -C";
+	my $cs_index = "$genome" . "_CS";
+	## check to see if 'infile' is a concatenation of a trimmed CS and trimmed QV file
+	if($infile =~ /:::/) {
+	    my @two_files = split (":::",$infile);
+	    $bowtie .= " -Q $two_files[1] -v 1 -a --best --strata -S --col-keepends $cs_index $two_files[0]";
+	} else {
+	    $bowtie .= " -v 1 -a --best --strata -S --col-keepends $cs_index $infile";
+	}
     }
-    $bowtie .= " -v 1 -a --best --strata -S $genome $infile";
     
     # define the outfile base name .. strip extensions from the infile
     my $outfile_base = $infile;
@@ -6629,7 +6701,7 @@ sub perform_alignment {
     print OUT "$read_aligns[$index]";
     
     log_it($logfile, "\n\n");
-
+    
     # close streams
     close BOW;
     close OUT;
@@ -6647,12 +6719,16 @@ sub perform_alignment {
 }
 
 sub check_ebwt {
-    my($base) = @_;
+    my($base,$type) = @_;
     my @ebwt_suffixes = qw(.1.ebwt .2.ebwt .3.ebwt .4.ebwt .rev.1.ebwt .rev.2.ebwt);
     my $ebwt_count = 0;
     my $ebwt_file;
     foreach my $ebwt_suffix (@ebwt_suffixes) {
-	$ebwt_file = "$base" . "$ebwt_suffix";
+	if($type eq "c") {
+	    $ebwt_file = "$base" . "_CS" . "$ebwt_suffix";
+	} else {
+	    $ebwt_file = "$base" . "$ebwt_suffix";
+	}
 	if(-r $ebwt_file) {
 	    ++$ebwt_count;
 	}
@@ -6667,9 +6743,14 @@ sub check_ebwt {
 }
 
 sub bowtie_build {
-    my($fasta) = @_;
+    my($fasta,$type) = @_;
     my $log = "$fasta" . "_bowtie_build_log.txt";
-    system("bowtie-build $fasta $fasta > $log");
+    if($type eq "c" ) {
+	my $out_base = "$fasta" . "_CS";
+	system("bowtie-build -C $fasta $out_base > $log");
+    } else {
+	system("bowtie-build $fasta $fasta > $log");
+    }
     return $log;
 }
 
@@ -6869,7 +6950,213 @@ sub merge_em {
     return $out_name;
 }
 
+sub trim_CS {
+    my($untrimmed,$adapter,$untrimmedCSQV) = @_;
     
+    # Split comma-delimited paths...
+    my @untrimmed_files = split (",",$untrimmed);
+    my @untrimmed_QV_files = ();
+    if($untrimmedCSQV) {
+	@untrimmed_QV_files = split (",",$untrimmedCSQV);
+    }
+	
+    
+    # Split comma-delimited adapters...
+    my @adapters = split (",",$adapter);
+    
+    # holder for all trimmed file names ...
+    my @trimmed_files = ();
+    
+    my $used_adapter;
+    
+    # check for number of adapters...
+    unless (((scalar @untrimmed_files) == (scalar @adapters)) or
+	    ((scalar @adapters) == 1)) {
+	log_it($logfile, "\nFATAL: The number of apdaters provided must be equal to the number of untrimmedCS files, or just one\n");
+	exit;
+    }
+    
+    my $ut_qv_file;
+    my $trimmedQV;
+    foreach my $ut_file (@untrimmed_files) {
+	if(@adapters) {
+	    $used_adapter = shift @adapters;
+	}
+	my $cs_used_adapter = adapter2cs($used_adapter);
+	if(@untrimmed_QV_files) {
+	    $ut_qv_file = shift @untrimmed_QV_files;
+	}
+	log_it($logfile, "\nAdapter trimming file $ut_file with adapter $used_adapter (translated to $cs_used_adapter) ...");
+	(open(IN, "$ut_file")) || return 0;
+	my $trimmedCS = "$ut_file";
+	$trimmedCS =~ s/\..*$//g;  ## strip any extension
+	$trimmedCS .= "_trimmed.csfasta"; ## add new extension
+	(open(OUT, ">$trimmedCS")) || return 0;
+	
+	if($ut_qv_file) {
+	    (open(QIN, "$ut_qv_file")) || return 0;
+	    $trimmedQV = $ut_qv_file;
+	    $trimmedQV =~ s/\..*$//g;
+	    $trimmedQV .= "_trimmed.qual";
+	    (open(QOUT, ">$trimmedQV")) || return 0;
+	}
+	
+	
+	my $header;
+	my $trim_len;
+	my $no_insert = 0; ## includes adapter-only and no-adapter cases
+	my $too_short = 0;
+	my $amb = 0;
+	my $ok;
+	my $trim_seq;
+	
+	my $qin_line;
+	
+	my $cs_l_num = 0;
+	my $qv_l_num = 0;
+	
+	my $qv_head;
+	
+	my @qv_vals = ();
+	
+	while (<IN>) {
+	    chomp;
+	    ++$cs_l_num;
+	    if($ut_qv_file) {
+		$qin_line = <QIN>;
+		chomp $qin_line;
+		++$qv_l_num;
+	    }
+	    if($_ =~ /^\#/) {
+		next;
+	    }
+	    if($_ =~ /^>/) {
+		$header = $_;
+		if($ut_qv_file) {
+		    $qv_head = $qin_line;
+		    unless($header eq $qv_head) {
+			log_it($logfile, "\nFATAL: csfasta and qual files out of sync at lines $cs_l_num (csfasta) and $qv_l_num (qual) .. headers $header and $qv_head DONT match\n");
+			exit;
+		    }
+		}
+	    } else {
+		$trim_len = 0;
+		while ($_ =~ /$cs_used_adapter/ig) {
+		    $trim_len = (pos $_) - (length $cs_used_adapter) - 1; # subtract 1 to remove the hybrid color .. leading T is still included, so sRNA length is trim_len - 1
+		}
+		if($trim_len <= 1) {  ## 1 is no insert for colorspace .. leading T still there
+		    ++$no_insert;
+		} elsif (($trim_len - 1) < 15) {  ## accounts for leading T (or other base key)
+		    ++$too_short;
+		} else {
+		    $trim_seq = substr($_,0,$trim_len);  ## because of above, this also chops the hybrid color
+		    if($trim_seq =~ /^[ATGC][0123]+$/) {
+			++$ok;
+			print OUT "$header\n$trim_seq\n";
+			
+			if($ut_qv_file) {
+			    @qv_vals = split (" ", $qin_line);
+			    for(my $j = 0; $j <= ($trim_len - 2); ++$j) {
+				if($j == 0) {
+				    print QOUT "$qv_head\n$qv_vals[0]";
+				} else {
+				    print QOUT " $qv_vals[$j]";
+				}
+			    }
+			    print QOUT "\n";
+			}
+			
+		    } else {
+			++$amb;
+		    }
+		}
+	    }
+	}
+	close IN;
+	close OUT;
+	log_it($logfile," Done\n");
+	log_it($logfile,"\tNo insert \(includes adapter-only and no-adapter cases combined\): $no_insert\n");
+	log_it($logfile,"\tToo short \(less than 15nts\): $too_short\n");
+	log_it($logfile,"\tAmbiguous bases after trimming: $amb\n");
+	log_it($logfile,"\tOK - output: $ok\n");
+	if($ut_qv_file) {
+	    close QIN;
+	    close QOUT;
+	    log_it($logfile,"\tResults in files $trimmedCS and $trimmedQV\n");
+	    my $concat = "$trimmedCS" . ":::" . "$trimmedQV";
+	    push(@trimmed_files,$concat);
+	} else {
+	    log_it($logfile,"\tResults in file $trimmedCS\n");
+	    push(@trimmed_files,$trimmedCS);
+	}
+    }
+    return @trimmed_files;
+}
+
+sub adapter2cs {
+    my($base_adapter) = @_;
+    $base_adapter = uc $base_adapter;
+    unless($base_adapter =~ /^[ATGC]+$/) {
+        log_it($logfile, "\nFATAL: Invlaid adapter $base_adapter found in sub-routine adapter2cs\n");
+        exit;
+    }
+    my %colors = (
+        'AA' => 0,
+        'CC' => 0,
+        'GG' => 0,
+        'TT' => 0,
+        'AC' => 1,
+        'CA' => 1,
+        'GT' => 1,
+        'TG' => 1,
+        'AG' => 2,
+        'CT' => 2,
+        'GA' => 2,
+        'TC' => 2,
+        'AT' => 3,
+        'CG' => 3,
+        'GC' => 3,
+        'TA' => 3,
+        );
+    my $dibase;
+    my $color_adapter;
+    my @letters = split('', $base_adapter);
+    for(my $i = 0; $i <= ((scalar @letters) - 2); ++$i) {
+        $dibase = "$letters[$i]" . "$letters[($i + 1)]";
+        unless(exists($colors{$dibase})) {
+            log_it($logfile, "\nFATAL: Failure to lookup the dibase $dibase in sub-routine adapter2cs\n");
+            exit;
+	}
+        $color_adapter .= $colors{$dibase};
+    }
+    return $color_adapter;
+}
+
+sub check_csqv {
+    my($cs,$qv) = @_;
+    my @css = split (",",$cs);
+    my @qvs = split (",",$qv);
+    unless((scalar @css) == (scalar @qvs)) {
+	log_it($logfile, "\nFATAL: Unequal number of files specified in options --untrimmedCS and --untrimmedCSQV\n");
+	return 0;
+    }
+    foreach my $csf (@css) {
+	unless(-r $csf) {
+	    log_it($logfile, "\nFATAL: File $csf was not readable\n");
+	    return 0;
+	}
+    }
+    foreach my $qvf (@qvs) {
+	unless(-r $qvf) {
+	    log_it($logfile, "\nFATAL: File $qvf was not readable\n");
+	    return 0;
+	}
+    }
+    return 1;
+}
+
+	       
+
 __END__
 
 =head1 LICENSE
@@ -6884,7 +7171,7 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.                                                              
                                                                                                  
 This program is distributed in the hope that it will be useful,                                  
-but WITHOUT ANY WARRANTY; without even the implied warranty of                                   
+    but WITHOUT ANY WARRANTY; without even the implied warranty of                                   
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                                    
 GNU General Public License for more details.                                                     
                                                                                                  
@@ -6903,7 +7190,7 @@ Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of sma
 
 =head1 VERSION
 
-1.1.0 :: Released October 1, 2013
+1.2.0 :: Released October 16, 2013
 
 =head1 AUTHOR
 
@@ -6911,14 +7198,14 @@ Michael J. Axtell, Penn State University, mja18@psu.edu
 
 =head1 DEPENDENCIES
 
-	perl
-	samtools
-	RNAeval
-	RNALfold
-	bowtie (0.12.x OR 1.x) [only if aligning reads]
-	bowtie-build (0.12.x OR 1.x) [only if aligning reads]
+perl
+samtools
+RNAeval
+RNALfold
+bowtie (0.12.x OR 1.x) [only if aligning reads]
+bowtie-build (0.12.x OR 1.x) [only if aligning reads]
 
-ShortStack.pl is a perl script, so it needs perl to compile. It expects to find perl at /usr/bin/perl. If this is not where your perl is, modify line 1 of ShortStacl.pl (the hashbang) accordingly. It also requires the package Getopt::Long, which I think is standard in most Perl distributions. If this package is not installed, get it from CPAN.
+ShortStack.pl is a perl script, so it needs perl to compile. It expects to find perl at /usr/bin/perl. If this is not where your perl is, modify line 1 of ShortStack.pl (the hashbang) accordingly. It also requires the package Getopt::Long, which I think is standard in most Perl distributions. If this package is not installed, get it from CPAN.
 
 samtools <http://samtools.sourceforge.net/> needs to be installed in your PATH. ShortStack was developed using samtools 0.1.18. Other versions should be OK as far as I know, but let me know if not!
 
@@ -6934,28 +7221,28 @@ There is no 'real' installation. After installing the dependencies (see above), 
                                                                                                  
 For convenience, you can add it to your PATH .. for instance
 
-	sudo cp ShortStack.pl /usr/bin/
+    sudo cp ShortStack.pl /usr/bin/
 
 
 =head1 USAGE
                                                                                                                              
-	Shortstack.pl [options] [genome.fasta] 
+    Shortstack.pl [options] [genome.fasta] 
 
 There are three modes which differ in the the types of pre-analysis that are performed. Each of the modes has a different set of REQUIRED options:
 
 Mode 1: Trim small RNA-seq reads to remove 3' adapter seqeuence, align them, and then analyze.  Required options:
 
-	--untrimmedFA OR --untrimmedFQ
-	
-	--adapter
+    --untrimmedFA OR --untrimmedFQ OR --untrimmedCS
+    
+    --adapter
 
 Mode 2: Align pre-trimmed small RNA-seq reads, and then analyze. Required options:
 
-	--trimmedFA OR --trimmedFQ
+    --trimmedFA OR --trimmedFQ OR --trimmedCS
 
 Mode 3: Analyze a pre-existing BAM alignment of small RNA-seq reads. Require option:
 
-	--bamfile
+    --bamfile
 
 Additionally, in modes 1 or 2, the option --align_only will terminate analysis after making the alignment file.
 
@@ -6975,11 +7262,19 @@ A full tutorial with sample Arabidopsis data can be found at http://axtelldata.b
 
 --untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ format.  Multiple datasets can be provided as a comma-delimited list.
 
+--untrimmedCS [string] : Path to untrimmed small RNA-seq data is Colorpsace-FASTA format. Multiple datasets can be provided as a comma-delimited list. 
+
+--untrimmedCSQV [string] : Path to untrimmed small RNA-seq quality values from SOLiD datasets, corresponding to colorspace-fasta files given in option --untrimmedCS. Multiple datasets can be provided as a comma-delimited list.
+
 --adapter [string] : Sequence of 3' adapter to search for during adapter trimming. Must be at least 8 nts in length, and all ATGC characters. Required if either --untrimmedFA or --untrimmedFQ are specified. Multiple adapters (for when multiple input untrimmedFA/FQ files are specified) can be provided as a comma-delimited list.
 
 --trimmedFA [string] : Path to trimmed and ready to map small RNA-seq data in FASTA format. Multiple datasets can be provided as a comma-delimited list.
 
 --trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq data in FASTQ format. Multiple datasets can be provided as a comma-delimited list.
+
+--trimmedCS [string] : Path to trimmed and ready to map small RNA-seq data in Colorspace-FASTA format. Multiple datasets can be provided as a comma-delimited list.                                                                             
+                                                                                                                                                                                                                                                
+--trimmedCSQV [string] : Path to trimmed color-space quality value files, corresponding to trimmed colorspace-fasta files provided in option --trimmedCS. Multiple datasets can be provided as a comma-delimited list.              
 
 --align_only : Exits program after completion of small RNA-seq data alignment, creating BAM file.
 
@@ -7040,9 +7335,9 @@ Additionally, the chromosome names in the FASTA headers must be kept SIMPLE.  Sp
 
 If not already present, a .fai index file for the genome will be created using samtools faidx at the beginning of the run.
 
-=head2 Small RNA-seq reads in FASTA or FASTQ format
+=head2 Small RNA-seq reads.
 
-FASTA or FASTQ data should be devoid of comment lines and conform to FASTA or FASTQ specs. In addition, ShortStack.pl assumes that each read will occupy a single line in the file. There is no support for paired-end reads.
+FASTA or FASTQ data should be devoid of comment lines and conform to FASTA or FASTQ specs. In addition, ShortStack.pl assumes that each read will occupy a single line in the file. There is no support for paired-end reads.  Colorspace-FASTA formatted data (from SOLiD) can have comment lines. Format is assumed to conform to colorspace-FASTA specifications (beginning with a nucleotide, followed by a string of colors [0,1,2,3] or ambiguity codes [.].  For SOLiD data, the quality value files can also be input (with option --untrimmedCSQV or --trimmedCSQV); these files are expected to be space delimited list of integers, in the same order as the corresponding colorspace-fasta files.
 
 =head2 Input .bam file
 
@@ -7090,7 +7385,7 @@ This is a simple tab-delimited text file.  The first line begins with a "#" (com
 
 To import this into R, here's a tip to deal with the first line, which has the headers but begins with a "#" character.
 
-	>results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
+    >results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
 
 Column 1: Locus : The genome-browser-friendly coordinates of the clusters.  Coordinates are one-based, inclusive (e.g. Chr1:1-100 refers to a 100 nt interval beginning with nt 1 and ending with nt 100).
 
@@ -7166,19 +7461,23 @@ Note that alignments for very complex HP loci are suppressed (only the sequence 
 
 =head1 KEY METHODS
 
-=head2 Adapter trimming
+=head2 Adapter trimming (FASTA or FASTQ)
 
 Adapter trimming by ShortStack searches for the right-most occurence of the string given in the option --adapter. If found, the adapter is chopped off. Reads where no adapter is found are discarded, as are those shorter than 15 nts after trimming. Finally, any reads that contain non-ATGC characters after trimming are also discarded. Adapter-matching is performed by a simple regex and allows for no mismatches. If the input file is in FASTQ format, the quality values are trimmed as well.
 
+=head2 Adapter trimming (Colorspace-FASTA)
+
+Adapter trimming of colorspace data first translates the input adapter sequence to colorspace. The right-most occurence of the color-space adapter sequence is identified. Trimming begins 1 color BEFORE the match to the color-space adapter. This removes the 'hybrid' color corresponding to the dinucleotide at the junction of the small RNA and the adapter.  Reads where no adapter is found are discarded, as are those shorter than 15 colors after trimming. Finally, any reads that contain non-0123 colors after trimming are also discarded. Adapter-matching is performed by a simple regex and allows for no mismatches. If SOLiD formatted quality values were provided (via option --untrimmedCSQV), the quality values are also trimmed at the corresponding position.
+
 =head2 Alignments
 
-Alignments are performed with the bowtie settings -v 1 -a --best --strata -S, and then parsed by ShortStack to retain just ONE randomly selected valid alignment per read. After this selection, and the addition of the XX tag (indicating the total number of possible positions for the read), the data are then piped through samtools view and samtools sort to create a sorted BAM formatted file. The header is also modified to note ShortStack processing. Note that unmapped reads are also retained in the alignment, with the SAM Flag set as 0x4 to indicate that.
+FASTA and FASTQ alignments are performed with the bowtie settings -v 1 -a --best --strata -S. Color-space alignments use bowtie settings -C -f --col-keepends (and if quality values are available, -Q) -v 1 -a --best --strata -S.  Initial alignments are parsed by ShortStack to retain just ONE randomly selected valid alignment per read. After this selection, and the addition of the XX tag (indicating the total number of possible positions for the read), the data are then piped through samtools view and samtools sort to create a sorted BAM formatted file. The header is also modified to note ShortStack processing. Note that unmapped reads are also retained in the alignment, with the SAM Flag set as 0x4 to indicate that.
 
 One valid question is why force bowtie to report all valid alignments, and then parse to select just one, instead of explicitly telling bowtie to report just one alignment (e.g. k 1)? The reason is that bowtie's selection of reported positions in those cases is clearly NOT random. So even though ShortStack's method incurs a performance penalty during alignment, it will guarantee a more accurate alignment.
 
 =head2 Multiple libraries
 
-As of version 1.1.0, ShortStack supports input of multiple FASTA or FASTQ datasets, either trimmed or untrimmed. These are passed in via the options --untrimmedFA, --untrimmedFQ, --trimmedFA, or --trimmedFQ as comma-delimited lists.  If the input is untrimmed, option --adapter also allows input of a corresponding comma-delimited list of adapters.  The untrimmed files and the adapters are assumed to be in the same order. If all untrimmed files have the same adapter, just one sequence for option --adapter is acceptable, and will be used to guide trimming for all files.
+As of version 1.1.0, ShortStack supports input of multiple FASTA or FASTQ datasets (and as of version 1.2.0, multiple colorspace-FASTA datasets as well), either trimmed or untrimmed. These are passed in via the options --untrimmedFA, --untrimmedFQ, --untrimmedCS, --trimmedFA, --trimmedFQ, or --trimmedCS as comma-delimited lists.  If the input is untrimmed, option --adapter also allows input of a corresponding comma-delimited list of adapters.  If the data are colorspace, options --untrimmedCSQV and --trimmedCSQV allow input of comma-delimited lists of quality value files corresponding to their colorspace FASTA coutnerparts given by options --untrimmedCS or --trimmedCS. The untrimmed files and the adapters are assumed to be in the same order. If all untrimmed files have the same adapter, just one sequence for option --adapter is acceptable, and will be used to guide trimming for all files.
 
 When multiple small RNA-seq libraries are input, each one is first aligned separately, creating temporary .bam files. When this is complete, they are merged into a single alignment, which is given the name "outdir.bam" in the working directory, where "outdir" is the string given in option --outdir. During the merging, the read group information is stored, so all alignments can be de-convoluted back to their parent libraries if desired. The individual .bam alignments created intially are deleted.
 
@@ -7222,15 +7521,7 @@ Cluster discovery proceeds in two simple steps:
 
 - Precision: There must be at least one candidate mature miRNA that comprises at least 20% of the total abundance of small RNAs mapped to the hairpin.  
 
-- Duplex:  Both partners in a candidate miRNA/miRNA* duplex must not span any loops (i.e. neither is allowed to have base-pairs to itself).  In addition, there must be <= [--maxmiRUnpaired] unpaired mature miRNA nts in the miRNA/miRNA* duplex, and <= [--maxmiRUnpaired] unpaired miRNA* nts in the miRNA/miRNA* duplex.
-
-- Star: The exact predicted miRNA*s of candidate miRNAs must have at least one mapped read, and the total abundance of any candidate mature miRNA/miRNA* pair must be at least 25% of the total small RNA abundance at the locus.  Finally, redundant candidate mature miRNAs are removed, as the steps above initially might classify a small RNA as both a miRNA* and mature miRNA.  In such cases, the partner with the higher abundance is called the miRNA, the other the miRNA*.
-
-Hairpin loci passing all four of these loci are annotated as MIRNAs.  Those failing one or more are reported as HP loci instead.
-
-=head2 Quantification of clusters
-
-All mappings with at lease one nt of overlap within the cluster are tallied as being within the cluster.  Thus, for a cluster located at Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and 2000-2021 are all counted as being within the cluster during quantification.  Note that it's possible to count the same mapping within non-overlapping clusters.
+- Duplex:  Both partners in a candidate miRNA/m, for a cluster located at Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and 2000-2021 are all counted as being within the cluster during quantification.  Note that it's possible to count the same mapping within non-overlapping clusters.
 
 =head2 Analysis of Phasing
 
