@@ -6,8 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "1.2.2";
-
+my $version_num = "1.2.3";
 
 ##### get options and validate them
 
@@ -633,7 +632,7 @@ if(($mode == 1) or ($mode == 2)) {
 ################################################
 # bam file validation
 my %rgs = validate_bam($bamfile,$expected_faidx);
-unless(%rgs) {
+if(exists($rgs{'BAD'})) {
     log_it($logfile,"\nBAM file validation failed. Aborting run.\n");
     exit;
 }
@@ -669,6 +668,7 @@ if($count) {
     my @islands = get_islands($bamfile,$mindepth,$expected_faidx,$read_group);
     
     @clusters = merge_clusters(\@islands,\$pad,\$genome);
+    
     %names = get_names_simple(\@clusters);
 }
 
@@ -1209,6 +1209,9 @@ sub merge_clusters {
 	    exit;
 	}
     }
+    ## last one
+    $entry = "$last_chr" . ":" . "$last_start" . "-" . "$last_stop";
+    push(@output,$entry);
     return @output;
 }
     
@@ -6347,14 +6350,16 @@ sub get_islands {
 	$last_start = -1;
 	$last_ok = -1;
 	if($read_group) {
-	    open(DEPTH, "samtools view -F 0x4 -r $read_group -b -u $bamfile $chr | samtools depth /dev/stdin |");
+	    open(DEPTH, "samtools view -F 0x4 -r $read_group -b -u $bamfile $chr | samtools depth /dev/stdin 2> /dev/null |");
 	} else {
-	    open(DEPTH, "samtools view -F 0x4 -b -u $bamfile $chr | samtools depth /dev/stdin |");
+	    open(DEPTH, "samtools view -F 0x4 -b -u $bamfile $chr | samtools depth /dev/stdin 2> /dev/null |");
 	}
 	while (<DEPTH>) {
 	    chomp;
+
 	    @fields = split ("\t", $_);
 	    if($fields[2] >= $mindepth) {
+		
 		if($last_ok == -1) {
 		    ## first start on the chr
 		    $last_start = $fields[1];
@@ -6364,6 +6369,7 @@ sub get_islands {
 		    $last_ok = $fields[1];
 		} else {
 		    ## close the previous island, open a new one
+		    
 		    $island = "$chr" . ":" . "$last_start" . "-" . "$last_ok";
 		    push(@islands,$island);
 		    $last_start = $fields[1];
@@ -6374,6 +6380,7 @@ sub get_islands {
 	close DEPTH;
 	## close the last one, if there is one
 	unless($last_ok == -1) {
+	    
 	    $island = "$chr" . ":" . "$last_start" . "-" . "$last_ok";
 	    push(@islands,$island);
 	}
@@ -6664,7 +6671,7 @@ sub perform_alignment {
     
     # Open the processes
     (open(BOW, "$bowtie |")) || return 0;
-    (open(OUT, "| samtools view -S -b -u - | samtools sort - $outfile_base")) || return 0;
+    (open(OUT, "| samtools view -S -b -u - 2> /dev/null | samtools sort - $outfile_base 2> /dev/null")) || return 0;
     
     # Parsing the bowtie stream
     my $in_header = 1;
@@ -6792,22 +6799,22 @@ sub bowtie_build {
 sub validate_bam {
     my($bam,$fai) = @_;
     log_it($logfile,"\nValidating bamfile $bam ...\n");
-    
+    my %rg = ();
+    $rg{'BAD'} = 1;
     # Is it readable?
     log_it($logfile, "\tFile readable\? ");
     unless(-r $bam) {
 	log_it($logfile, "NO -- ABORT\n");
-	return 0;
+	return %rg;
     }
     log_it($logfile, "YES\n");
     
     # header checks
     my %h_seqs = ();
     log_it($logfile, "\tHeader present\? ");
-    (open(H, "samtools view -H $bam |")) || return 0;
+    (open(H, "samtools view -H $bam |")) || return %rg;
     my $h;
     my $so;
-    my %rg = ();
     my $rgname;
     while (<H>) {
 	if($_ =~ /^\@/) {
@@ -6840,13 +6847,13 @@ sub validate_bam {
 	log_it($logfile, "YES\n");
     } else {
 	log_it($logfile, "FAIL -- bamfile must be sorted by \'coordinate\' as indicated in the header SO:tag-- ABORT\n");
-	return 0;
+	return %rg;
     }
     
     # does it match the genome?
     my %fai_names = ();
     log_it($logfile,"\tMatches genome\? ");
-    (open(FAI, "$fai")) || return 0;
+    (open(FAI, "$fai")) || return %rg;
     my @fields = ();
     while (<FAI>) {
 	@fields = split ("\t", $_);
@@ -6857,7 +6864,7 @@ sub validate_bam {
     while(($h_seq) = each %h_seqs) {
 	unless(exists($fai_names{$h_seq})) {
 	    log_it($logfile, "FAIL -- reference name $h_seq was not found in genome -- ABORT\n");
-	    return 0;
+	    return %rg;
 	}
     }
     log_it($logfile, "PASS\n");
@@ -6867,7 +6874,9 @@ sub validate_bam {
     if(%rg) {
 	log_it($logfile, "YES. And they are...\n");
 	while(($rgname) = each %rg) {
-	    log_it($logfile,"\t\t$rgname\tDescription: $rg{$rgname}\n");
+	    unless($rgname eq "BAD") {
+		log_it($logfile,"\t\t$rgname\tDescription: $rg{$rgname}\n");
+	    }
 	}
     } else {
 	log_it($logfile, "NO\n");
@@ -6876,14 +6885,14 @@ sub validate_bam {
     
     # Does it have XX tags?  Just check the first line
     log_it($logfile, "\tHas XX tags\? ");
-    (open(SAM, "samtools view $bam |")) || return 0;
+    (open(SAM, "samtools view $bam |")) || return %rg;
     my $check = <SAM>;
     close SAM;
     if($check =~ /\tXX:i:(\d+)/) {
 	log_it($logfile,"PASS\n");
     } else {
 	log_it($logfile,"FAIL -- bam file needs to have XX tags per ShortStack spec -- ABORT\n");
-	return 0;
+	return %rg;
     }
     
     ## Is it indexed? If not, index it.
@@ -6898,12 +6907,12 @@ sub validate_bam {
 	    log_it($logfile,"Now it does\n");
 	} else {
 	    log_it($logfile,"FAILED to create it with samtools index -- ABORT\n");
-	    return 0;
+	    return %rg;
 	}
     }
     
     ## Get the total number of reads
-    (open(STAT, "samtools flagstat $bam |")) || return 0;
+    (open(STAT, "samtools flagstat $bam |")) || return %rg;
     my $n_mapped = 0;
     while (<STAT>) {
 	if($_ =~ /^(\d+) \+ \d+ mapped/) {
@@ -6911,7 +6920,8 @@ sub validate_bam {
 	}
     }
     log_it($logfile,"\tNumber of aligned reads: $n_mapped\n");
-
+    
+    delete $rg{'BAD'};
     return %rg;
 }
 
@@ -7227,7 +7237,7 @@ Shahid S., Axtell MJ. (2013) Identification and annotation of small RNA genes us
 
 =head1 VERSION
 
-1.2.2 :: Released October 26, 2013
+1.2.3 :: Released November 1, 2013
 
 =head1 AUTHOR
 
@@ -7258,28 +7268,28 @@ There is no 'real' installation. After installing the dependencies (see above), 
                                                                                                  
 For convenience, you can add it to your PATH .. for instance
 
-    sudo cp ShortStack.pl /usr/bin/
+sudo cp ShortStack.pl /usr/bin/
 
 
 =head1 USAGE
                                                                                                                              
-    Shortstack.pl [options] [genome.fasta] 
+Shortstack.pl [options] [genome.fasta] 
 
 There are three modes which differ in the the types of pre-analysis that are performed. Each of the modes has a different set of REQUIRED options:
 
 Mode 1: Trim small RNA-seq reads to remove 3' adapter seqeuence, align them, and then analyze.  Required options:
 
-    --untrimmedFA OR --untrimmedFQ OR --untrimmedCS
-    
-    --adapter
+--untrimmedFA OR --untrimmedFQ OR --untrimmedCS
+
+--adapter
 
 Mode 2: Align pre-trimmed small RNA-seq reads, and then analyze. Required options:
 
-    --trimmedFA OR --trimmedFQ OR --trimmedCS
+--trimmedFA OR --trimmedFQ OR --trimmedCS
 
 Mode 3: Analyze a pre-existing BAM alignment of small RNA-seq reads. Require option:
 
-    --bamfile
+--bamfile
 
 Additionally, in modes 1 or 2, the option --align_only will terminate analysis after making the alignment file.
 
@@ -7370,13 +7380,13 @@ A full tutorial with sample Arabidopsis data can be found at http://axtelldata.b
 
 It is critical that this be the precise genome to which the reads in the input .bam file were mapped. If it isn't, validation of the BAM alignment file will fail and the run will be aborted.
 
-Additionally, the chromosome names in the FASTA headers must be kept SIMPLE.  Specifically, ShortStack.pl at several points parses clusters by the regex /^(\S+):(\d+)-(\d+)$/ or some variant thereof, where the first pattern is the chromosome name.  Therefore, the chromosome names must match (\S+) .. e.g. a single string of one or more non-white-space characters, with no metacharacters.  So, ">Chr1" in your reference genome is good, but ">Chr1 | XM00023 | this is a bunch of annotation blah blah blah" is bad.  This same concern applies to the input .bam file, so your chromosome names should be shortened BEFORE mapping your reads, so that they are short and they are exactly reflected in the .bam file.
+Chromsome names that contain whitespace will be truncated; only the first string of non-white-space characters will be maintained. This applies both during alignment (where bowtie does this) and during the rest of the analysis (where samtools does this, when creating the .fai index file).
 
-If not already present, a .fai index file for the genome will be created using samtools faidx at the beginning of the run.
+If not already present, a .fai index file for the genome will be created using samtools faidx at the beginning of the run. As above, chromosome names will be automatically trimmed starting at the first white-space character, if present.
 
 =head2 Small RNA-seq reads.
 
-FASTA or FASTQ data should be devoid of comment lines and conform to FASTA or FASTQ specs. In addition, ShortStack.pl assumes that each read will occupy a single line in the file. There is no support for paired-end reads.  Colorspace-FASTA formatted data (from SOLiD) can have comment lines. Format is assumed to conform to colorspace-FASTA specifications (beginning with a nucleotide, followed by a string of colors [0,1,2,3] or ambiguity codes [.].  For SOLiD data, the quality value files can also be input (with option --untrimmedCSQV or --trimmedCSQV); these files are expected to be space delimited list of integers, in the same order as the corresponding colorspace-fasta files.
+FASTA or FASTQ data should be devoid of comment lines and conform to FASTA or FASTQ specs. In addition, ShortStack.pl assumes that each read will occupy a single line in the file. There is no support for paired-end reads.  Colorspace-FASTA formatted data (from SOLiD) can have comment lines. Format is assumed to conform to colorspace-FASTA specifications (beginning with a nucleotide, followed by a string of colors [0,1,2,3] or ambiguity codes [.].  For SOLiD data, the quality value files can also be input (with option --untrimmedCSQV or --trimmedCSQV); these files are expected to be space delimited list of integers, in the same order as the corresponding colorspace-fasta files. During alignment, read names with white-space will be truncated, beginning at the first white-space character found.
 
 =head2 Input .bam file
 
@@ -7548,7 +7558,13 @@ Cluster discovery proceeds in two simple steps:
 
 6.  Redundant hairpins are then removed.  Redundant hairpins are those whose 5' arms and 3' arms overlap.  In pairwise comparisons of redundant hairpins, the longest hairpin is retained.
 
-7.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window could have been extended around the cluster, there could be  putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must hateria set forth below. 
+7.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window could have been extended around the cluster, there could be  putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 1nt within the original cluster coordinates.
+
+8. The pattern of small RNA expression relative to the remaining hairpins is then examined.  The per-nucleotide coverage across every base, on both strands separately, across the original locus coordinates is calculated.  If there is a single hairpin whose 5' and 3' arms contain >= [--minfrachpdepth] of the total coverage of the original locus, the hairpin is kept for futher analysis.  If more than one hairpin meets this criterion, than the one with the highest coverage fraction in the arms is retained.  Note that this step contains a correction for reads that are "dyads" .. reads that map twice to a hairpin, once in each arm, on opposite strands... this happens for perfect inverted repeat loci.  Such reads are counted towards the sense strand only for a given hairpin.
+
+9. The pattern of small RNA expression relative to the single hairpin candidate is further scrutinized for polarity.  The fraction of all mappings in the hairpin interval must be >= [--minstrandfrac].  As in step 8, this step corrects for "dyad" reads (see above).  Hairpins that pass this step are either HP or MIRNA loci.  The coordinates of the originally determined de novo locus are discarded, and replaced with the hairpin coordinates.
+
+10.  Each potential hairpin that remains is next analyzed to see if it qualifies as a MIRNA.  MIRNA locus annotation is designed to satisfy the criteria for de novo annotation of plant MIRNAs as described in Meyers et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682.  In fact, ShortStack's criteria is a little stricter than Meyers et al., in that ShortStack has an absolute requirement for sequencing of the exact predicted miRNA* sequence for a candidate mature miRNA.  It is important to note that ShortStack's MIRNA annotation method is designed to reduce false positives at the expense of an increased rate of false negatives.  In other words, there are likely many bona fide MIRNA loci not annotated as such because they don't quite meet the strict criteria set forth below. 
 
 - Hairpin Size:  The total number of pairs in the hairpin must be <= [--maxmiRHPPairs]
 
