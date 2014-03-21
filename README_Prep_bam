@@ -56,14 +56,12 @@ OPTIONS
 
 NOTES
   Input format and assumptions
-
     It is critical that the input sam, sam.gz, or bam file be sorted by read
     name. Additionally, it is assumed that read names are unique within the
     file. If either of these assumptions are not true, the results of this
     script are not reliable.
 
   Exisiting NH:i: tags
-
     If there are already NH:i: tags in the input data, they will be
     discarded and over-written by the script.
 

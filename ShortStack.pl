@@ -6,7 +6,9 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.3.1";
+my $version = "0.4.0";
+## December 27, 2012
+####
 
 ##### get options and validate them
 
@@ -25,12 +27,12 @@ my $minfracpaired = 0.67;
 my $minntspaired = 15; ## lowered to 15 from 30 as of version 0.3.0
 my $minfrachpdepth = 0.67;  ## raised from 0.5 as of version 0.2.1
 my $minstrandfrac = 0.8;
-my $mindicerfrac = 0.85;
+my $mindicerfrac = 0.8;  ## lowered to 0.8 from 0.85 as of 0.4.0
+my $minUI = 0.1;  ## parameter added as of version 0.4.0 .. "minimum Uniqueness Index required to attempt RNA folding / hairpin analysis"
 my $count = '';
 my $nohp = 0;
 my $raw = '';
 my $phasesize = 21;
-my $phaseFDR = 0.05;
 my $inv_file = '';
 my $flag_file = "NULL";
 my $maxmiRHPPairs = '';  ## parameter added as of version 0.3.0
@@ -52,6 +54,7 @@ GetOptions ('outdir=s' => \$outdir,
 	    'minfrachpdepth=f' => \$minfrachpdepth,
 	    'minstrandfrac=f' => \$minstrandfrac,
 	    'mindicerfrac=f' => \$mindicerfrac,
+	    'minUI=f' => \$minUI,
 	    'count=s' => \$count,
 	    'nohp' => \$nohp,
 	    'raw' => \$raw,
@@ -62,8 +65,7 @@ GetOptions ('outdir=s' => \$outdir,
 	    'maxmiRUnpaired=i' => \$maxmiRUnpaired,
 	    'miRType=s' => \$miRType,
 	    'maxdGperStem=f' => \$maxdGperStem,
-	    'maxLoopLength=i' => \$maxLoopLength,
-	    'phaseFDR=f' => \$phaseFDR);
+	    'maxLoopLength=i' => \$maxLoopLength);
 
 # Validate the options
 # default output directory is ShortStack_[time], where time is the number of non-leap seconds since 00:00:00 UCT Jan 1, 1970
@@ -133,6 +135,11 @@ unless(($mindicerfrac >= 0) and ($mindicerfrac <= 1)) {
     die "Option -mindicerfrac must be number greater than or equal to 0 and less than or equal to one\n$usage\n";
 }
 
+# ensure that option --minUI is present and between 0 and 1
+unless(($minUI >= 0) and ($minUI <= 1)) {
+    die "Option --minUI must be a number between 0 and 1\n$usage\n";
+}
+
 # if the --count option was provided, make sure the indicated file can be read
 if($count) {
     unless(-r $count) {
@@ -153,12 +160,6 @@ if($phasesize =~ /^\d+$/) {
 	   ($phasesize eq "none")) {
 	die "FATAL: Option --phasesize must be an integer within the --dicermin to --dicermax size range OR \'all\' OR \'none\'\n\n$usage\n";
     }
-}
-
-# check the --phaseFDR value to ensure it is between 0 and 1
-unless(($phaseFDR >= 0) and
-       ($phaseFDR <= 1)) {
-    die "FATAL: Option --phaseFDR must be a number between 0 and 1\n\n$usage\n";
 }
 
 # parse the mirType and the associated settings
@@ -301,6 +302,7 @@ log_it ($logfile,"Dicer size range: $dicermin to $dicermax\n");
 if($nohp) {
     log_it ($logfile,"Running in \"nohp\" mode: Hairpins and MIRNAs will not be inferred\n");
 } else {
+    log_it ($logfile,"Minimum uniqueness index required to attempt RNA folding during hairpin preduction: $minUI\n");
     log_it ($logfile,"Maximum allowed separation of a base pair to span during hairpin prediction: $maxhpsep\n");
     log_it ($logfile,"Minimum fraction of paired nts allowable in a valid hairpin structure: $minfracpaired\n");
     log_it ($logfile,"Minimum number of base pairs within a valid hairpin structure: $minntspaired\n");
@@ -329,7 +331,6 @@ if($nohp) {
 log_it ($logfile,"Minimum fraction of mappings to assign a polarity to a non-hairpin cluster: $minstrandfrac\n");
 log_it ($logfile,"Minimum fraction of mappings within the Dicer size range to annotate a locus as Dicer-derived: $mindicerfrac\n");
 log_it ($logfile,"Cluster type to analyze for phasing: $phasesize\n");
-log_it ($logfile,"False Discovery Rate for Significantly Phased Clusters: $phaseFDR\n");
 log_it ($logfile,"Reporting units: ");
 if($raw) {
     log_it ($logfile,"Raw mappings\n\n");
@@ -361,6 +362,7 @@ if($count) {
     log_it ($logfile," de novo\n");
     my @first_clusters = get_clusters($bamfile,$mindepth);
     @clusters = merge_clusters(\@first_clusters,\$pad,\$genome);
+    %names = get_names_simple(\@clusters);
 }
 
 my $phase_one_n_clusters;
@@ -372,133 +374,12 @@ if(@clusters) {
     exit;
 }
 
-
-##### Phase Two: Gather genomic sequences for input into RNA folding
-my @final_clusters = ();
-## my %hp_clusters = ();
-my %miRNAs = ();
-## my %put_mir = ();  ## only really used when option --putativemir is called
-my %final_hps = ();
-
-if($nohp) {
-    log_it ($logfile,"Running in nohp mode -- skipping phases 2, 3, and 4\n\n");
-    @final_clusters = @clusters;
-    unless($count) {
-	# if clusters were de novo, generate arbitrary names for them now if the hairpin routines are being skipped
-	%names = get_names_simple(\@final_clusters);
-    }
-} else {
-    log_it ($logfile,"\n");
-    log_it ($logfile,`date`);
-    log_it ($logfile,"Phase Two: Gathering genome sequence for RNA secondary structure prediction\n");
-
-#    my %to_fold = get_folding_regions(\$genome,\@clusters,\$pad,\$maxhpsep);  ## hash structure: 'sequence', 'start', 'stop'  strand is always Watson
-## pad is no longer relevant for get_folding_regions, since dangling pads are not on the clusters anymore.  
-## Now we just get a centered query as long as the locus itself is > --maxhpsep
-    my %to_fold = get_folding_regions(\$genome,\@clusters,\$maxhpsep);  ## hash structure: 'sequence', 'start', 'stop'  strand is always Watson
-
-    log_it ($logfile,"\n\n");
-
-    #### Phase three: Identify qualifying hairpins
-
-    log_it ($logfile,`date`);
-    log_it ($logfile,"Phase Three: Identification of qualified hairpins overlapping clusters\n");
-
-    #fold each query and retain only qualifying structures
-
-    log_it ($logfile,"\tFolding sequences and identifying qualifying hairpins\.\.\.\n");
-
-    my %qualifying_hairpins = folder(\%to_fold,\$maxhpsep,\$minntspaired,\$minfracpaired,\$maxdGperStem,\$maxLoopLength);
-    ## Hash structure:  key is locus.  value is an array.  Each array entry is tab-delimited string containing:
-    # 0 : brax
-    # 1 : adj_start
-    # 2 : details
-    # 3 : strand (Watson or Crick)
-    #### 0 - 3 are as before  .. new ones are below
-    # 4 : pairs
-    # 5 : frac_paired
-    # 6 : stem_length
-    # 7 : loop_length
-    # 8 : dGperStem
-
-    
-    #convert the coordinates of the qualifying hairpins to the true chromosomal coordinates
-    log_it ($logfile,"\tConverting hairpin coordinates to true genomic coordinates\.\.\.");
-    my %true_hps = hairpin_coords(\%to_fold,\%qualifying_hairpins);  ## structure same as %qualifying hairpins
-    ### same structure as %qualifying_hairpins, except field[1] of each entry is now a start-stop
-    
-    log_it ($logfile,"Done\n");
-    
-    ## take in the einverted file
-    if(-r $inv_file) {
-	log_it ($logfile,"\tParsing inverted repeats from file $inv_file\.\.\.\n");
-	my @initial_irs = parse_inv(\$inv_file,\$minntspaired,\$minfracpaired,\$maxdGperStem,\$maxLoopLength);
-	## each line is tab-delimited, with the same fields as in %true_hps, except addition of an extra field ([9]), which is the chr
-	
-	log_it ($logfile,"\tdone\n");
-	my $initial_ir_tally = scalar @initial_irs;
-	log_it ($logfile,"\t\tFound $initial_ir_tally potential qualifying IRs\n");
-	log_it ($logfile,"\tMerging einverted-derived inverted repeats with clusters and with RNAL-fold derived hairpins\.\.\.");
-	my ($in_irs,$out_irs) = merge_inv(\@initial_irs,\%true_hps,\@clusters);
-	log_it ($logfile," done\n");
-	log_it ($logfile,"\t\tFrom the $in_irs potentially qualifying IRs, $out_irs had overlap with one or more clusters and were merged with RNALfold hairpins\n");
-    }
-
-    log_it ($logfile,"\tRemoving redundant hairpins on a per-locus basis\.\.\.");
-    my %true_hps_trimmed = remove_redundant_hps(\%true_hps); ## structure same as %true_hps
-    log_it ($logfile,"Done\n");
-    
-    
-    log_it ($logfile,"\tRemoving hairpins that do not overlap clusters\.\.\.");
-    my %true_hps_3 = remove_nonoverlapped_hps(\%true_hps_trimmed);  ## structure same as %qualifying hairpins
-    log_it ($logfile,"Done\n");
-    
-    ## Phase Four : Annotation of hpRNA and microRNA loci
-    log_it($logfile, "\n");
-    log_it($logfile, `date`);
-    log_it($logfile, "Phase Four: Annotation of hpRNA and microRNA loci\n");
-    
-    
-    log_it ($logfile,"\tFiltering hairpins based on expression evidence\.\.\.\n");
-    my %filtered_hps = hp_expression(\%true_hps_3,\$bamfile,\$minfrachpdepth);  ## radical changes 
-    ## Structure of hash .. key is locus, value is a single tab-delimited string.  Fields are as for %true_hps WITH ADDITION of [9] which is the frac_hp_depth
-
-    ## NEW NEW NEW NEW
-    log_it ($logfile,"\tFinal filtering of hairpins, and annotation of miRNA and hpRNA loci\.\.\.\n");
-    %final_hps = final_hp(\%filtered_hps,\$genome,\$bamfile,\$reads,\$minstrandfrac,\$maxmiRHPPairs,\$maxmiRUnpaired);
-    
-    ## structure like %filtered_hps, but expanded:
-    # [10] : hp_size_result
-    # [11] : prec_result
-    # [12] : duplex_result
-    # [13] : star_result
-    # [14] : hp_call
-    # [15] : output string of alignment to be written
-
-    
-    log_it ($logfile,"\tFinishing parsing of hairpin-associated clusters\.\.\.");
-
-
-    @final_clusters = get_final_clusters(\%final_hps,\@clusters);
-    ## if we are doing hairpins, we know its not count mode, so clusters have been determined de novo and haven't been named yet
-    %names = get_names_simple(\@final_clusters);
-
-    log_it ($logfile,"done\n");
-    ## Write the HP and MIRNA files
-    log_it ($logfile,"\tWriting miRNA and other hpRNA details to files\.\.\.");
-    my($n_miRNAs,$n_hpRNAs) = write_files(\%final_hps, \$outdir, \%names, \@final_clusters);
-    log_it ($logfile," done\n");
-    ## Report
-    
-    my $clus_count = scalar @final_clusters;
-    log_it ($logfile,"\n\tTotal Clusters: $clus_count\n\tmiRNA loci: $n_miRNAs\n\tother hpRNA loci: $n_hpRNAs\n\n");
-    
-}
-
-## Phase 5: Annotate and Quantify all clusters
+### NEW PHASE 2 -- INITIAL QUANTIFICATION
+## OLD Phase 5: Annotate and Quantify all clusters
 log_it ($logfile,`date`);
-log_it ($logfile,"Phase 5: Quantify all clusters\n");
-my %quant_master = quant(\@final_clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\$phaseFDR,\%names);
+log_it ($logfile,"Phase 2: Quantify all clusters\n");
+
+my %quant_master = quant(\@clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\%names);
 
 # in this initial hash, the fields are
 #[0] : locus
@@ -511,13 +392,12 @@ my %quant_master = quant(\@final_clusters,\$bamfile,\$dicermin,\$dicermax,\$mins
 #[7] : dicer_call
 #[8] : phase_offset
 #[9] : phase_pval
-#[10] : phase_FDR_call
-#[11] : short
-#[12] : long
-#[13 -- end] : dicer size mappings
+#[10] : short
+#[11] : long
+#[12 -- end] : dicer size mappings
 
 
-# modify the notations for hairpins
+# later, we will modify the notations for hairpins
 
 # new fields to add
 #[0] : locus
@@ -531,24 +411,157 @@ my %quant_master = quant(\@final_clusters,\$bamfile,\$dicermin,\$dicermax,\$mins
 #[8] : dicer_call
 #[9] : phase_offset
 #[10] : phase_pval
-#[11] : phase_FDR_call
-#[12] : pairs           <<<<<<
-#[13] : frac_paired    <<<<<<
-#[14] : stem_length    <<<<<<
-#[15] : loop_length    <<<<<<
-#[16] : dGperStem      <<<<<<
-#[17] : frac_hp        <<<<<<
-#[18] : hp_size_result <<<<<<
-#[19] : prec_result    <<<<<<
-#[20] : duplex_result  <<<<<<
-#[21] : star_result    <<<<<<
-#[22 -- end] : dicer size mappings
+######### >>>>>>>> OBSOLETED !#[11] : phase_FDR_call
+#[11] : pairs           <<<<<<
+#[12] : frac_paired    <<<<<<
+#[13] : stem_length    <<<<<<
+#[14] : loop_length    <<<<<<
+#[15] : dGperStem      <<<<<<
+#[16] : frac_hp        <<<<<<
+#[17] : hp_size_result <<<<<<
+#[18] : prec_result    <<<<<<
+#[19] : duplex_result  <<<<<<
+#[20] : star_result    <<<<<<
+#[21 -- end] : dicer size mappings
+
+my @final_clusters = ();
+my %final_hps = ();
+my %miRNAs = ();
+
+## Deal with hairpins now
+if($nohp) {
+    log_it ($logfile,"\n");
+    log_it ($logfile,`date`);
+    log_it ($logfile,"Running in nohp mode: Skipping phases 3, 4, and 5\n");
+    @final_clusters = @clusters;
+
+
+} else {
+    log_it ($logfile,"\n");
+    log_it ($logfile,`date`);
+    log_it ($logfile,"Phase Three: Preparing for RNA secondary structure prediction\n");
+    log_it ($logfile,"\n\tFiltering clusters based on repetitveness and DicerCall\.\.\.");
+
+    # get only those clusters with uniqueness values greater than or equal to --minUI and a DicerCall that is NOT "N"
+    my @folding_clusters = get_folding_clusters(\@clusters,\%quant_master,\$minUI);
+    
+    # report 
+    my $n_to_fold = scalar @folding_clusters;
+    
+    log_it ($logfile, "Done\n");
+    log_it ($logfile, "\t\tHairpin and miRNA analysis limited to $n_to_fold out of the $phase_one_n_clusters\n");
+    log_it ($logfile, "\t\tThe others are omitted from structural analysis because of high repetitiveness and\/or a DicerCall of \"N\"\n");
+    
+    # Begin folding processes
+    log_it ($logfile,"\n\tGathering genomic sequences for folding\n");
+    my %to_fold = get_folding_regions(\$genome,\@folding_clusters,\$maxhpsep);  ## hash structure: 'sequence', 'start', 'stop'  strand is always Watson
+    
+    ## Phase Four -- Folding
+    log_it ($logfile, "\n\n");
+    log_it ($logfile,`date`);
+    log_it ($logfile,"Phase Four: Identification of qualified hairpins overlapping clusters\n");
+
+    #fold each query and retain only qualifying structures
+
+    log_it ($logfile,"\tFolding sequences and identifying qualifying hairpins\.\.\.\n");
+
+    my %qualifying_hairpins = folder(\%to_fold,\$maxhpsep,\$minntspaired,\$minfracpaired,\$maxdGperStem,\$maxLoopLength);
+
+    ## Hash structure:  key is locus.  value is an array.  Each array entry is tab-delimited string containing:
+    # 0 : brax
+    # 1 : adj_start
+    # 2 : details
+    # 3 : strand (Watson or Crick)
+    #### 0 - 3 are as before  .. new ones are below
+    # 4 : pairs
+    # 5 : frac_paired
+    # 6 : stem_length
+    # 7 : loop_length
+    # 8 : dGperStem
+    
+    #convert the coordinates of the qualifying hairpins to the true chromosomal coordinates
+    log_it ($logfile,"\tConverting hairpin coordinates to true genomic coordinates\.\.\.");
+    my %true_hps = hairpin_coords(\%to_fold,\%qualifying_hairpins);  ## structure same as %qualifying hairpins
+    ### same structure as %qualifying_hairpins, except field[1] of each entry is now a start-stop
+    
+    log_it ($logfile,"Done\n");
+    
+    ## take in the einverted file
+    if(-r $inv_file) {
+	log_it ($logfile,"\tParsing inverted repeats from file $inv_file\.\.\.");
+	my @initial_irs = parse_inv(\$inv_file,\$minntspaired,\$minfracpaired,\$maxdGperStem,\$maxLoopLength);
+	## each line is tab-delimited, with the same fields as in %true_hps, except addition of an extra field ([9]), which is the chr
+	
+	log_it ($logfile," Done\n");
+	my $initial_ir_tally = scalar @initial_irs;
+	log_it ($logfile,"\t\tFound $initial_ir_tally potential qualifying IRs\n");
+	log_it ($logfile,"\tMerging einverted-derived inverted repeats with clusters and with RNAL-fold derived hairpins\.\.\.");
+	my ($in_irs,$out_irs) = merge_inv(\@initial_irs,\%true_hps,\@folding_clusters);
+	log_it ($logfile," Done\n");
+	log_it ($logfile,"\t\tFrom the $in_irs potentially qualifying IRs, $out_irs had overlap with one or more clusters and were merged with RNALfold hairpins\n");
+    }
+    
+    log_it ($logfile,"\tRemoving redundant hairpins on a per-locus basis\.\.\.");
+    my %true_hps_trimmed = remove_redundant_hps(\%true_hps); ## structure same as %true_hps
+    log_it ($logfile," Done\n");
+    
+    log_it ($logfile,"\tRemoving hairpins that do not overlap clusters\.\.\.");
+    my %true_hps_3 = remove_nonoverlapped_hps(\%true_hps_trimmed);  ## structure same as %qualifying hairpins
+    log_it ($logfile," Done\n");
+
+    
+    ## Phase Five : Annotation of hpRNA and microRNA loci
+    log_it($logfile, "\n");
+    log_it($logfile, `date`);
+    log_it($logfile, "Phase Five: Annotation of hpRNA and microRNA loci\n");
+    
+    log_it ($logfile,"\tFiltering hairpins based on expression evidence\.\.\.");
+    my %filtered_hps = hp_expression(\%true_hps_3,\$bamfile,\$minfrachpdepth);  ## radical changes 
+    ## Structure of hash .. key is locus, value is a single tab-delimited string.  Fields are as for %true_hps WITH ADDITION of [9] which is the frac_hp_depth
+
+    ## NEW NEW NEW NEW
+    log_it ($logfile,"\tFinal filtering of hairpins, and annotation of miRNA and hpRNA loci\.\.\.");
+    %final_hps = final_hp(\%filtered_hps,\$genome,\$bamfile,\$reads,\$minstrandfrac,\$maxmiRHPPairs,\$maxmiRUnpaired);
+    log_it ($logfile," Done\n");
+	   
+    ## structure like %filtered_hps, but expanded:
+    # [10] : hp_size_result
+    # [11] : prec_result
+    # [12] : duplex_result
+    # [13] : star_result
+    # [14] : hp_call
+    # [15] : output string of alignment to be written
+    
+    log_it ($logfile,"\tFinishing parsing of hairpin-associated clusters\.\.\.");
+
+    @final_clusters = get_final_clusters(\%final_hps,\@clusters);
+    log_it($logfile," Done\n");
+    ## get names again
+    %names = get_names_simple(\@final_clusters);
+    
+    ## Write the HP and MIRNA files
+    log_it ($logfile,"\tWriting miRNA and other hpRNA details to files\.\.\.");
+    my($n_miRNAs,$n_hpRNAs) = write_files(\%final_hps, \$outdir, \%names, \@final_clusters);
+    log_it ($logfile," Done\n");
+    
+    my $clus_count = scalar @final_clusters;
+    log_it ($logfile,"\n\tTotal Clusters: $clus_count\n\tmiRNA loci: $n_miRNAs\n\tother hpRNA loci: $n_hpRNAs\n\n");
+    
+    ## now, we must re-quantify .. remove from the %quant_master hash entries for replaced clusters, and recalculate for the hairpin clusters with new coordinates.  Update all names too
+    log_it($logfile,"Re-quantifying hpRNA and miRNA loci\.\.\.");
+    requant(\%quant_master,\@clusters,\@final_clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\%names);
+    log_it($logfile," Done\n");
+}
+
+## Phase 6 - Final output
+log_it($logfile,`date`);
+log_it($logfile,"\nPhase Six: Finalizing results and writing files\n");
 
 my %quant_2 = ();
 if($nohp) {
     foreach my $f_clus (@final_clusters) {
 	my @qm_fields = split ("\t",$quant_master{$f_clus});
-	my @new_fields = @qm_fields[2..10];
+	my @new_fields = @qm_fields[2..9];
 	unshift(@new_fields,"ND");
 	unshift(@new_fields,$qm_fields[1]);  ## name
 	unshift(@new_fields,$qm_fields[0]);  ## loc-coords
@@ -564,7 +577,7 @@ if($nohp) {
 	push(@new_fields, "NA"); ## duplex_result
 	push(@new_fields, "NA"); ## star_result
 	
-	for(my $ii = 11; $ii < (scalar @qm_fields); ++$ii) {
+	for(my $ii = 10; $ii < (scalar @qm_fields); ++$ii) {
 	    push(@new_fields, $qm_fields[$ii]);
 	}
 	my $new_entry = join("\t", @new_fields);
@@ -604,27 +617,23 @@ unless($flag_file eq "NULL") {
 #[9] : dicer_call
 #[10] : phase_offset
 #[11] : phase_pval
-#[12] : phase_FDR_call
-#[13] : pairs          
-#[14] : frac_paired    
-#[15] : stem_length    
-#[16] : loop_length    
-#[17] : dGperStem      
-#[18] : frac_hp        
-#[19] : hp_size_result 
-#[20] : prec_result    
-#[21] : duplex_result  
-#[22] : star_result   
-#[23 -- end] : dicer size mappings
 
+#[12] : pairs          
+#[13] : frac_paired    
+#[14] : stem_length    
+#[15] : loop_length    
+#[16] : dGperStem      
+#[17] : frac_hp        
+#[18] : hp_size_result 
+#[19] : prec_result    
+#[20] : duplex_result  
+#[21] : star_result   
+#[22 -- end] : dicer size mappings
 
-## Phase 6 .. Create output files and final reports
-log_it ($logfile,"\n");
-log_it ($logfile,`date`);
-log_it ($logfile,"Phase 6: Outputting Results\n");
 
 # output a .bed file
 # need difft. methods if hairpins/MIRNAs are included
+
 my $bed_text_for_log;
 if($nohp) {
     $bed_text_for_log = write_bed_nohp(\@final_clusters,\%quant_4,\$outdir,\$dicermin,\$dicermax,\%names);
@@ -638,7 +647,7 @@ log_it ($logfile,"\n$bed_text_for_log\n");
 # output the master file
 my $big_table = "$outdir" . "\/" . "Results\.txt";
 open(BIG, ">$big_table");
-print BIG "\#Locus\tName\tFlagOverlap\tHP\tStrand\tFrac_Watson\tTotal\tUniques\tRep-total\tDicerCall\tPhaseOffset\tPhase_pval\tPhase_FDR_Call\t";
+print BIG "\#Locus\tName\tFlagOverlap\tHP\tStrand\tFrac_Watson\tTotal\tUniques\tRep-total\tDicerCall\tPhaseOffset\tPhase_pval\t";
 print BIG "Pairs\tFracPaired\tStemLength\tLoopLength\tdGperStem\tFracCovHP\tHPSizeResult\tPrecisionResult\tDuplexResult\tStarResult\tShort\tLong";
 for(my $d = $dicermin; $d <= $dicermax; ++$d) {
     print BIG "\t$d";
@@ -703,24 +712,24 @@ OPTIONS:
 --reads [float] : number of mapped reads in bam_file\.  If not provided, ShortStack will force the analysis into \'raw\' mode, and no reads-per-million adjustments will be made\.
 --inv_file [string] : path to .inv file from einverted analysis of the genome_file in question\.  If not provided, warning is issued but analysis proceeds\.
 --flag_file [string] : path to file containing a list of loci to assess for overlap with small RNA loci\.  Optional\.
---mindepth [integer] : threshold for calling islands \(in reads per million\; must be more than 0 and less than 1 million\; default: 20\)
+--mindepth [integer] : threshold for calling islands \(must be at least 2  and less than 1 million\; default: 20\)
 --pad [integer] : Number of nucleotides upstream and downstrem to extend initial islands during cluster definition\; default: 100
 --dicermin [integer] : smallest size of the Dicer-derived small RNAs \(must be between 15-35 and less than or equal to option --dicermax\; default: 20\)
 --dicermax [integer] : largest size of the Dicer-derived small RNAs \(must be between 15-35 and more than or equal to option --dicermin\; default: 24\)
+--minUI [float] : Minimum uniqueness index required to attempt RNA folding\. Uniqueness index is defined as repeat-normalized abundance / total abundance\; default: 0.1
 --maxhpsep [integer] : maximum allowed separation of a base pair to span during hairpin prediction \(option -L for RNALfold\; must be between 50 and 2000\;default: 300\)
 --minfracpaired [float] : minimum fraction of paired nts allowable in a hairpin structure\; default: 0.67
 --minntspaired [integer] : minimum number of base-pairs in an accetable hairpin structure\; default: 15
 --minfrachpdepth [float] : minimum fraction of coverage in hairpin helix to keep hairpin\; default: 0.67
 --maxdGperStem [float] : maximum (deltaG/stem length) value for a valid hairpin\; stem length is 0.5 \* \(left stem + right stem\)\; default: -0.5
---maxLoopLength [integer] : maximum allowed loop length for a valid hairpin\; default: set by --miRType \'plant\' be essentially unlimited \(100,000\)\.  --miRType \'animal\' sets it to 15\.
+--maxLoopLength [integer] : maximum allowed loop length for a valid hairpin\; default: set by --miRType \'plant\' to be essentially unlimited \(100,000\)\.  --miRType \'animal\' sets it to 15\.
 --miRType [string] : Either 'plant' or 'animal'.  Sets maxmiRHPPairs, maxLoopLength, and maxmiRUnpaired to values specific to either kingdom\; default: \'plant\'
 --maxmiRHPPairs [integer] : Maximum number of base pairs in a MIRNA\. \; default: set by --miRType \'plant\' to 150\.  --miRType \'animal\' sets to 45 instead
 --maxmiRUnpaired [integer] : Maximum number of unpaired miRNA nts in a miRNA/miRNA\* duplex\; default: set by --miRType \'plant\' to 5\.  --miRType \'animal\' instead sets it to 6
 --minstrandfrac [float] : minimum fraction of mappings to assign a polarity to a non-hairpin cluster\; default: 0.8
---mindicerfrac [float] : minimum fraction of mappings within the dicer size range to annotate a locus as Dicer-derived\; default: 0.85
+--mindicerfrac [float] : minimum fraction of mappings within the dicer size range to annotate a locus as Dicer-derived\; default: 0.8
 --count [string] : File containing a-priori defined clusters\.  Presence of --count triggers \"count\" mode, and de-novo cluster discovery is skipped\. Default: off
 --phasesize [string or integer] : Cluster type to examine for significant phasing\.  Must be within the --dicermin to --dicermax range, or \'all\' to look at all dicer clusters, or \'none\' to skip all phasing analyses\. Default: 21
---phaseFDR [float] : Benjamini-Hochberg false discovery rate for calling significantly phased clusters\.  Default: 0.05
 --nohp : If --nohp appears on the command line, program executes in \"no_hp\" mode, omitting hairpin and MIRNA inferences\.  Default: off
 --raw : If --raw appears on the command line, program reports quantifications in raw mappings, instead of normalizing for library size to mappings per million mapped\. Default: Off
 
@@ -3344,7 +3353,7 @@ sub get_star_coord {
 }
     
 sub quant {
-    my($clus_array,$bamfile,$dicer_min,$dicer_max,$strand_cutoff,$dicer_cutoff,$phasesize,$phaseFDR,$names) = @_; ## passed by reference .. first one is array, hp_hash and miR_hash are hashes, others scalars
+    my($clus_array,$bamfile,$dicer_min,$dicer_max,$strand_cutoff,$dicer_cutoff,$phasesize,$names) = @_; ## passed by reference .. first one is array, hp_hash and miR_hash are hashes, others scalars
     my %output = ();
     my %internal = ();
     my $total;
@@ -3573,93 +3582,25 @@ sub quant {
 	# was calculated above
 	$output{$locus} .= "\t$dicer_call";
 	
-	### [8], [9], and [10] PHASING -- added later
+	# [8] and [9] .. phase offset and phase p-value
+	if(exists($phase_p_values{$locus})) {
+	    $output{$locus} .= "\t$phase_offsets{$locus}\t$phase_p_values{$locus}";
+	} else {
+	    $output{$locus} .= "\tND\tND";
+	}
 		
-	# [11] SHORT
+	# [10] SHORT
 	$output{$locus} .= "\t$internal{'short'}";
 	
-	# [12] LONG
+	# [11] LONG
 	$output{$locus} .= "\t$internal{'long'}";
 	
-	# [13] through whenenver .. Dicer 
+	# [12] through whenenver .. Dicer 
 	for($i = $$dicer_min; $i <= $$dicer_max; ++$i) {
 	    $output{$locus} .= "\t$internal{$i}";
 	}
-
-    }
-    
-    # Generate the ordered set of Benjamini-Hochberg values (i/m) * FDR
-    my @bh_vals = ();
-    for($i = 1; $i <= (scalar (keys %phase_p_values)); ++$i) {
-	push(@bh_vals,(($i/scalar (keys %phase_p_values)) * $$phaseFDR));
-    }
-    
-    # Generate the ordered set of loci where phasing p-values were determined, ordered in the basis of ascending p-values
-    my @phase_sorted_loci = sort {$phase_p_values{$a} <=> $phase_p_values{$b}} (keys %phase_p_values);
-    
-    # Go in order, and track whether p-value is significant or not
-    my %phase_results = ();
-    my $ok = 1;
-    my $column_entry;
-    
-    
-    for($i = 0; $i < (scalar @phase_sorted_loci); ++$i) {
-	my $locus = $phase_sorted_loci[$i];
-	if($ok) {
-	    unless($phase_p_values{$locus} <= $bh_vals[$i]) {
-		$ok = 0;
-	    }
-	    if($ok) {
-		$column_entry = "$phase_offsets{$locus}" . ":" . sprintf("%.3e",$phase_p_values{$locus}) . ":" . "OK-FDR-" . "$$phaseFDR";
-	    } else {
-		$column_entry = "$phase_offsets{$locus}" . ":" . sprintf("%.3e",$phase_p_values{$locus}) . ":" . "NS-FDR-" . "$$phaseFDR";
-	    }
-	} else {
-	    $column_entry = "$phase_offsets{$locus}" . ":" . sprintf("%.3e",$phase_p_values{$locus}) . ":" . "NS-FDR-" . "$$phaseFDR";
-	}
-	$phase_results{$locus} = $column_entry;
-
     }
 
-    my @old = ();
-    my $old_string;
-    my $new_string;
-    while((my $locus,$old_string) = each %output) {
-	@old = split ("\t", $old_string);
-	$new_string = '';  ## reset each time
-	$new_string .= $old[0]; ## locus
-	$new_string .= "\t";
-	$new_string .= $old[1]; ## name
-	$new_string .= "\t";
-	$new_string .= $old[2]; ## strand
-	$new_string .= "\t";
-	$new_string .= $old[3]; ## frac_wat
-	$new_string .= "\t";
-	$new_string .= $old[4]; ## total
-	$new_string .= "\t";
-	$new_string .= $old[5]; ## uniques
-	$new_string .= "\t";
-	$new_string .= $old[6]; ## rep-total
-	$new_string .= "\t";
-	$new_string .= $old[7]; ## dicer call
-	$new_string .= "\t";
-	
-	if(exists($phase_results{$locus})) {
-	    #$new_string .= $phase_results{$locus};
-	    my @pres = split (":", $phase_results{$locus});
-	    $new_string .= "$pres[0]\t$pres[1]\t$pres[2]";
-	} else {
-	    $new_string .= "ND\tND\tND";
-	}
-	
-	for($i = 8; $i < (scalar @old); ++$i) {
-	    $new_string .= "\t$old[$i]";
-	}
-	$output{$locus} = $new_string;
-	## TEST
-	## print "$new_string\n";
-	## END TEST
-    }
     print STDERR " Done\n";
     return %output;
 }
@@ -3824,7 +3765,7 @@ sub mod_quant_hp {
     
     while(($locus,$entry) = each %$quant_hash) {
 	@fields = split ("\t", $entry);
-	@new_fields = @fields[3..10];
+	@new_fields = @fields[3..9];
 	if(exists($$hp_hash{$locus})) {
 	    # polarity of the hairpin supersedes that calcuated by the reads alone
 	    if($$hp_hash{$locus} =~ /Watson/) {
@@ -3880,7 +3821,7 @@ sub mod_quant_hp {
 	unshift(@new_fields,$locus);
 	
 	# add the rest of the original information (the read counts)
-	for(my $ii = 11; $ii < (scalar @fields); ++$ii) {
+	for(my $ii = 10; $ii < (scalar @fields); ++$ii) {
 	    push(@new_fields, $fields[$ii]);
 	}
 	
@@ -3916,8 +3857,8 @@ sub convert_2_mpmm {
 	push(@new_fields,$old_fields[8]);
 	push(@new_fields,$old_fields[9]);
 	push(@new_fields,$old_fields[10]);
-	push(@new_fields,$old_fields[11]);
 	# hp information
+	push(@new_fields,$old_fields[11]);
 	push(@new_fields,$old_fields[12]);
 	push(@new_fields,$old_fields[13]);
 	push(@new_fields,$old_fields[14]);
@@ -3927,13 +3868,12 @@ sub convert_2_mpmm {
 	push(@new_fields,$old_fields[18]);
 	push(@new_fields,$old_fields[19]);
 	push(@new_fields,$old_fields[20]);
-	push(@new_fields,$old_fields[21]);
 	
 	# short and long
+	push(@new_fields, sprintf("%.3f",(($old_fields[21] / $$reads) * 1000000)));
 	push(@new_fields, sprintf("%.3f",(($old_fields[22] / $$reads) * 1000000)));
-	push(@new_fields, sprintf("%.3f",(($old_fields[23] / $$reads) * 1000000)));
 	# the rest
-	for($i = 24; $i < (scalar @old_fields); ++$i) {
+	for($i = 23; $i < (scalar @old_fields); ++$i) {
 	    push(@new_fields, sprintf("%.3f",(($old_fields[$i] / $$reads) * 1000000)));
 	}
 	my $result = join("\t",@new_fields);
@@ -4955,6 +4895,8 @@ sub final_hp { ## First added 0.3.0
     my %output_hash = ();
     my $result_string = ();
     
+    
+    
     while(($orig_locus, $hp_entry) = each %$in_hash) {
 	@hp_fields = split ("\t", $hp_entry);
 	@hp_arms = split (",", $hp_fields[2]);
@@ -5696,7 +5638,6 @@ sub summarize {
     my($quant,$nohp,$dicermin,$dicermax,$logfile) = @_;  ## hash, scalar
     my %loci = ();
     my %abun = ();
-    my $n_phased = 0;
     my $i;
     
     if($$nohp) {
@@ -5726,7 +5667,8 @@ sub summarize {
     my @fields = ();
     my $locus;
     my $entry;
-
+    my $rounded;
+    
     while(($locus, $entry) = each %$quant) {
 	@fields = split ("\t", $entry);
 	
@@ -5736,10 +5678,6 @@ sub summarize {
 	# $fields[3] is the HP call
 	++$loci{$fields[3]}{$fields[9]};
 	$abun{$fields[3]}{$fields[9]} += $fields[8];
-	# $fields[12] is the phase call
-	if($fields[12] =~ /OK/) {
-	    ++$n_phased;
-	}
     }
     
     # report
@@ -5747,19 +5685,35 @@ sub summarize {
 
     if($$nohp) {
 	log_it($$logfile,"DicerCall\tLoci\tAbundance\n");
-	log_it($$logfile, "N\t$loci{'ND'}{'N'}\t$abun{'ND'}{'N'}\n");
+	log_it($$logfile, "N\t$loci{'ND'}{'N'}\t");
+	$rounded = sprintf("%.1f",$abun{'ND'}{'N'});
+	log_it($$logfile,"$rounded\n");
 	for($i = $$dicermin; $i <= $$dicermax; ++$i) {
-	    log_it($$logfile,"$i\t$loci{'ND'}{$i}\t$abun{'ND'}{$i}\n");
+	    log_it($$logfile,"$i\t$loci{'ND'}{$i}\t");
+	    $rounded = sprintf ("%.3f",$abun{'ND'}{$i});
+	    log_it($$logfile,"$rounded\n");
 	}
     } else {
 	log_it($$logfile,"DicerCall\tNON-HP_Loci\tHP_Loci\tMIRNA_Loci\tNON-HP_Abundance\tHP_Abundance\tMIRNA_Abundance\n");
-	log_it($$logfile,"N\t$loci{'.'}{'N'}\t$loci{'HP'}{'N'}\t$loci{'MIRNA'}{'N'}\t$abun{'.'}{'N'}\t$abun{'HP'}{'N'}\t$abun{'MIRNA'}{'N'}\n");
+	log_it($$logfile,"N\t$loci{'.'}{'N'}\t$loci{'HP'}{'N'}\t$loci{'MIRNA'}{'N'}\t");
+	$rounded = sprintf("%.1f",$abun{'.'}{'N'});
+	log_it($$logfile,"$rounded\t");
+	$rounded = sprintf("%.1f",$abun{'HP'}{'N'});
+	log_it($$logfile,"$rounded\t");
+	$rounded = sprintf("%.1f",$abun{'MIRNA'}{'N'});
+	log_it($$logfile,"$rounded\n");
 	for($i = $$dicermin; $i <= $$dicermax; ++$i) {
-	    log_it($$logfile,"$i\t$loci{'.'}{$i}\t$loci{'HP'}{$i}\t$loci{'MIRNA'}{$i}\t$abun{'.'}{$i}\t$abun{'HP'}{$i}\t$abun{'MIRNA'}{$i}\n");
+	    log_it($$logfile,"$i\t$loci{'.'}{$i}\t$loci{'HP'}{$i}\t$loci{'MIRNA'}{$i}\t");
+	    $rounded = sprintf("%.1f",$abun{'.'}{$i});
+	    log_it($$logfile,"$rounded\t");
+	    $rounded = sprintf("%.1f",$abun{'HP'}{$i});
+	    log_it($$logfile,"$rounded\t");
+	    $rounded = sprintf("%.1f",$abun{'MIRNA'}{$i});
+	    log_it($$logfile,"$rounded\n");
 	}
     }
     log_it($$logfile,"\n");
-    log_it($$logfile,"Number of signifcantly phased loci: $n_phased\n");
+
 }
 
 sub log_it {
@@ -5770,7 +5724,292 @@ sub log_it {
     close LOG;
 }
 
+sub get_folding_clusters {
+    my ($clusters,$quant_hash,$minUI) = @_;  ## passed by reference .. array and hash and scalar
+    my @fields = ();
+    my $u_ratio;
+    my @output;
+    foreach my $locus (@$clusters) {
+	@fields = split ("\t", $$quant_hash{$locus});
+	if($fields[4] != 0) {
+	    $u_ratio = $fields[6] / $fields[4]; ## rep_total / total
+	} else {
+	    $u_ratio = 0;
+	}
+	if(($u_ratio >= $$minUI) and ($fields[7] ne "N")) { ## DicerCall cannot be "N"
+	    push(@output, $locus);
+	}
+    }
+    return @output;
+}
+
+sub requant {
+    my($output,$oldclus,$finalclus,$bamfile,$dicer_min,$dicer_max,$strand_cutoff,$dicer_cutoff,$phasesize,$names) = @_; ## passed by reference .. first one is array, hp_hash and miR_hash are hashes, others scalars
+
+    my %internal = ();
+    my $total;
+    my $watson;
+    my $repnorm;
+    my $i;
+    my @fields = ();
+    my $loc_start;
+    my $loc_stop;
+    my $read_length;
+    my $nh;
+    my $frac_watson;
+    my $frac_crick;
+    my $strand;
+    my $total_norm;
+    my $repnorm_norm;
+    my $size_norm;
+    
+    my %phase_hash = ();
+    my $in_dicer_range;
+    my $dicer_call;
+    my $max_d_size;
+    my $max_d_proportion;
+    
+    my %phase_p_values = ();
+    my %phase_offsets = ();
+    my $p_val;
+    my $offset;    
+    
+    my $uniques;
+    
+    my $x;
+    
+    my %final_clusters = ();
+    my %old_clusters = ();
+    my $old;
+    my $final;
+    
+    my @lastfields = ();
+    my $laststring;
+    foreach $final (@$finalclus) {
+	$final_clusters{$final} = 1;
+    }
+    
+    foreach $old (@$oldclus) {
+	$old_clusters{$old} = 1;
+    }
+    
+    ## Delete defunct entries
+    foreach $old (@$oldclus) {
+	unless(exists($final_clusters{$old})) {
+	    delete $$output{$old};
+	}
+    }
+    
+    foreach my $locus (@$finalclus) {
+	unless(exists($$output{$locus})) {
 	    
+	    %internal = (); ## reset each time
+	    %phase_hash = (); ## reset each time
+	    $total = 0;
+	    $watson = 0;
+	    $repnorm = 0;
+	    $uniques = 0;
+	    $internal{'short'} = 0;
+	    $internal{'long'} = 0;
+	    for($i = $$dicer_min; $i <= $$dicer_max; ++$i) {
+		$internal{$i} = 0;
+	    }
+	    
+	    if($locus =~ /:(\d+)-(\d+)/) {
+		$loc_start = $1;
+		$loc_stop = $2;
+	    } else {
+		die "FATAL in sub-routine \"quant\" : could not parse coordinates from locus $locus\n";
+	    }
+	    # initialize phase hash
+	    for($i = $loc_start; $i <= $loc_stop; ++$i) {
+		$phase_hash{$i} = 0;
+	    }
+	    
+	    open(SAM, "samtools view $$bamfile $locus |");
+	    while (<SAM>) {
+		chomp;
+		# ignore header lines, should they be present
+		if($_ =~ /^@/) {
+		    next;
+		}
+		# get fields
+		@fields = split ("\t", $_);
+		# ignore unmapped reads, should they appear
+		if($fields[1] & 4) {
+		    next;
+		}
+		$read_length = parse_cigar($fields[5]);
+		
+		# determine the number of total mappings for the read from the NH:i: tag.
+		$nh = '';
+		for($i = ((scalar @fields) - 1); $i >= 0; --$i) {
+		    if($fields[$i] =~ /^NH:i:(\d+)$/) {
+			$nh = $1;
+			last;
+		    }
+		}
+		unless($nh) {
+		    die "FATAL in sub-routine \"quant\": Could not parse NH:i flag from sam line $_\n";
+		}
+		
+		# tally
+		++$total;
+		if($nh == 1) {
+		    ++$uniques;
+		}
+		unless($fields[1] & 16) {
+		    ++$watson;
+		}
+		
+		$repnorm += (1 / $nh);
+		if($read_length < $$dicer_min) {
+		    ++$internal{'short'};
+		} elsif ($read_length > $$dicer_max) {
+		    ++$internal{'long'};
+		} else {
+		    ++$internal{$read_length};
+		    ## add to phase hash
+		    ## make sure to inlcude reads whose left end is outside the locus.. for those simply add the read length to get a correct register
+		    if($fields[1] & 16) {
+			if(($fields[3] + 2) < $loc_start) {
+			    ++$phase_hash{($fields[3] + 2 + $read_length)};
+			} else {
+			    ++$phase_hash{($fields[3] + 2)};
+			}
+		    } else {
+			if($fields[3] < $loc_start) {
+			    ++$phase_hash{($fields[3] + $read_length)};
+			} else {
+			    ++$phase_hash{$fields[3]};
+			}
+		    }
+		}
+	    }
+	    close SAM;
+	    if($total > 0) {
+		$frac_watson = sprintf ("%.4f", ($watson / $total));
+	    } else {
+		$frac_watson = 0;
+	    }
+	    
+	    $frac_crick = 1 - $frac_watson;
+	    
+	    # Evaluate whether this will be annotated a Dicer-derived locus or not, based on the cutoff supplied
+	    $in_dicer_range = 0; # reset
+	    for($i = $$dicer_min; $i <= $$dicer_max; ++$i) {
+		$in_dicer_range += $internal{$i};
+	    }
+	    
+	    if($total > 0) {
+		if(($in_dicer_range / $total) >= $$dicer_cutoff) {
+		    # is a dicer locus.  find the dicer-read size with max n reads, and calc proportion
+		    # reset variables
+		    $max_d_size = "null";
+		    $max_d_proportion = 0;
+		    for($i = $$dicer_min; $i <= $$dicer_max; ++$i) {
+			if(($internal{$i} / $total) > $max_d_proportion) {
+			    $max_d_proportion = $internal{$i} / $total;
+			    $max_d_size = $i;
+			}
+		    }
+		    # shorten the proportion to three decimal places
+		    $max_d_proportion = sprintf("%.3f",$max_d_proportion);
+		    ## as of version 0.1.2, dicer_call no longer has colon-delimted information, and the proportion is omitted
+		    #$dicer_call = "$max_d_size" . ":" . "$max_d_proportion"; ## OLD
+		    $dicer_call = $max_d_size;
+		} else {
+		    # Not a Dicer locus
+		    $dicer_call = "N";
+		}
+	    } else {
+		# shouldn't be here unless somehow $total was zero
+		$dicer_call = "N";
+	    }
+	    
+	    # see whether phasing should be examined
+	    unless(($$phasesize =~ /^none$/) or
+		   ($dicer_call =~ /^N$/)) {
+		if($$phasesize =~  /^all$/) {
+		    if (($loc_stop - $loc_start + 1) > (4 * $max_d_size)) {
+			($p_val,$offset) = eval_phasing(\%phase_hash,\$dicer_call,\$loc_start,\$loc_stop);
+			$phase_p_values{$locus} = $p_val;
+			$phase_offsets{$locus} = $offset;
+		    }
+		} elsif (($dicer_call == $$phasesize) and
+			 (($loc_stop - $loc_start + 1) > (4 * $$phasesize))) {
+		    
+		    ($p_val,$offset) = eval_phasing(\%phase_hash,\$dicer_call,\$loc_start,\$loc_stop);
+		    $phase_p_values{$locus} = $p_val;
+		    $phase_offsets{$locus} = $offset;
+		}
+	    }
+	    
+	    # begin entry
+	    # [0] : locus name
+	    $$output{$locus} .= "$locus";
+	    
+	    # [1] : name from name hash
+	    $$output{$locus} .= "\t$$names{$locus}";
+	    
+	    # [2] : STRAND .. in this sub-routine, based solely upon $$strand_cutoff.
+	    
+	    if($frac_watson >= $$strand_cutoff) {
+		$strand = "+";
+	    } elsif($frac_crick >= $$strand_cutoff) {
+		$strand = "-";
+	    } else {
+		$strand = "\.";
+	    }
+	    $$output{$locus} .= "\t$strand";
+	    
+	    # [3] FRAC_WAT
+	    $$output{$locus} .= "\t$frac_watson";
+	    
+	    # calculate mappings, reporting only in raw in this sub-routine
+	    # [4] TOTAL
+	    $$output{$locus} .= "\t$total";
+	    
+	    # [5] UNIQUE MAPPERS
+	    $$output{$locus} .= "\t$uniques";
+	    
+	    # [6] REP-TOTAL
+	    $repnorm_norm = sprintf("%.4f",$repnorm);
+	    $$output{$locus} .= "\t$repnorm_norm";
+	    
+	    # [7] DICER ... either 'N' or a number within the dicer_min to dicer_max range
+	    # was calculated above
+	    $$output{$locus} .= "\t$dicer_call";
+	    
+	    # [8] and [9]: Phase p offset and phase p-value
+	    if(exists($phase_p_values{$locus})) {
+		$$output{$locus} .= "\t$phase_offsets{$locus}";
+		$$output{$locus} .= "\t$phase_p_values{$locus}";
+	    } else {
+		$$output{$locus} .= "\tND\tND";
+	    }
+	    
+	    # [10] SHORT
+	    $$output{$locus} .= "\t$internal{'short'}";
+	    
+	    # [11] LONG
+	    $$output{$locus} .= "\t$internal{'long'}";
+	    
+	    # [12] through whenenver .. Dicer 
+	    for($i = $$dicer_min; $i <= $$dicer_max; ++$i) {
+		$$output{$locus} .= "\t$internal{$i}";
+	    }
+	}
+	
+	## ensure the correct name is inserted, for all loci
+	@lastfields = split ("\t", $$output{$locus});
+	$lastfields[1] = $$names{$locus};
+	$laststring = join("\t", @lastfields);
+	$$output{$locus} = $laststring;
+	
+    }
+}
+
 __END__	
 
 =head1 LICENSE
@@ -5785,7 +6024,7 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.                                                              
                                                                                                  
 This program is distributed in the hope that it will be useful,                                  
-    but WITHOUT ANY WARRANTY; without even the implied warranty of                                   
+but WITHOUT ANY WARRANTY; without even the implied warranty of                                   
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                                    
 GNU General Public License for more details.                                                     
                                                                                                  
@@ -5806,7 +6045,7 @@ As of this version release, a manuscript describing ShortStack is being revised.
 
 =head1 VERSION
 
-0.3.1 :: Released December 5, 2012
+0.4.0 :: Released December 27, 2012
 
 =head1 AUTHOR
 
@@ -5834,7 +6073,7 @@ ensure 'perl' is located in /usr/bin/ .. if not, edit line 1 of script according
 
 =head1 USAGE
                                                                                                                              
-Shortstack.pl [options] [in.bam] [genome.fasta] 
+	Shortstack.pl [options] [in.bam] [genome.fasta] 
 
 =head1 QUICK START 
 
@@ -5846,7 +6085,7 @@ Shortstack.pl [options] [in.bam] [genome.fasta]
 
 4. Align your reads to the reference genome, output the results in sam/bam format, and pipe through 'Prep_bam.pl' to generate a properly formatted, sorted, and indexed .bam alignment.  Note the total number of mapped reads.  Suggested aligner is bowtie 1 (0.12.8) but any method that outputs in sam/bam format is fine.  If you use bowtie version 1, the following command can be used for one-step mapping, formatting, sorting, and indexing (assuming of course you've installed bowtie and built the bowtie index for your reference genome):
 
-bowtie [bowtie_options] -S [bowtie_genome_index] [trimmed_reads] | Prep_bam.pl --genome [genome.fasta] --prefix [file_name_prefix]
+	bowtie [bowtie_options] -S [bowtie_genome_index] [trimmed_reads] | Prep_bam.pl --genome [genome.fasta] --prefix [file_name_prefix]
 
 5.  If you use another mapping method besides the one above, the final .bam formatted file must be sorted by chromosomal position, have NH:i: tags present (see SAM specification), and be indexed with the .bam.bai index file in the same directory as the .bam file.  In additional, all data lines (except those for unmapped reads, which are ignored) must have a valid CIGAR string (see SAM specification).  Non-conforming .sam or .bam files can be processed with 'Prep_bam.pl' -- see the README for Prep_bam.pl included with this package.
 
@@ -5868,11 +6107,11 @@ Some Tests:
 
 A) full de-novo annotation run, including inverted repeats file and flag file of known Arabidopsis MIRNAs:
 
-    ShortStack.pl --inv_file Athaliana_167.inv --flag_file ath_hp_mb19_SStack_Athal_167.txt col_leaf_ok.bam Athaliana_167.fa
+	ShortStack.pl --inv_file Athaliana_167.inv --flag_file ath_hp_mb19_SStack_Athal_167.txt col_leaf_ok.bam Athaliana_167.fa
 
 B) count mode run to quantify small RNA expression from known Arabidopsis miRBase MIRNA loci:
 
-    ShortStack.pl --count ath_hp_mb19_SStack_Athal_167.txt col_leaf_ok.bam Athaliana_167.fa
+	ShortStack.pl --count ath_hp_mb19_SStack_Athal_167.txt col_leaf_ok.bam Athaliana_167.fa
 
 
 =head1 OPTIONS
@@ -5892,6 +6131,8 @@ B) count mode run to quantify small RNA expression from known Arabidopsis miRBas
 --dicermin [integer] : Smallest size in the Dicer size range (or size range of interest).  Deafult = 20.  Must be between 15 and 35, and less than or equal to --dicermax
 
 --dicermax [integer] : Largest size in the Dicer size range (or size range of interest).  Deafult = 24.  Must be between 15 and 35, and more than or equal to --dicermin
+
+--minUI [float] : Minimum uniqueness index required to attempt RNA folding. Uniqueness index is defined as repeat-normalized abundance / total abundance.  Must be a value between 0 and 1.  Zero forces all clusters to be folded; default: 0.1
 
 --maxhpsep [integer] : Maximum allowed span for a base-pair during hairpin search with RNALfold; Also serves as the maximum size of genomic query to fold with RNALfold .. loci whose unpadded size is more than --maxhpsep will not be analyzed at all with RNALfold.  Default = 300.  Must be between 50 and 2000.
 
@@ -5916,8 +6157,6 @@ B) count mode run to quantify small RNA expression from known Arabidopsis miRBas
 --mindicerfrac [float] : Minimum fraction of mappings within Dicer size range to annotate a locus as Dicer-derived.  Default = 0.85.  Allowed values between 0 and 1.
 
 --phasesize [integer] : Examine phasing only for clusters dominated by the indicated size range.  Size must be within the bounds described by --dicermin and --dicermax.  Set to 'all' to examine p-values of each locus within the Dicer range, in its dominant size.  Set to 'none' to suppress all phasing analysis.  Default = 21.  Allowed values between --dicermin and --dicermax.
-
---phaseFDR [float] : False Discovery Rate for phased cluster analysis.  FDR of p-values set to this value for Benjamini-Hochberg method.  See below for details.  Default = 0.05.  Allowed values greater than 0 up to 1.
 
 --count [string] : Invokes count mode, in which user-provided clusters are annotated and quantified instead of being defined de novo.  When invoked, the file provided with --count is assumed to contain a simple list of clusters.  Count mode also forces nohp mode.  Formatting details below.  Default : Not invoked.
 
@@ -5953,6 +6192,8 @@ If running in --count mode, the user-provided file is expected to be a simple te
 
 Importantly, the 'Results.txt' file produced by a previous ShortStack.pl run can be used directly in subsequent runs in --count mode.  This is useful when comparing identical intervals across multiple samples.
 
+Note that count mode also forces nohp mode.
+
 =head2 --flag_file
 
 Optional.  This is a list of genomic loci to scan for overlap with one or more of the small RNA loci found/analyzed by ShortStack.  Overlap of any length is reported.  The format of the file is similar to that of the --count file:  A tab-delimited text file with coordinates in the first column, and names in the second column.  Unlike for --count files, names are required to be present in the second column for --flag_file.  Coordinates must be in the format [Chr]:[start]-[stop], where Chr is defined in the genome file AND the .bam file, and start and stop are one-based, inclusive.
@@ -5987,7 +6228,7 @@ This is a simple tab-delimited text file.  The first line begins with a "#" (com
 
 To import this into R, here's a tip to deal with the first line, which has the headers but begins with a "#" character.
 
-    >results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
+	>results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
 
 Column 1: Locus : The genome-browser-friendly coordinates of the clusters.  Coordinates are one-based, inclusive (e.g. Chr1:1-100 refers to a 100 nt interval beginning with nt 1 and ending with nt 100).
 
@@ -6013,33 +6254,31 @@ Column 11: PhaseOffset : If "ND", phasing p-value was not calculated for this cl
 
 Column 12: Phase_pval :  If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the p-value is derived from a modified hypergeometric distribution, as described below. 
 
-Column 13: Phase_FDR_Call : If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the FDR call will begin with either "OK" or "NS" (meaning 'not significant') and then list the alpha used in the Benjamini-Hochberg procedure.  
+Column 13: Pairs : Number of base-pairs in the hairpin stems.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 14: Pairs : Number of base-pairs in the hairpin stems.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+Column 14 : FracPaired : Fraction of the stem nucleotides that are paired.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 15 : FracPaired : Fraction of the stem nucleotides that are paired.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+Column 15 : StemLength : Defined as 0.5 * (5' arm length + 3' arm length).  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 16 : StemLength : Defined as 0.5 * (5' arm length + 3' arm length).  If this is not a HP or MIRNA locus, "NA" is entered instead.
+Column 16 : LoopLength : Number of nucleotides between the 5' and 3' stems.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 17 : LoopLength : Number of nucleotides between the 5' and 3' stems.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+Column 17 : dGperStem : deltaG of the stems divided by the StemLength.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 18 : dGperStem : deltaG of the stems divided by the StemLength.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+Column 18 : FracCovHP : Fraction of the per-nucleotide coverage present in the originally found cluster that is located in the two arms of the hairpin.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 19 : FracCovHP : Fraction of the per-nucleotide coverage present in the originally found cluster that is located in the two arms of the hairpin.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+Column 19 : HPSizeResult : "1" indicates the number of pairs in the hairpin was less than or equal to maxmiRHPPairs; 0 indicates the opposite.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 20 : HPSizeResult : "1" indicates the number of pairs in the hairpin was less than or equal to maxmiRHPPairs; 0 indicates the opposite.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+Column 20 : PrecisionResult : The number of small RNA sequences in the stem region of the hairpin that accounted for >= 20% of the mappings.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 21 : PrecisionResult : The number of small RNA sequences in the stem region of the hairpin that accounted for >= 20% of the mappings.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+Column 21 : DuplexResult : The number of possible miRNA/miRNA* duplexes in which neither partner spanned a loop and neither partner had > maxmiRUnpaired number of unpaired nucleotides in the putative duplex.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 22 : DuplexResult : The number of possible miRNA/miRNA* duplexes in which neither partner spanned a loop and neither partner had > maxmiRUnpaired number of unpaired nucleotides in the putative duplex.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+Column 22 : StarResult : The number of putative miRNA*'s that were actually sequenced.  Values of 1 or more here indicate a MIRNA annoation.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 23 : StarResult : The number of putative miRNA*'s that were actually sequenced.  Values of 1 or more here indicate a MIRNA annoation.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+Column 23: Short : The total mappings from reads with lengths less than --dicermin, either in raw reads (--raw mode), or mappings per million mapped.
 
-Column 24: Short : The total mappings from reads with lengths less than --dicermin, either in raw reads (--raw mode), or mappings per million mapped.
+Column 24: Long : The total mappings from reads with lengths more than --dicermax, either in raw reads (--raw mode), or mappings per million mapped.
 
-Column 25: Long : The total mappings from reads with lengths more than --dicermax, either in raw reads (--raw mode), or mappings per million mapped.
-
-Columns 26 - the end : The total mappings from reads with the indicated lengths.  These are the sizes within the Dicer range.
+Columns 25 - the end : The total mappings from reads with the indicated lengths.  These are the sizes within the Dicer range.
 
 =head2 Log.txt
 
@@ -6077,23 +6316,25 @@ Cluster discovery proceeds in two simple steps:
 
 =head2 Hairpin and MIRNA analysis
 
-1.  The genomic window to be subject to RNA folding is first determined.  If the locus size is > --maxhpsep, no RNA folding will take place at the locus.  Otherwise, a window with length of --maxhpsep is centered on the locus to determine the nucleotides to fold
+1. Clusters are first filtered to determine eligbility for secondary structure analysis.  Only clusters whose uniqueness index* is >= [--minUI] are eligible.  In addition, clusters with a DicerCall of "N" are excluded from folding analysis.  (Uniqueness index is the ratio of repeat-normalized abundance / total mappings at the locus.  Values approaching zero indicate a cluster dominated by multimapped reads.  Values approaching 1 indicate most mapped reads at a locus are uniquely placed).
 
-2.  Both the top and bottom genomic strands from the window are then subjected to secondary structure prediction using RNALfold (option -L [--maxhpsep]), which returns a diverse set of often overlapping predicted structures.
+2.  The genomic window to be subject to RNA folding is first determined.  If the locus size is > --maxhpsep, no RNA folding will take place at the locus.  Otherwise, a window with length of --maxhpsep is centered on the locus to determine the nucleotides to fold
 
-3.  The structures are parsed, retaining only those that satisfy options --minfracpaired, --minntspaired, --maxLoopLength, amd --maxdGperStem.
+3.  Both the top and bottom genomic strands from the window are then subjected to secondary structure prediction using RNALfold (option -L [--maxhpsep]), which returns a diverse set of often overlapping predicted structures.
 
-4.  If an .inv file was provided, all inverted repeats in that file are parsed, and then filtered to also satisfy options --minfracpaired, --minntspaired, --maxLoopLength, amd --maxdGperStem.  In addition, loop lengths from einverted data are not allowed to be longer than 50% of the helix length of the putative hairpin.  Putative RNA secondary structures in dot-bracket notation are generated from the .inv alignment, not by actual RNA folding.  All G-U alignments are considered paired, in addition to the standard A-U and G-C pairings.  Both strands are used, subject to passing the --minfracpaired, --minntspaired, --maxLoopLength, amd --maxdGperStem criteria.  Inverted-repeats that survive these filters are then filtered to retain only those with overlap to the original clusters, and the resulting set of eniverted-derived hairpins is merged with the RNALfold-derived set.
+4.  The structures are parsed, retaining only those that satisfy options --minfracpaired, --minntspaired, --maxLoopLength, amd --maxdGperStem.
 
-5.  Redundant hairpins are then removed.  Redundant hairpins are those whose 5' arms and 3' arms overlap.  In pairwise comparisons of redundant hairpins, the longest hairpin is retained.
+5.  If an .inv file was provided, all inverted repeats in that file are parsed, and then filtered to also satisfy options --minfracpaired, --minntspaired, --maxLoopLength, amd --maxdGperStem.  In addition, loop lengths from einverted data are not allowed to be longer than 50% of the helix length of the putative hairpin.  Putative RNA secondary structures in dot-bracket notation are generated from the .inv alignment, not by actual RNA thermodynamic analysis.  All G-U alignments are considered paired, in addition to the standard A-U and G-C pairings.  Both strands are used, subject to passing the --minfracpaired, --minntspaired, --maxLoopLength, amd --maxdGperStem criteria.  Inverted-repeats that survive these filters are then filtered to retain only those with overlap to the original set of structure-eligible clusters (see 1 above), and the resulting set of eniverted-derived hairpins is merged with the RNALfold-derived set.
 
-6.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window could have been extended around the cluster, there could be  putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 1nt within the original cluster coordinates.
+6.  Redundant hairpins are then removed.  Redundant hairpins are those whose 5' arms and 3' arms overlap.  In pairwise comparisons of redundant hairpins, the longest hairpin is retained.
 
-7. The pattern of small RNA expression relative to the remaining hairpins is then examined.  The per-nucleotide coverage across every base, on both strands separately, across the original locus coordinates is calculated.  If there is a single hairpin whose 5' and 3' arms contain >= [--minfrachpdepth] of the total coverage of the original locus, the hairpin is kept for futher analysis.  If more than one hairpin meets this criterion, than the one with the highest coverage fraction in the arms is retained.  Note that this step contains a correction for reads that are "dyads" .. reads that map twice to a hairpin, once in each arm, on opposite strands... this happens for perfect inverted repeat loci.  Such reads are counted towards the sense strand only for a given hairpin.
+7.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window could have been extended around the cluster, there could be  putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 1nt within the original cluster coordinates.
 
-8. The pattern of small RNA expression relative to the single hairpin candidate is further scrutinized for polarity.  The fraction of all mappings in the hairpin interval must be >= [--minstrandfrac].  As in step 7, this step corrects for "dyad" reads (see above).  Hairpins that pass this step are either HP or MIRNA loci.  The coordinates of the originally determined de novo locus are discarded, and replaced with the hairpin coordinates.
+8. The pattern of small RNA expression relative to the remaining hairpins is then examined.  The per-nucleotide coverage across every base, on both strands separately, across the original locus coordinates is calculated.  If there is a single hairpin whose 5' and 3' arms contain >= [--minfrachpdepth] of the total coverage of the original locus, the hairpin is kept for futher analysis.  If more than one hairpin meets this criterion, than the one with the highest coverage fraction in the arms is retained.  Note that this step contains a correction for reads that are "dyads" .. reads that map twice to a hairpin, once in each arm, on opposite strands... this happens for perfect inverted repeat loci.  Such reads are counted towards the sense strand only for a given hairpin.
 
-9.  Each potential hairpin that remains is next analyzed to see if it qualifies as a MIRNA.  MIRNA locus annotation is designed to satisfy the criteria for de novo annotation of plant MIRNAs as described in Meyers et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682.  In fact, ShortStack's criteria is a little stricter than Meyers et al., in that ShortStack has an absolute requirement for sequencing of the exact predicted miRNA* sequence for a candidate mature miRNA.  It is important to note that ShortStack's MIRNA annotation method is designed to reduce false positives at the expense of an increased rate of false negatives.  In other words, there are likely many bona fide MIRNA loci that end up being classified as Hairpins, instead of MIRNAs, because they don't quite meet the strict criteria set forth below. 
+9. The pattern of small RNA expression relative to the single hairpin candidate is further scrutinized for polarity.  The fraction of all mappings in the hairpin interval must be >= [--minstrandfrac].  As in step 8, this step corrects for "dyad" reads (see above).  Hairpins that pass this step are either HP or MIRNA loci.  The coordinates of the originally determined de novo locus are discarded, and replaced with the hairpin coordinates.
+
+10.  Each potential hairpin that remains is next analyzed to see if it qualifies as a MIRNA.  MIRNA locus annotation is designed to satisfy the criteria for de novo annotation of plant MIRNAs as described in Meyers et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682.  In fact, ShortStack's criteria is a little stricter than Meyers et al., in that ShortStack has an absolute requirement for sequencing of the exact predicted miRNA* sequence for a candidate mature miRNA.  It is important to note that ShortStack's MIRNA annotation method is designed to reduce false positives at the expense of an increased rate of false negatives.  In other words, there are likely many bona fide MIRNA loci that end up being classified as Hairpins, instead of MIRNAs, because they don't quite meet the strict criteria set forth below. 
 
 - Hairpin Size:  The total number of pairs in the hairpin must be <= [--maxmiRHPPairs]
 
@@ -6131,9 +6372,7 @@ Phasing analysis proceeds as follows:
 
 7.  The p-value within the chosen register is then calculated using the cumulative distribution function (CDF) for the hypergeometric distribution.  Sorry, hard to show equations in plain-text -- see Wikipedia's Hypergeometric distribution entry, under CDF. N (the population size) is the number of nt positions in the locus. m (the number of success states in the population) is the number of possible positions in the phasing register of interest, INLCUDING POSITIONS +1 AND -1 RELATIVE TO THE REGISTER OF INTEREST.  This means phasing is "fuzzy", which is often seen in the known examples of this phenomenon.  n (the number of draws) is defined as the total number of positions with ABOVE AVERAGE abundance.  k (the number of successes) is the number of phased positions (inlduing the fuzzy +1 and -1 positions) with ABOVE AVERAGE abundance.  The p-value is then calculated per the hypergeometric distribution CDF.  NOTE: The restriction of n and k to only above-average abundance works well to eliminate low-level noise and focus on the dominant small RNA pattern within the locus.
 
-8. After all p-values have been caluclated, ShortStack uses the Benjamini-Hochberg method to control for the false discovery rate at a user-specified alpha (default is 0.05).  Significant clusters are noted 'OK' and non-significant clusters are noted 'NS'; in both cases the p-values are reported.   Results of phasing analysis are in columns 10-12 of the Results.txt file.
-
-
+Note: P-values are not corrected for multiple-testing.  Consider adjustment of p-values to control for multiple testing (e.g. Bonferroni, Benjamini-Hochberg FDR, etc) if you want a defensible set of phased loci from a genome-wide analysis.
 
 =cut
 
