@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.4.4";
+my $version = "0.5.0";
 
 
 ##### get options and validate them
@@ -87,6 +87,12 @@ my $logfile = "$outdir" . "\/" . "Log\.txt";
 unless(($mindepth > 0) and
        ($mindepth < 1000000)) {
     die "FATAL: mindepth must be more than zero and less than one million\n\n$usage\n";
+}
+
+# Warn if mindepth is greater than 8000
+if($mindepth > 8000) {
+    print STDERR "\nWARNING: Setting mindepth to be more than 8000 might cause ShortStack to become a memory hog\!\n";
+    print STDERR "\tConsider aborting and setting mindepth lower\n";
 }
 
 # ensure that option --pad is present and logical -- 0 >= x < 100,000
@@ -359,7 +365,9 @@ if($count) {
     %names = get_names_countmode($count);  ## if names not present in count file, arbitrary names assigned
 } else {
     log_it ($logfile," de novo\n");
-    my @first_clusters = get_clusters($bamfile,$mindepth);
+
+    my @first_clusters = get_islands_mpileup($bamfile,$mindepth,$expected_faidx);
+    
     @clusters = merge_clusters(\@first_clusters,\$pad,\$genome);
     %names = get_names_simple(\@clusters);
 }
@@ -367,7 +375,7 @@ if($count) {
 my $phase_one_n_clusters;
 if(@clusters) {
     $phase_one_n_clusters = scalar @clusters;
-    log_it ($logfile,"Phase One complete: Found $phase_one_n_clusters Clusters\n");
+    log_it ($logfile,"Phase One complete: Found $phase_one_n_clusters Clusters\n\n");
 } else {
     log_it ($logfile,"Sorry, no clusters meeting your criteria were found in these data\.\n");
     exit;
@@ -376,7 +384,7 @@ if(@clusters) {
 ### NEW PHASE 2 -- INITIAL QUANTIFICATION
 ## OLD Phase 5: Annotate and Quantify all clusters
 log_it ($logfile,`date`);
-log_it ($logfile,"Phase 2: Quantify all clusters\n");
+log_it ($logfile,"Phase Two: Quantify all clusters\n");
 
 my %quant_master = quant(\@clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\%names);
 
@@ -547,14 +555,14 @@ if($nohp) {
     log_it ($logfile,"\n\tTotal Clusters: $clus_count\n\tmiRNA loci: $n_miRNAs\n\tother hpRNA loci: $n_hpRNAs\n\n");
     
     ## now, we must re-quantify .. remove from the %quant_master hash entries for replaced clusters, and recalculate for the hairpin clusters with new coordinates.  Update all names too
-    log_it($logfile,"Re-quantifying hpRNA and miRNA loci\.\.\.");
+    log_it($logfile,"\tRe-quantifying hpRNA and miRNA loci\.\.\.");
     requant(\%quant_master,\@clusters,\@final_clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\%names);
-    log_it($logfile," Done\n");
+    log_it($logfile," Done\n\n");
 }
 
 ## Phase 6 - Final output
 log_it($logfile,`date`);
-log_it($logfile,"\nPhase Six: Finalizing results and writing files\n");
+log_it($logfile,"Phase Six: Finalizing results and writing files\n");
 
 my %quant_2 = ();
 if($nohp) {
@@ -657,9 +665,7 @@ foreach my $f_clus (@final_clusters) {
     print BIG "$quant_4{$f_clus}\n";
 }
 close BIG;
-    
-# Provide a summary report to the user on STDERR and in the log
-log_it ($logfile,"\nSummary of Results:\n");
+
 
 summarize(\%quant_4,\$nohp,\$dicermin,\$dicermax,\$logfile);
 
@@ -734,291 +740,6 @@ OPTIONS:
 
 ";
     return $usage;
-}
-      
-sub get_clusters {
-    my($bamfile,$actual_threshold) = @_;
-    my @clusters = ();
-    my @fields = ();
-    my $last_chr = "null";
-    my $last_good_coordinate;
-    my $current_start_coordinate;
-    my $open = 0;
-    my $chr;
-    my $position;
-    my $last_position = 0;
-    my $cluster;
-    my $end;
-    my $read_length;
-    my %depth = ();
-    my $i;
-    my @occupied = ();
-    my $coordinate;
-    my @set_of_depths = ();
-    my $delta;
-    my $analysis_position;
-    my $analysis_depth;
-    
-    # Sanity check and warning / failure if threshold is too low
-    # Warn if >= 2 <= 5 mappings
-    # fail if less than 2
-    if($actual_threshold < 2) {
-	die "\nFATAL: With --mindepth set at $actual_threshold , islands will be defined by having as few as $actual_threshold reads\nThat is too low\!  Try again after increasing --mindepth\n\n";
-    } elsif ($actual_threshold <= 5) {
-	print STDERR "\n\*\*\* WARNING \*\*\*\n";
-	print STDERR "At --mindepth setting $actual_threshold, islands are being defined with as few as $actual_threshold reads \.\.\. which seems very low\nConsider aborting this run and increasing --mindepth\n";
-    }
-    
-    
-    # for a crude progress counter
-    my $nlines = 0; # number of lines
-    my $onehunk = 0; # number of 100ks
-    my $onemil = 0;
-    print STDERR "\tProgress in sub-routine \'get_clusters\': ";
-    ##
-    
-    # initialize depth hash
-    for($i = 0; $i < 100; ++$i) {
-	$depth{$i} = 0;
-    }
-    
-    #  read the samfile
-    open(SAM, "samtools view $bamfile |");
-    while (<SAM>) {
-	chomp;
-	# skip headers
-	if($_ =~ /^@/) {
-	    next;
-	}
-	# progress
-	++$nlines;
-	if($nlines >= 100000) {
-	    ++$onehunk;
-	    $nlines = 0;
-	    print STDERR "\.";
-	}
-	if($onehunk >= 10) {
-	    ++$onemil;
-	    $onehunk = 0;
-	    print STDERR " $onemil Million mappings examined\n\t";
-	}
-	##
-
-	# get fields of interest for the current line
-	@fields = split ("\t", $_);
-	$chr = $fields[2];
-	$position = $fields[3];
-	# ensure the read is mapped.  If not, go to the next line
-	if($fields[1] & 4 ) {
-	    next;
-	}
-	$read_length = parse_cigar($fields[5]);
-	
-	
-	
-	# check if you've passed into the next chromosome.  If so, process accordingly
-	if(($last_chr ne $chr) and
-	   ($last_chr ne "null")) {
-	    
-	    ## close out last chr
-	    $delta = 99;  ## ensures all possible positions at the end of the last chr are analyzed
-	    # analyze read depths at the last position up through all positions skipped before the current position	    
-	    
-	    for($i = 0; $i < $delta; ++$i) {
-		# if the delta has gone beyond the 100nt window, break the loop
-		if($i > 99) {
-		    last;
-		} else {
-		    $analysis_position = $i + $last_position;
-		    $analysis_depth = $depth{$i};
-		    if($open) {
-			# currently within a valid cluster
-			# if the current position is beyond , must close the currently open cluster and then check to see if a new one should be opened
-			if($analysis_position > ($last_good_coordinate + 1)) {
-			    # close
-			    $open = 0;
-			    $end = $last_good_coordinate;
-			    $cluster = "$last_chr" . ":" . "$current_start_coordinate" . "-" . "$end";
-			    push(@clusters, $cluster);
-			    
-			    $last_good_coordinate = '';
-			    $current_start_coordinate = '';
-			    
-			    # open new one if warranted
-			    if($analysis_depth >= $actual_threshold) { # 
-				$open = 1;
-				$current_start_coordinate = $analysis_position;
-				$last_good_coordinate = $analysis_position;
-			    }
-			} else {
-			    # or, the position under analysis is the next consecutive one.  Check depth -- if depth OK, modify the last good coordinate
-			    if($analysis_depth >= $actual_threshold) {
-				$last_good_coordinate = $analysis_position;
-			    }
-			}
-		    } else {
-			# no cluster is currently open.  Initiate a new cluster if warranted by the depth
-			if($analysis_depth >= $actual_threshold) {
-			    $open = 1;
-			    $current_start_coordinate = $analysis_position;
-			    $last_good_coordinate = $analysis_position;
-			}
-		    }
-		}
-	    }
-	    ## close cluster if one is still open
-	    if($open) {
-		$open = 0;
-		$end = $last_good_coordinate;
-		$cluster = "$last_chr" . ":" . "$current_start_coordinate" . "-" . "$end";
-		push(@clusters, $cluster);
-
-		$last_good_coordinate = '';
-		$current_start_coordinate = '';
-	    }
-	    
-	    # clear out depth hash
-	    for($i = 0; $i < 100; ++$i) {
-		$depth{$i} = 0;
-	    }
-	}
-	
-	# check if you've passed to a new left-most position on the same chr?  If so, analyze all positions that were just passed by.
-	if(($last_position != $position) and
-	   ($last_chr eq $chr)) {
-	    
-	    $delta = $position - $last_position;  # should be a positive number of 1 or more
-	    # analyze read depths at the last position up through all positions skipped before the current position	    
-	    
-	    for($i = 0; $i < $delta; ++$i) {
-		# if the delta has gone beyond the 100nt window, break the loop
-		if($i > 99) {
-		    last;
-		} else {
-		    $analysis_position = $i + $last_position;
-		    $analysis_depth = $depth{$i};
-		    if($open) {
-			# currently within a valid cluster
-			# if the current position is not the next one, must close the currently open cluster and then check to see if a new one should be opened
-			if($analysis_position > ($last_good_coordinate + 1)) {
-			    # close
-			    $open = 0;
-			    $end = $last_good_coordinate;
-			    $cluster = "$chr" . ":" . "$current_start_coordinate" . "-" . "$end";
-			    push(@clusters, $cluster);
-
-			    $last_good_coordinate = '';
-			    $current_start_coordinate = '';
-			    
-			    # open new one if warranted
-			    if($analysis_depth >= $actual_threshold) { 
-				$open = 1;
-				$current_start_coordinate = $analysis_position;
-				$last_good_coordinate = $analysis_position;
-			    }
-			} else {
-			    # or, the position under analysis is within the allowable gap distance.  Check depth -- if depth OK, modify the last good coordinate
-			    if($analysis_depth >= $actual_threshold) {
-				$last_good_coordinate = $analysis_position;
-			    }
-			}
-		    } else {
-			# no cluster is currently open.  Initiate a new cluster if warranted by the depth
-			if($analysis_depth >= $actual_threshold) {
-			    $open = 1;
-			    $current_start_coordinate = $analysis_position;
-			    $last_good_coordinate = $analysis_position;
-			}
-		    }
-		}
-	    }
-	    
-	    # move values over to reflect position
-	    # reset the array first
-	    @set_of_depths = ();
-	    for ($i = 0; $i < 100; ++$i) {
-		push(@set_of_depths,$depth{$i});
-	    }
-	    
-	    for ($i = 1; $i <= $delta; ++$i) {
-		my $junk = shift @set_of_depths;
-		$junk = '';
-		push(@set_of_depths, 0);
-	    }
-	    for($i = 0; $i < 100; ++$i) {
-		$depth{$i} = $set_of_depths[$i];
-	    }
-	}
-	
-	# Add counts correspoinding to the current mapped read, all the way through the end of the read
-	for($i = 0; $i < $read_length; ++$i) {
-	    ++$depth{$i};
-	}
-	# update last chr and last position before turning to the next line
-	$last_chr = $chr;
-	$last_position = $position;
-    }
-    
-    ## close out the end of the final chr
-    ## close out last chr
-    $delta = 99;  ## ensures all possible positions at the end of the last chr are analyzed
-    # analyze read depths at the last position up through all positions skipped before the current position	    
-    
-    for($i = 0; $i < $delta; ++$i) {
-	# if the delta has gone beyond the 100nt window, break the loop
-	if($i > 99) {
-	    last;
-	} else {
-	    $analysis_position = $i + $last_position;
-	    $analysis_depth = $depth{$i};
-	    if($open) {
-		# currently within a valid cluster
-		# if the current position is beyond the max gap length, must close the currently open cluster and then check to see if a new one should be opened
-		if($analysis_position > ($last_good_coordinate + 1)) {
-		    # close
-		    $open = 0;
-		    $end = $last_good_coordinate;
-		    $cluster = "$last_chr" . ":" . "$current_start_coordinate" . "-" . "$end";
-		    push(@clusters, $cluster);
-
-
-		    $last_good_coordinate = '';
-		    $current_start_coordinate = '';
-		    
-		    # open new one if warranted
-		    if($analysis_depth >= $actual_threshold) { # 
-			$open = 1;
-			$current_start_coordinate = $analysis_position;
-			$last_good_coordinate = $analysis_position;
-		    }
-		} else {
-		    # or, the position under analysis is within the allowable gap distance.  Check depth -- if depth OK, modify the last good coordinate
-		    if($analysis_depth >= $actual_threshold) {
-			$last_good_coordinate = $analysis_position;
-		    }
-		}
-	    } else {
-		# no cluster is currently open.  Initiate a new cluster if warranted by the depth
-		if($analysis_depth >= $actual_threshold) {
-		    $open = 1;
-		    $current_start_coordinate = $analysis_position;
-		    $last_good_coordinate = $analysis_position;
-		}
-	    }
-	}
-    }
-    ## close cluster if one is still open
-    if($open) {
-	$open = 0;
-	$end = $last_good_coordinate;
-	$cluster = "$last_chr" . ":" . "$current_start_coordinate" . "-" . "$end";
-	push(@clusters, $cluster);
-
-	$last_good_coordinate = '';
-	$current_start_coordinate = '';
-    }
-    print STDERR " Done\n";
-    return @clusters;
 }
 
 sub merge_clusters {
@@ -5857,7 +5578,7 @@ sub summarize {
     }
     
     # report
-    log_it($$logfile,"\nSummary\n");
+    log_it($$logfile,"\nSummary\n\n");
 
     if($$nohp) {
 	log_it($$logfile,"DicerCall\tLoci\tAbundance\n");
@@ -6186,6 +5907,91 @@ sub requant {
     }
 }
 
+sub get_islands_mpileup {
+    my($bamfile,$mindepth,$expected_faidx) = @_;
+    # go chr by chr, using the .fai index file to get the chr names
+    my @chrs = ();
+    open(FAI, "$expected_faidx");
+    my @fields = ();
+    
+    my $genome_sum = 0;
+    my %fai_hash = ();
+    while (<FAI>) {
+	chomp;
+	@fields = split ("\t", $_);
+	push(@chrs, $fields[0]);
+	$fai_hash{$fields[0]} = $fields[1];
+	$genome_sum += $fields[1];
+    }
+    close FAI;
+    
+    my @islands = ();
+    
+    my $last_start;
+    my $last_ok;
+    
+    my $island;
+    
+    my $mindpad;
+    
+    ## A progress bar based on the % of genome (in nts) analyzed, updated only at the completion of chromosomes
+    print STDERR "\n\tProgress in sub-routine get_islands_mpileup \(dots = 5 percent\; updates only at completion of a chromosome\): ";
+    my $dots_printed = 0;
+    my $frac_done = 0;
+    my $needed_dots = 0;
+    foreach my $chr (@chrs) {
+	
+	$last_start = -1;
+	$last_ok = -1;
+	if($mindepth > 8000) {
+	    $mindpad = 100 + $mindepth;
+	    open(PILE, "samtools mpileup -BQ0 -r $chr -d $mindpad $bamfile 2> mpileup_junk |");
+	} else {
+	    open(PILE, "samtools mpileup -BQ0 -r $chr $bamfile 2> mpileup_junk |");
+	}
+	while (<PILE>) {
+	    chomp;
+	    @fields = split ("\t", $_);
+	    if($fields[3] >= $mindepth) {
+		if($last_ok == -1) {
+		    ## first start on the chr
+		    $last_start = $fields[1];
+		    $last_ok = $fields[1];
+		} elsif ($fields[1] == $last_ok + 1) {
+		    ## continuing to extend an island
+		    $last_ok = $fields[1];
+		} else {
+		    ## close the previous island, open a new one
+		    $island = "$chr" . ":" . "$last_start" . "-" . "$last_ok";
+		    push(@islands,$island);
+		    $last_start = $fields[1];
+		    $last_ok = $fields[1];
+		}
+	    }
+	}
+	close PILE;
+	## close the last one, if there is one
+	unless($last_ok == -1) {
+	    $island = "$chr" . ":" . "$last_start" . "-" . "$last_ok";
+	    push(@islands,$island);
+	}
+	
+	## update progress bar
+	$frac_done += ($fai_hash{$chr} / $genome_sum);
+	$needed_dots = int ($frac_done / 0.05);
+	until($dots_printed == $needed_dots) {
+	    print STDERR"\.";
+	    ++$dots_printed;
+	}
+	
+    }
+    system "rm -f mpileup_junk";
+    print STDERR " Done\n";
+    return @islands;
+    
+}
+
+
 __END__	
 =head1 LICENSE
 
@@ -6218,7 +6024,7 @@ Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of sma
 
 =head1 VERSION
 
-0.4.4 :: Released May 14, 2013
+0.5.0 :: Released May 15, 2013
 
 =head1 AUTHOR
 
@@ -6529,10 +6335,4 @@ Phasing analysis proceeds as follows:
 Note: P-values are not corrected for multiple-testing.  Consider adjustment of p-values to control for multiple testing (e.g. Bonferroni, Benjamini-Hochberg FDR, etc) if you want a defensible set of phased loci from a genome-wide analysis.
 
 =cut
-
-
-
-
-
-
 
