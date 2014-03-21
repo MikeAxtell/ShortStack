@@ -6,7 +6,7 @@ use strict;
 
 ############### MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.1.1";
+my $version = "0.1.2";
 #####
 
 ##### get options and validate them
@@ -131,15 +131,16 @@ if($count) {
     }
 }
 
-# check the --phasesize option to see if it is a number between --dicermin and --dicermax, OR 'all'
+# check the --phasesize option to see if it is a number between --dicermin and --dicermax, OR 'all', OR 'none'
 if($phasesize =~ /^\d+$/) {
     unless(($phasesize >= $dicermin) and
 	   ($phasesize <= $dicermax)) {
 	die "FATAL: Option --phasesize must be an integer within the --dicermin to --dicermax size range OR \'all\'\n\n$usage\n";
     }
 } else {
-    unless($phasesize eq "all") {
-	die "FATAL: Option --phasesize must be an integer within the --dicermin to --dicermax size range OR \'all\'\n\n$usage\n";
+    unless(($phasesize eq "all") or
+	   ($phasesize eq "none")) {
+	die "FATAL: Option --phasesize must be an integer within the --dicermin to --dicermax size range OR \'all\' OR \'none\'\n\n$usage\n";
     }
 }
 
@@ -451,7 +452,7 @@ if($nohp) {
 # output the master file
 my $big_table = "$outdir" . "\/" . "Results\.txt";
 open(BIG, ">$big_table");
-print BIG "\#Locus\tName\tHP\tStrand\tFrac_Watson\tTotal\tUniques\tRep-total\tDicerCall\tPhasing\tShort\tLong";
+print BIG "\#Locus\tName\tHP\tStrand\tFrac_Watson\tTotal\tUniques\tRep-total\tDicerCall\tPhaseOffset\tPhase_pval\tPhase_FDR_Call\tShort\tLong";
 for(my $d = $dicermin; $d <= $dicermax; ++$d) {
     print BIG "\t$d";
 } 
@@ -664,7 +665,7 @@ OPTIONS:
 --minstrandfrac [float] : minimum fraction of mappings to assign a polarity to a non-hairpin cluster\; default: 0.8
 --mindicerfrac [float] : minimum fraction of mappings within the dicer size range to annotate a locus as Dicer-derived\; default: 0.85
 --count [string] : File containing a-priori defined clusters\.  Presence of --count triggers \"count\" mode, and de-novo cluster discovery is skipped\. Default: off
---phasesize [string or integer] : Cluster type to examine for significant phasing\.  Must be within the --dicermin to --dicermax range, or \'all\' to look at all dicer clusters\. Default: 21
+--phasesize [string or integer] : Cluster type to examine for significant phasing\.  Must be within the --dicermin to --dicermax range, or \'all\' to look at all dicer clusters, or \'none\' to skip all phasing analyses\. Default: 21
 --phaseFDR [float] : Benjamini-Hochberg false discovery rate for calling significantly phased clusters\.  Default: 0.05
 --nohp : If --nohp appears on the command line, program executes in \"no_hp\" mode, omitting hairpin and MIRNA inferences\.  Default: off
 --raw : If --raw appears on the command line, program reports quantifications in raw mappings, instead of normalizing for library size to mappings per million mapped\. Default: Off
@@ -3309,7 +3310,9 @@ sub quant {
 		}
 		# shorten the proportion to three decimal places
 		$max_d_proportion = sprintf("%.3f",$max_d_proportion);
-		$dicer_call = "$max_d_size" . ":" . "$max_d_proportion";
+		## as of version 0.1.2, dicer_call no longer has colon-delimted information, and the proportion is omitted
+		#$dicer_call = "$max_d_size" . ":" . "$max_d_proportion"; ## OLD
+		$dicer_call = $max_d_size;
 	    } else {
 		# Not a Dicer locus
 		$dicer_call = "N";
@@ -3320,20 +3323,21 @@ sub quant {
 	}
 	
 	# see whether phasing should be examined
-	if($$phasesize eq "all") {
-	    if(($dicer_call ne "N") and
-	       (($loc_stop - $loc_start + 1) > (4 * $max_d_size))) {
-
+	unless(($$phasesize =~ /^none$/) or
+	       ($dicer_call =~ /^N$/)) {
+	    if($$phasesize =~  /^all$/) {
+		if (($loc_stop - $loc_start + 1) > (4 * $max_d_size)) {
+		    ($p_val,$offset) = eval_phasing(\%phase_hash,\$dicer_call,\$loc_start,\$loc_stop);
+		    $phase_p_values{$locus} = $p_val;
+		    $phase_offsets{$locus} = $offset;
+		}
+	    } elsif (($dicer_call == $$phasesize) and
+		     (($loc_stop - $loc_start + 1) > (4 * $$phasesize))) {
+		
 		($p_val,$offset) = eval_phasing(\%phase_hash,\$dicer_call,\$loc_start,\$loc_stop);
 		$phase_p_values{$locus} = $p_val;
 		$phase_offsets{$locus} = $offset;
 	    }
-	} elsif (($dicer_call =~ /^$$phasesize:/) and
-		 (($loc_stop - $loc_start + 1) > (4 * $$phasesize))) {
-	    
-	    ($p_val,$offset) = eval_phasing(\%phase_hash,\$dicer_call,\$loc_start,\$loc_stop);
-	    $phase_p_values{$locus} = $p_val;
-	    $phase_offsets{$locus} = $offset;
 	}
 	
         # begin entry
@@ -3368,19 +3372,19 @@ sub quant {
 	$repnorm_norm = sprintf("%.4f",$repnorm);
 	$output{$locus} .= "\t$repnorm_norm";
 	
-	# [7] DICER ... either 'N' or a number within the dicer_min to dicer_max range, followed by a fraction.  
+	# [7] DICER ... either 'N' or a number within the dicer_min to dicer_max range
 	# was calculated above
 	$output{$locus} .= "\t$dicer_call";
 	
-	### [8] PHASING -- added later
+	### [8], [9], and [10] PHASING -- added later
 		
-	# [9] SHORT
+	# [11] SHORT
 	$output{$locus} .= "\t$internal{'short'}";
 	
-	# [10] LONG
+	# [12] LONG
 	$output{$locus} .= "\t$internal{'long'}";
 	
-	# [11] through whenenver .. Dicer 
+	# [13] through whenenver .. Dicer 
 	for($i = $$dicer_min; $i <= $$dicer_max; ++$i) {
 	    $output{$locus} .= "\t$internal{$i}";
 	}
@@ -3426,7 +3430,7 @@ sub quant {
 	#print STDERR "$i\t$locus\tBH:$bh_vals[$i]\t$column_entry\n";
 	##
     }
-    
+
     my @old = ();
     my $old_string;
     my $new_string;
@@ -3451,9 +3455,11 @@ sub quant {
 	$new_string .= "\t";
 	
 	if(exists($phase_results{$locus})) {
-	    $new_string .= $phase_results{$locus};
+	    #$new_string .= $phase_results{$locus};
+	    my @pres = split (":", $phase_results{$locus});
+	    $new_string .= "$pres[0]\t$pres[1]\t$pres[2]";
 	} else {
-	    $new_string .= "ND";
+	    $new_string .= "ND\tND\tND";
 	}
 	
 	for($i = 8; $i < (scalar @old); ++$i) {
@@ -3496,11 +3502,12 @@ sub eval_phasing {
     my $sum = 0;
     
     # determine the phasing size to examine for this locus, which is $i
-    if($$dcall =~ /^(\d+):/) {
-	$i = $1;
-    } else {
-	die "FATAL in sub-routine \'eval_phasing\'  could not parse dicer call $$dcall\n";
-    }
+#    if($$dcall =~ /^(\d+):/) {
+#	$i = $1;
+#    } else {
+#	die "FATAL in sub-routine \'eval_phasing\'  could not parse dicer call $$dcall\n";
+#    }
+    $i = $$dcall;
     
     # If the locus is larger than 20 * $i, concatenate the phase hash information beyond the first 20 cycles
     my $exam_stop;
@@ -3670,7 +3677,7 @@ sub convert_2_mpmm {
     while(($locus,$input_string) = each %$in_hash) {
 	@new_fields = ();  ## reset each time though
 	@old_fields = split ("\t", $input_string);
-	# 0: locus, 1: name, 2: HP, 3: strand, 4: frac_wat, 5: total, 6: uniques 7: rep-total, 8: dicercall, 9: phasing, 10: short, 11: long, 12 to end, dicer
+	# 0: locus, 1: name, 2: HP, 3: strand, 4: frac_wat, 5: total, 6: uniques 7: rep-total, 8: dicercall, 9: phasing_offset, 10: phase p-val, 11; phase_FDRcall,  12: short, 13: long, 14 to end, dicer
 	for($i = 0; $i <= 4; ++$i) {
 	    push(@new_fields,$old_fields[$i]);
 	}
@@ -3683,11 +3690,13 @@ sub convert_2_mpmm {
 	# dicer call and phasing
 	push(@new_fields,$old_fields[8]);
 	push(@new_fields,$old_fields[9]);
+	push(@new_fields,$old_fields[10]);
+	push(@new_fields,$old_fields[11]);
 	# short and long
-	push(@new_fields, sprintf("%.3f",(($old_fields[10] / $$reads) * 1000000)));
-	push(@new_fields, sprintf("%.3f",(($old_fields[11] / $$reads) * 1000000)));
+	push(@new_fields, sprintf("%.3f",(($old_fields[12] / $$reads) * 1000000)));
+	push(@new_fields, sprintf("%.3f",(($old_fields[13] / $$reads) * 1000000)));
 	# the rest
-	for($i = 12; $i < (scalar @old_fields); ++$i) {
+	for($i = 14; $i < (scalar @old_fields); ++$i) {
 	    push(@new_fields, sprintf("%.3f",(($old_fields[$i] / $$reads) * 1000000)));
 	}
 	my $result = join("\t",@new_fields);
@@ -3778,7 +3787,7 @@ sub write_bed_nohp {
 	# Determine the dominant size of the cluster from $fcfields[8] and write correct color
 	if($fcfields[8] eq "N") {
 	    print BED "$colors{'N'}\t";
-	} elsif ($fcfields[8] =~ /^(\d+):/) {
+	} elsif ($fcfields[8] =~ /^(\d+)$/) {
 	    print BED "$colors{$1}\t";
 	} else {
 	    die "FATAL in sub-routine \"write_bed_nohp\" : Could not find the cluster size from entry $fcfields[8]\n";
@@ -3886,7 +3895,7 @@ sub write_bed_with_hp {
 	# Determine the dominant size of the cluster from $fcfields[8] and write correct color
 	if($fcfields[8] eq "N") {
 	    print BED "$colors{'N'}\t";
-	} elsif ($fcfields[8] =~ /^(\d+):/) {
+	} elsif ($fcfields[8] =~ /^(\d+)$/) {
 	    print BED "$colors{$1}\t";
 	} else {
 	    die "FATAL in sub-routine \"write_bed_nohp\" : Could not find the cluster size from entry $fcfields[8]\n";
@@ -3960,7 +3969,7 @@ sub final_summary_nohp {
 	if($fields[8] eq "N") {
 	    ++$hash{$fields[8]};
 	} else {
-	    if($fields[8] =~ /^(\d+):/) {
+	    if($fields[8] =~ /^(\d+)$/) {
 		$size = $1;
 	    } else {
 		die "FATAL in sub-routine final_summary_hp : failed to parse dicer size category of $fields[8]\n";
@@ -3969,7 +3978,7 @@ sub final_summary_nohp {
 	}
 	
 	# phased?
-	if($fields[9] =~ /OK/) {
+	if($fields[11] =~ /OK/) {
 	    ++$hash{'phased'};
 	}
     }
@@ -3989,7 +3998,7 @@ sub final_summary {
 	if($fields[8] eq "N") {
 	    $dcall = $fields[8];
 	} else {
-	    if($fields[8] =~ /^(\d+):/) {
+	    if($fields[8] =~ /^(\d+)$/) {
 		$dcall = $1;
 	    } else {
 		die "FATAL in sub-routine final_summary_hp : failed to parse dicer size category of $fields[8]\n";
@@ -4007,7 +4016,7 @@ sub final_summary {
 	++$hash{$dcall}{$hp_call};
 	
 	# phased?
-	if($fields[9] =~ /OK/) {
+	if($fields[11] =~ /OK/) {
 	    ++$hash{'phased'};
 	}
     }
@@ -4074,7 +4083,9 @@ A manuscript describing the ShortStack package will be submitted sometime in the
 
 =head1 VERSIONS
 
-0.1.1 : This version. May 4, 2012.  Added helper script "miR_homologs.pl" to package.  No change to ShortStack.pl code itself except version change.
+0.1.2 : May 17, 2012.  Changes to simplify downstream analysis of the Results.txt file, and to phasing analysis.  Details: A) changed format of 'DicerCall' column in result to remove the colon-delimted fractions .. now it simply reports size or 'N'  B) Changed format of phasing analysis results to split the phase offset, p-value, and false-discovery rate call into three separate columns.  C) added option of --phasesize none to suppress analysis of phasing at all clusters.
+
+0.1.1 : May 4, 2012.  Added helper script "miR_homologs.pl" to package.  No change to ShortStack.pl code itself except version change.
 
 0.1.0 : Initial release. April 29, 2012
 
@@ -4153,7 +4164,7 @@ Shortstack.pl [options] [in.bam] [genome.fasta]
 
 --mindicerfrac [float] : Minimum fraction of mappings within Dicer size range to annotate a locus as Dicer-derived.  Default = 0.85.  Allowed values between 0 and 1.
 
---phasesize [integer] : Examine phasing only for clusters dominated by the indicated size range.  Size must be within the bounds described by --dicermin and --dicermax.  Set to 'all' to examine p-values of each locus within the Dicer range, in its dominant size.  Default = 21.  Allowed values between --dicermin and --dicermax.
+--phasesize [integer] : Examine phasing only for clusters dominated by the indicated size range.  Size must be within the bounds described by --dicermin and --dicermax.  Set to 'all' to examine p-values of each locus within the Dicer range, in its dominant size.  Set to 'none' to suppress all phasing analysis.  Default = 21.  Allowed values between --dicermin and --dicermax.
 
 --phaseFDR [float] : False Discovery Rate for phased cluster analysis.  FDR of p-values set to this value for Benjamini-Hochberg method.  See below for details.  Default = 0.05.  Allowed values greater than 0 up to 1.
 
@@ -4231,15 +4242,19 @@ Column 7: Uniquely Mapped Total : Total mappings derived from uniquely mapped re
 
 Column 8: Rep-Total : Repeat normalized total mappings.  Instead of each mapping counting as "1", each mapping instead counts as "1/NH", where NH is the total number of mappings that read had, according to the NH:i: tag.
 
-Column 9: Dicer Call : If "N", the cluster is not dicer-derived, per options --dicermin, --dicermax, and --mindicerfrac.  If it is in the format "21:0.786", then it IS being annotated as a Dicer-derived cluster, in which 21mers were the most numerous (in terms of total mappings) species, comprising 78.6% of all mappings.
+Column 9: DicerCall : If "N", the cluster was not annotated as dicer-derived, per options --dicermin, --dicermax, and --mindicerfrac.  Otherwise this is a number, within the --dicermin to --dicermax size range, which indicates the most abundant small RNA size within the mappings at that cluster.
 
-Column 10: Phasing : If "ND", phasing p-value was not calculated for this cluster.  Otherwise, this will be a colon-delimited entry in the format [offset]:[p-value]:[FDR-call].  The offset is the one-based genomic position with which the cluster appears to be "in-phase" (based on the 5' nt of a sense-mapped small RNA).  Phasing is always in increments identicial to the Dicer size call in column 9 (e.g., for the "21:0.786" example, 21nt phasing was tested).  The p-value is derived from a modified hypergeometric distribution, as described below.  The FDR call will begin with either "OK" or "NS" (meaning 'not significant') and then list the alpha used in the Benjamini-Hochberg procedure.
+Column 10: PhaseOffset : If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the offset is the one-based genomic position with which the cluster appears to be "in-phase" (based on the 5' nt of a sense-mapped small RNA).  Phasing is always in increments identicial to the Dicer size call in column 9.
 
-Column 11: Short : The total mappings from reads with lengths less than --dicermin, either in raw reads (--raw mode), or mappings per million mapped.
+Column 11: Phase_pval :  If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the p-value is derived from a modified hypergeometric distribution, as described below. 
 
-Column 12: Long : The total mappings from reads with lengths more than --dicermax, either in raw reads (--raw mode), or mappings per million mapped.
+Column 12: Phase_FDR_Call : If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the FDR call will begin with either "OK" or "NS" (meaning 'not significant') and then list the alpha used in the Benjamini-Hochberg procedure.  
 
-Columns 13 - the end : The total mappings from reads with the indicated lengths.  These are the sizes within the Dicer range.
+Column 13: Short : The total mappings from reads with lengths less than --dicermin, either in raw reads (--raw mode), or mappings per million mapped.
+
+Column 14: Long : The total mappings from reads with lengths more than --dicermax, either in raw reads (--raw mode), or mappings per million mapped.
+
+Columns 15 - the end : The total mappings from reads with the indicated lengths.  These are the sizes within the Dicer range.
 
 =head2 Log.txt
 
@@ -4369,9 +4384,9 @@ ShortStack's basic method to identify phased small RNAs involves calculation of 
 
 Phasing analysis proceeds as follows:
 
-1. Clusters to be analyzed must be annotated as Dicer-derived and be dominated by the size class indicated by option --phasesize.  If --phasesize is set to 'all', all clusters within the Dicer size range will be analyzed.
+1. Clusters to be analyzed must be annotated as Dicer-derived and be dominated by the size class indicated by option --phasesize.  If --phasesize is set to 'all', all clusters within the Dicer size range will be analyzed.  Conversely, phasing analysis is suppressed for all clusters if option --phasesize is set to 'none'.
 
-2. Cluster must also have a length of more than 4 x the phase size in question .. so, more than 84nts under the default --phasesize 21 setting.  Clusters that are too short are not examined.
+2. Cluster must also have a length of more than 4 x the phase size in question .. so, more than 84nts under the default --phasesize 21 setting.  Clusters that are too short are never examined.
 
 3. Phasing is only analyzed with respect to the dominant size of the cluster.  So, for a cluster dominated by 21mers, only phasing in 21nt increments will be examined.
 
@@ -4383,7 +4398,7 @@ Phasing analysis proceeds as follows:
 
 7.  The p-value within the chosen register is then calculated using the cumulative distribution function (CDF) for the hypergeometric distribution.  Sorry, hard to show equations in plain-text -- see Wikipedia's Hypergeometric distribution entry, under CDF. N (the population size) is the number of nt positions in the locus. m (the number of success states in the population) is the number of possible positions in the phasing register of interest, INLCUDING POSITIONS +1 AND -1 RELATIVE TO THE REGISTER OF INTEREST.  This means phasing is "fuzzy", which is often seen in the known examples of this phenomenon.  n (the number of draws) is defined as the total number of positions with ABOVE AVERAGE abundance.  k (the number of successes) is the number of phased positions (inlduing the fuzzy +1 and -1 positions) with ABOVE AVERAGE abundance.  The p-value is then calculated per the hypergeometric distribution CDF.  NOTE: The restriction of n and k to only above-average abundance works well to eliminate low-level noise and focus on the dominant small RNA pattern within the locus.
 
-8. After all p-values have been caluclated, ShortStack uses the Benjamini-Hochberg method to control for the false discovery rate at a user-specified alpha (default is 0.05).  Significant clusters are noted 'OK' and non-significant clusters are noted 'NS'; in both cases the p-values are reported.   These data appear in column 10 of the Results.txt file.
+8. After all p-values have been caluclated, ShortStack uses the Benjamini-Hochberg method to control for the false discovery rate at a user-specified alpha (default is 0.05).  Significant clusters are noted 'OK' and non-significant clusters are noted 'NS'; in both cases the p-values are reported.   Results of phasing analysis are in columns 10-12 of the Results.txt file.
 
 
 

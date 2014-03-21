@@ -13,9 +13,16 @@ CITATION
     an update!
 
 VERSIONS
-    0.1.1 : This version. May 4, 2012. Added helper script "miR_homologs.pl"
-    to package. No change to ShortStack.pl code itself except version
-    change.
+    0.1.2 : May 17, 2012. Changes to simplify downstream analysis of the
+    Results.txt file, and to phasing analysis. Details: A) changed format of
+    'DicerCall' column in result to remove the colon-delimted fractions ..
+    now it simply reports size or 'N' B) Changed format of phasing analysis
+    results to split the phase offset, p-value, and false-discovery rate
+    call into three separate columns. C) added option of --phasesize none to
+    suppress analysis of phasing at all clusters.
+
+    0.1.1 : May 4, 2012. Added helper script "miR_homologs.pl" to package.
+    No change to ShortStack.pl code itself except version change.
 
     0.1.0 : Initial release. April 29, 2012
 
@@ -135,8 +142,9 @@ OPTIONS
     --phasesize [integer] : Examine phasing only for clusters dominated by
     the indicated size range. Size must be within the bounds described by
     --dicermin and --dicermax. Set to 'all' to examine p-values of each
-    locus within the Dicer range, in its dominant size. Default = 21.
-    Allowed values between --dicermin and --dicermax.
+    locus within the Dicer range, in its dominant size. Set to 'none' to
+    suppress all phasing analysis. Default = 21. Allowed values between
+    --dicermin and --dicermax.
 
     --phaseFDR [float] : False Discovery Rate for phased cluster analysis.
     FDR of p-values set to this value for Benjamini-Hochberg method. See
@@ -325,32 +333,36 @@ OUTPUT
     is the total number of mappings that read had, according to the NH:i:
     tag.
 
-    Column 9: Dicer Call : If "N", the cluster is not dicer-derived, per
-    options --dicermin, --dicermax, and --mindicerfrac. If it is in the
-    format "21:0.786", then it IS being annotated as a Dicer-derived
-    cluster, in which 21mers were the most numerous (in terms of total
-    mappings) species, comprising 78.6% of all mappings.
+    Column 9: DicerCall : If "N", the cluster was not annotated as
+    dicer-derived, per options --dicermin, --dicermax, and --mindicerfrac.
+    Otherwise this is a number, within the --dicermin to --dicermax size
+    range, which indicates the most abundant small RNA size within the
+    mappings at that cluster.
 
-    Column 10: Phasing : If "ND", phasing p-value was not calculated for
-    this cluster. Otherwise, this will be a colon-delimited entry in the
-    format [offset]:[p-value]:[FDR-call]. The offset is the one-based
-    genomic position with which the cluster appears to be "in-phase" (based
-    on the 5' nt of a sense-mapped small RNA). Phasing is always in
-    increments identicial to the Dicer size call in column 9 (e.g., for the
-    "21:0.786" example, 21nt phasing was tested). The p-value is derived
-    from a modified hypergeometric distribution, as described below. The FDR
-    call will begin with either "OK" or "NS" (meaning 'not significant') and
-    then list the alpha used in the Benjamini-Hochberg procedure.
+    Column 10: PhaseOffset : If "ND", phasing p-value was not calculated for
+    this cluster. Otherwise, the offset is the one-based genomic position
+    with which the cluster appears to be "in-phase" (based on the 5' nt of a
+    sense-mapped small RNA). Phasing is always in increments identicial to
+    the Dicer size call in column 9.
 
-    Column 11: Short : The total mappings from reads with lengths less than
+    Column 11: Phase_pval : If "ND", phasing p-value was not calculated for
+    this cluster. Otherwise, the p-value is derived from a modified
+    hypergeometric distribution, as described below.
+
+    Column 12: Phase_FDR_Call : If "ND", phasing p-value was not calculated
+    for this cluster. Otherwise, the FDR call will begin with either "OK" or
+    "NS" (meaning 'not significant') and then list the alpha used in the
+    Benjamini-Hochberg procedure.
+
+    Column 13: Short : The total mappings from reads with lengths less than
     --dicermin, either in raw reads (--raw mode), or mappings per million
     mapped.
 
-    Column 12: Long : The total mappings from reads with lengths more than
+    Column 14: Long : The total mappings from reads with lengths more than
     --dicermax, either in raw reads (--raw mode), or mappings per million
     mapped.
 
-    Columns 13 - the end : The total mappings from reads with the indicated
+    Columns 15 - the end : The total mappings from reads with the indicated
     lengths. These are the sizes within the Dicer range.
 
   Log.txt
@@ -655,11 +667,12 @@ KEY METHODS
     1. Clusters to be analyzed must be annotated as Dicer-derived and be
     dominated by the size class indicated by option --phasesize. If
     --phasesize is set to 'all', all clusters within the Dicer size range
-    will be analyzed.
+    will be analyzed. Conversely, phasing analysis is suppressed for all
+    clusters if option --phasesize is set to 'none'.
 
     2. Cluster must also have a length of more than 4 x the phase size in
     question .. so, more than 84nts under the default --phasesize 21
-    setting. Clusters that are too short are not examined.
+    setting. Clusters that are too short are never examined.
 
     3. Phasing is only analyzed with respect to the dominant size of the
     cluster. So, for a cluster dominated by 21mers, only phasing in 21nt
@@ -710,6 +723,6 @@ KEY METHODS
     Benjamini-Hochberg method to control for the false discovery rate at a
     user-specified alpha (default is 0.05). Significant clusters are noted
     'OK' and non-significant clusters are noted 'NS'; in both cases the
-    p-values are reported. These data appear in column 10 of the Results.txt
-    file.
+    p-values are reported. Results of phasing analysis are in columns 10-12
+    of the Results.txt file.
 
