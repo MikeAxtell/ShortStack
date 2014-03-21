@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.4.3";
+my $version = "0.4.4";
 
 
 ##### get options and validate them
@@ -2397,7 +2397,10 @@ sub get_final_clusters {
     my $orig;
     my @output = ();
     my $chr;
-
+    
+    ## new in 0.4.4
+    my @pre_output = ();
+    
     my @en_fields = ();
     my @hp_coords = ();
     my $start;
@@ -2429,7 +2432,7 @@ sub get_final_clusters {
 	    
 	    # add to array, after checking failsafe
 	    unless(exists($failsafe{$new_hp_cluster})) {
-		push(@output,$new_hp_cluster);
+		push(@pre_output,$new_hp_cluster);
 	    }
 	    $failsafe{$new_hp_cluster} = 1;
 	    
@@ -2442,11 +2445,115 @@ sub get_final_clusters {
 	    
 	} else {
 	    unless(exists($failsafe{$orig})) {
-		push(@output,$orig);
+		push(@pre_output,$orig);
 	    }
 	    $failsafe{$orig} = 1;
 	}
     }
+    
+    ## new in 0.4.4 .. merge overlapping clusters
+    my $last_chr = "NULL";
+    my $last_end;
+    my $last_start;
+    my $pre_chr;
+    my $pre_end;
+    my $pre_start;
+    my $last_locus;
+    my $size_last;
+    my $size_pre;
+    foreach my $pre_out_locus (@pre_output) {
+	if($pre_out_locus =~ /(\S+):(\d+)-(\d+)/) {
+	    $pre_chr = $1;
+	    $pre_end = $3;
+	    $pre_start = $2;
+	    
+	    if($last_chr eq "NULL") {
+		## first time through, no comparison to make
+		$last_locus = $pre_out_locus;
+		$last_chr = $pre_chr;
+		$last_start = $pre_start;
+		$last_end = $pre_end;
+		
+	    } elsif (($last_chr ne $pre_chr) or
+	       ($pre_start > $last_end) or
+	       ($last_start > $pre_end)) {
+		
+		## no overlap, add the last one to the output
+		push(@output, $last_locus);
+		
+		## reset
+		$last_locus = $pre_out_locus;
+		$last_chr = $pre_chr;
+		$last_start = $pre_start;
+		$last_end = $pre_end;
+	    } else {
+		## there is overlap
+		## if only one of the two is a HP, keep it.
+		## if both, or none,  are HP, keep the longer one
+		if((exists($$input_hp_hash{$last_locus})) and
+		   (exists($$input_hp_hash{$pre_out_locus}))) {
+		    $size_last = $last_end - $last_start +1;
+		    $size_pre = $pre_end - $pre_start + 1;
+		    
+		    if($size_last < $size_pre) {
+			## deleted = $last_locus;
+			delete $$input_hp_hash{$last_locus};
+			
+			## judgement suspended on the current one, current gets set as last
+			$last_locus = $pre_out_locus;
+			$last_chr = $pre_chr;
+			$last_start = $pre_start;
+			$last_end = $pre_end;
+			
+		    } else {
+			## deleted = $pre_out_locus;
+			delete $$input_hp_hash{$pre_out_locus};
+			
+			## judgement still suspend on the last one, which remains the last one, so no resetting required here
+		    }
+		    
+		} elsif (exists($$input_hp_hash{$last_locus})) {
+		    ## deleted = $pre_out_locus;
+			## judgement still suspend on the last one, which remains the last one, so no resetting required here
+		    
+		    
+		} elsif (exists($$input_hp_hash{$pre_out_locus})) {
+		    ## deleted = $last_locus;
+		    
+		    ### simply store the current one as last in prep for next time through the loop
+			$last_locus = $pre_out_locus;
+			$last_chr = $pre_chr;
+			$last_start = $pre_start;
+			$last_end = $pre_end;
+		    
+		} else {
+		    $size_last = $last_end - $last_start +1;
+		    $size_pre = $pre_end - $pre_start + 1;
+		    
+		    if($size_last < $size_pre) {
+			## deleted = $last_locus;
+			## judgement suspended on the current one, current gets set as last
+			$last_locus = $pre_out_locus;
+			$last_chr = $pre_chr;
+			$last_start = $pre_start;
+			$last_end = $pre_end;
+			
+			
+		    } else {
+			## deleted = $pre_out_locus;
+			
+			## judgement still suspend on the last one, which remains the last one, so no resetting required here
+
+		    }
+		}
+	    }
+	}
+    }
+    ## don't forget the last one
+    push(@output, $last_locus);
+    
+    ## end new part from 0.4.4
+    
     return @output;
 }
 
@@ -6111,7 +6218,7 @@ Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of sma
 
 =head1 VERSION
 
-0.4.3 :: Released April 24, 2013
+0.4.4 :: Released May 14, 2013
 
 =head1 AUTHOR
 
@@ -6422,6 +6529,9 @@ Phasing analysis proceeds as follows:
 Note: P-values are not corrected for multiple-testing.  Consider adjustment of p-values to control for multiple testing (e.g. Bonferroni, Benjamini-Hochberg FDR, etc) if you want a defensible set of phased loci from a genome-wide analysis.
 
 =cut
+
+
+
 
 
 
