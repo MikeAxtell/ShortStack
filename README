@@ -1,3 +1,21 @@
+LICENSE
+    ShortStack.pl
+
+    Copyright (C) 2012 Michael J. Axtell
+
+    This program is free software: you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by the
+    Free Software Foundation, either version 3 of the License, or (at your
+    option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+    Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with this program. If not, see <http://www.gnu.org/licenses/>.
+
 SYNOPSIS
     Annotation and quantification of small RNA genes based upon
     reference-aligned small RNA sequences
@@ -13,7 +31,7 @@ CITATION
     please check Pubmed before citing!
 
 VERSION
-    0.3.0 :: Released November 20, 2012
+    0.3.1 :: Released December 5, 2012
 
 AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
@@ -409,8 +427,7 @@ OUTPUT
     To import this into R, here's a tip to deal with the first line, which
     has the headers but begins with a "#" character.
 
-    >results <- read.table("Results.txt", head=TRUE, sep="\t",
-    comment.char="")
+        >results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
 
     Column 1: Locus : The genome-browser-friendly coordinates of the
     clusters. Coordinates are one-based, inclusive (e.g. Chr1:1-100 refers
@@ -592,21 +609,22 @@ KEY METHODS
     will often be 20-24nts in length, corresponding to a pile of a single
     small RNA species.
 
-    2. The initial islands are then extended on both sides by the distance
-    specified by option --pad. Islands that overlap after extension are
-    merged. After all extensions and resultant mergers are performed, the
-    final result is the initial clusters. If the run is performed in --nohp
-    mode, these are the final clusters. If hairpins and MIRNAs are being
-    examined, some of the clusters may be adjusted in position to fully
-    capture the putative hairpin(s) (see below).
+    2. The initial islands are then temporarily extended on both sides by
+    the distance specified by option --pad. Islands that overlap after
+    extension are merged. The "dangling pads" at the ends of the merged
+    clusters are then removed. After all extensions, resultant mergers, and
+    end trimmings are performed, the final result is the initial clusters.
+    If the run is performed in --nohp mode, these are the final clusters. If
+    hairpins and MIRNAs are being examined, some of the clusters may be
+    adjusted in position to fully capture the putative hairpin(s) (see
+    below).
 
   Hairpin and MIRNA analysis
 
     1. The genomic window to be subject to RNA folding is first determined.
-    If the unpadded locus size (unpadded locus size is defined as the locus
-    size - ( 2 * --pad)) is > --maxhpsep, no RNA folding will take place at
-    the locus. Otherwise, a window with length of --maxhpsep is centered on
-    the locus to determine the nucleotides to fold
+    If the locus size is > --maxhpsep, no RNA folding will take place at the
+    locus. Otherwise, a window with length of --maxhpsep is centered on the
+    locus to determine the nucleotides to fold
 
     2. Both the top and bottom genomic strands from the window are then
     subjected to secondary structure prediction using RNALfold (option -L
@@ -638,7 +656,7 @@ KEY METHODS
     removed. Because the folding window could have been extended around the
     cluster, there could be putative hairpins that are not within the
     original cluster. To have overlap, at least one of the hairpin's helical
-    arms must have at least 20nts within the original cluster coordinates.
+    arms must have at least 1nt within the original cluster coordinates.
 
     7. The pattern of small RNA expression relative to the remaining
     hairpins is then examined. The per-nucleotide coverage across every
@@ -699,12 +717,11 @@ KEY METHODS
 
   Quantification of clusters
 
-    All mappings with either their left-ends, right-ends, or both within the
-    cluster are tallied as being within the cluster. Thus, for a cluster
-    located at Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and
-    2000-2021 are all counted as being within the cluster during
-    quantification. Note that it's possible to count the same mapping within
-    non-overlapping clusters.
+    All mappings with at lease one nt of overlap within the cluster are
+    tallied as being within the cluster. Thus, for a cluster located at
+    Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and 2000-2021 are
+    all counted as being within the cluster during quantification. Note that
+    it's possible to count the same mapping within non-overlapping clusters.
 
   Analysis of Phasing
 

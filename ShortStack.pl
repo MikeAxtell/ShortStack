@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.3.0";
+my $version = "0.3.1";
 
 ##### get options and validate them
 
@@ -392,7 +392,10 @@ if($nohp) {
     log_it ($logfile,`date`);
     log_it ($logfile,"Phase Two: Gathering genome sequence for RNA secondary structure prediction\n");
 
-    my %to_fold = get_folding_regions(\$genome,\@clusters,\$pad,\$maxhpsep);  ## hash structure: 'sequence', 'start', 'stop'  strand is always Watson
+#    my %to_fold = get_folding_regions(\$genome,\@clusters,\$pad,\$maxhpsep);  ## hash structure: 'sequence', 'start', 'stop'  strand is always Watson
+## pad is no longer relevant for get_folding_regions, since dangling pads are not on the clusters anymore.  
+## Now we just get a centered query as long as the locus itself is > --maxhpsep
+    my %to_fold = get_folding_regions(\$genome,\@clusters,\$maxhpsep);  ## hash structure: 'sequence', 'start', 'stop'  strand is always Watson
 
     log_it ($logfile,"\n\n");
 
@@ -1014,8 +1017,12 @@ sub merge_clusters {
     my($input,$pad,$genome) = @_; ## passed my reference .. array and scalar
     my @output = ();
 
+    my $this_start;
+    my $this_stop;
     my $last_start;
     my $last_stop;
+    my $last_padded_start;
+    my $last_padded_stop;
     my $this_padded_start;
     my $this_padded_stop;
     my $last_chr = "null";
@@ -1039,36 +1046,52 @@ sub merge_clusters {
     foreach my $in_clus (@$input) {
 	if($in_clus =~ /^(\S+):(\d+)-(\d+)$/) {
 	    $this_chr = $1;
-	    $this_padded_start = $2 - $$pad;
+	    $this_start = $2;
+	    $this_padded_start = $this_start - $$pad;
 	    if($this_padded_start < 1) {
 		$this_padded_start = 1;
 	    }
-	    $this_padded_stop = $3 + $$pad;
+	    $this_stop = $3;
+	    $this_padded_stop = $this_stop + $$pad;
 	    if($this_padded_stop > $chr_sizes{$this_chr}) {
 		$this_padded_stop = $chr_sizes{$this_chr};
 	    }
 	    
 	    # special first case
 	    if($last_chr eq "null") {
-		$last_start = $this_padded_start;
-		$last_stop = $this_padded_stop;
+		$last_padded_start = $this_padded_start;
+		$last_padded_stop = $this_padded_stop;
+		$last_start = $this_start;
+		$last_stop = $this_stop;
 	    } elsif ($this_chr ne $last_chr) {
 		$entry = "$last_chr" . ":" . "$last_start" . "-" . "$last_stop";
 		push(@output,$entry);
-		$last_start = $this_padded_start;
-		$last_stop = $this_padded_stop;
+		$last_padded_start = $this_padded_start;
+		$last_padded_stop = $this_padded_stop;
+		$last_start = $this_start;
+		$last_stop = $this_stop;
 	    } else {
-		if($this_padded_start > $last_stop) {
+		if($this_padded_start > $last_padded_stop) {
+		    ## no overlap between these padded clusters.  Report the last one, trimming off its dangling pads
 		    $entry = "$this_chr" . ":" . "$last_start" . "-" . "$last_stop";
 		    push(@output,$entry);
-		    $last_start = $this_padded_start;
-		    $last_stop = $this_padded_stop;
+		    $last_padded_start = $this_padded_start;
+		    $last_padded_stop = $this_padded_stop;
+		    $last_start = $this_start;
+		    $last_stop = $this_stop;
 		} else {
-		    if($this_padded_start < $last_start) {
-			$last_start = $this_padded_start;
+		    # here, same chr, this_padded_start is <= last_padded_stop, so we are merging
+		    if($this_padded_start < $last_padded_start) {
+			$last_padded_start = $this_padded_start;
 		    }
-		    if($this_padded_stop > $last_stop) {
-			$last_stop = $this_padded_stop;
+		    if($this_start < $last_start) {
+			$last_start = $this_start;
+		    }
+		    if($this_padded_stop > $last_padded_stop) {
+			$last_padded_stop = $this_padded_stop;
+		    }
+		    if($this_stop > $last_stop) {
+			$last_stop = $this_stop;
 		    }
 		}
 	    }
@@ -1158,7 +1181,7 @@ sub get_names_countmode {
 		
 
 sub get_folding_regions {
-    my($gen_file,$info,$pad,$maxhpsep) = @_;  ## passed as references .. scalar, array, scalar, and scalar, respectively
+    my($gen_file,$info,$maxhpsep) = @_;  ## passed as references .. scalar, array,and scalar, respectively
     my $locus;
 
     my %to_fold = ();
@@ -1166,7 +1189,7 @@ sub get_folding_regions {
     my $start;
     my $stop;
     my $locus_size;
-    my $unp_locus_size;
+#    my $unp_locus_size;
     my $get_size;
     my $middle;
     my $get_start;
@@ -1202,10 +1225,10 @@ sub get_folding_regions {
 	}
 
 	$locus_size = $stop - $start + 1;
-	$unp_locus_size = int($locus_size - (2 * $$pad));  ## the unpadded region is the locus size - (2 * $pad).
+	#$unp_locus_size = int($locus_size - (2 * $$pad));  ## the unpadded region is the locus size - (2 * $pad).
 
-	if($unp_locus_size > $$maxhpsep) {
-	    next;  ## NOT folded if unpadded size is larger than the max hp sep
+	if($locus_size > $$maxhpsep) {
+	    next;  ## NOT folded if locus size is larger than the max hp sep
 	} else {
 	    $get_size = $$maxhpsep;  ## otherwise, a window the size of the maxhpsep will be folded in all cases.
 	}
@@ -1999,13 +2022,13 @@ sub remove_nonoverlapped_hps {
 	    @hp_ranges = split (",", $en_fields[2]);
 	    @range1 = split ("-", $hp_ranges[0]);
 	    @range2 = split ("-", $hp_ranges[1]);
-	    $overlap1 = range_overlap_count(\@loc_range,\@range1);
-	    $overlap2 = range_overlap_count(\@loc_range,\@range2);
+	    $overlap1 = range_overlap(\@loc_range,\@range1);
+	    $overlap2 = range_overlap(\@loc_range,\@range2);
 
-	    if(($overlap1 >= 20) or
-	       ($overlap2 >= 20)) {
+	    if(($overlap1) or
+	       ($overlap2)) {
 		
-		## criteria for overlap is at least 20nts of overlap between at least one of the two helical arms and the cluster
+		## criteria for overlap is the bare min of a single overlapping nt with one of the two helical arms
 		
 		push(@{$scrubbed{$locus}}, $entry);
 		
@@ -5749,6 +5772,7 @@ sub log_it {
 
 	    
 __END__	
+
 =head1 LICENSE
 
 ShortStack.pl
@@ -5782,7 +5806,7 @@ As of this version release, a manuscript describing ShortStack is being revised.
 
 =head1 VERSION
 
-0.3.0 :: Released November 20, 2012
+0.3.1 :: Released December 5, 2012
 
 =head1 AUTHOR
 
@@ -5963,7 +5987,7 @@ This is a simple tab-delimited text file.  The first line begins with a "#" (com
 
 To import this into R, here's a tip to deal with the first line, which has the headers but begins with a "#" character.
 
->results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
+    >results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
 
 Column 1: Locus : The genome-browser-friendly coordinates of the clusters.  Coordinates are one-based, inclusive (e.g. Chr1:1-100 refers to a 100 nt interval beginning with nt 1 and ending with nt 100).
 
@@ -6049,11 +6073,11 @@ Cluster discovery proceeds in two simple steps:
 
 1. The total depth of small RNA coverage at each occupied nucleotide in the genome is examined, and initial 'islands' of coverage are defined as continuous stretches where the read depth is greater than or equal to the threshold depth specified by option --mindepth.  Note that islands could theoretically be as small as one nucleotide, since they depend on total depth of coverage, not the small RNA length per se.  Many islands will often be 20-24nts in length, corresponding to a pile of a single small RNA species.
 
-2. The initial islands are then extended on both sides by the distance specified by option --pad.  Islands that overlap after extension are merged.  After all extensions and resultant mergers are performed, the final result is the initial clusters.  If the run is performed in --nohp mode, these are the final clusters.  If hairpins and MIRNAs are being examined, some of the clusters may be adjusted in position to fully capture the putative hairpin(s) (see below).
+2. The initial islands are then temporarily extended on both sides by the distance specified by option --pad.  Islands that overlap after extension are merged.  The "dangling pads" at the ends of the merged clusters are then removed.  After all extensions, resultant mergers, and end trimmings are performed, the final result is the initial clusters.  If the run is performed in --nohp mode, these are the final clusters.  If hairpins and MIRNAs are being examined, some of the clusters may be adjusted in position to fully capture the putative hairpin(s) (see below).
 
 =head2 Hairpin and MIRNA analysis
 
-1.  The genomic window to be subject to RNA folding is first determined.  If the unpadded locus size (unpadded locus size is defined as the locus size - ( 2 * --pad)) is > --maxhpsep, no RNA folding will take place at the locus.  Otherwise, a window with length of --maxhpsep is centered on the locus to determine the nucleotides to fold
+1.  The genomic window to be subject to RNA folding is first determined.  If the locus size is > --maxhpsep, no RNA folding will take place at the locus.  Otherwise, a window with length of --maxhpsep is centered on the locus to determine the nucleotides to fold
 
 2.  Both the top and bottom genomic strands from the window are then subjected to secondary structure prediction using RNALfold (option -L [--maxhpsep]), which returns a diverse set of often overlapping predicted structures.
 
@@ -6063,7 +6087,7 @@ Cluster discovery proceeds in two simple steps:
 
 5.  Redundant hairpins are then removed.  Redundant hairpins are those whose 5' arms and 3' arms overlap.  In pairwise comparisons of redundant hairpins, the longest hairpin is retained.
 
-6.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window could have been extended around the cluster, there could be  putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 20nts within the original cluster coordinates.
+6.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window could have been extended around the cluster, there could be  putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 1nt within the original cluster coordinates.
 
 7. The pattern of small RNA expression relative to the remaining hairpins is then examined.  The per-nucleotide coverage across every base, on both strands separately, across the original locus coordinates is calculated.  If there is a single hairpin whose 5' and 3' arms contain >= [--minfrachpdepth] of the total coverage of the original locus, the hairpin is kept for futher analysis.  If more than one hairpin meets this criterion, than the one with the highest coverage fraction in the arms is retained.  Note that this step contains a correction for reads that are "dyads" .. reads that map twice to a hairpin, once in each arm, on opposite strands... this happens for perfect inverted repeat loci.  Such reads are counted towards the sense strand only for a given hairpin.
 
@@ -6083,7 +6107,7 @@ Hairpin loci passing all four of these loci are annotated as MIRNAs.  Those fail
 
 =head2 Quantification of clusters
 
-All mappings with either their left-ends, right-ends, or both within the cluster are tallied as being within the cluster.  Thus, for a cluster located at Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and 2000-2021 are all counted as being within the cluster during quantification.  Note that it's possible to count the same mapping within non-overlapping clusters.
+All mappings with at lease one nt of overlap within the cluster are tallied as being within the cluster.  Thus, for a cluster located at Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and 2000-2021 are all counted as being within the cluster during quantification.  Note that it's possible to count the same mapping within non-overlapping clusters.
 
 =head2 Analysis of Phasing
 
