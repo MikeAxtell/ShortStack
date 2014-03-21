@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "1.2.3";
+my $version_num = "1.2.4";
 
 ##### get options and validate them
 
@@ -6493,7 +6493,7 @@ sub trim_FA {
 	log_it($logfile, "\nAdapter trimming file $ut_file with adapter $used_adapter ...");
 	(open(IN, "$ut_file")) || return 0;
 	my $trimmedFA = "$ut_file";
-	$trimmedFA =~ s/\..*$//g;  ## strip any extension
+	$trimmedFA =~ s/\.[^\/]+$//g;  ## s/\..*$//g;  ## strip any extension bug-fix 1.2.4
 	$trimmedFA .= "_trimmed.fasta"; ## add new extension
 	(open(OUT, ">$trimmedFA")) || return 0;
 	my $header;
@@ -6568,7 +6568,7 @@ sub trim_FQ {
 	log_it($logfile, "\nAdapter trimming file $ut_file with adapter $used_adapter ...");
 	(open(IN, "$ut_file")) || return 0;
 	my $trimmedFQ = "$ut_file";
-	$trimmedFQ =~ s/\..*$//g; ## strip extension
+	$trimmedFQ =~ s/\.[^\/]+$//g;  ## s/\..*$//g; ## strip extension bug-fix 1.2.4
 	$trimmedFQ .= "_trimmed.fastq"; ## add new extension
 	(open(OUT, ">$trimmedFQ")) || return 0;
 	my $header;
@@ -6667,7 +6667,7 @@ sub perform_alignment {
     
     # define the outfile base name .. strip extensions from the infile
     my $outfile_base = $infile;
-    $outfile_base =~ s/\..*$//g;
+    $outfile_base =~ s/\.[^\/]+$//g; ##### s/\..*$//g; bug fix in 1.2.4
     
     # Open the processes
     (open(BOW, "$bowtie |")) || return 0;
@@ -6966,7 +6966,7 @@ sub merge_em {
 	close STAT;
 	$n_unmapped = $n_all - $n_mapped;
 	$rg = $bamfile_part;
-	$rg =~ s/\..*$//g;
+	$rg =~ s/\.[^\/]+$//g;   #### s/\..*$//g;  bug-fix 1.2.4
 	log_it($logfile, "\tRead Group: $rg added to list .. Mapped: $n_mapped Unmapped: $n_unmapped\n");
 	# add to header
 	system "echo \"\@RG\tID:$rg\tDS:Mapped=$n_mapped\;Unmapped=$n_unmapped\" >> ShortStack_SAM_head_temp.txt";
@@ -7034,14 +7034,14 @@ sub trim_CS {
 	log_it($logfile, "\nAdapter trimming file $ut_file with adapter $used_adapter (translated to $cs_used_adapter) ...");
 	(open(IN, "$ut_file")) || return 0;
 	my $trimmedCS = "$ut_file";
-	$trimmedCS =~ s/\..*$//g;  ## strip any extension
+	$trimmedCS =~ s/\.[^\/]+$//g;  #### s/\..*$//g;  ## strip any extension
 	$trimmedCS .= "_trimmed.csfasta"; ## add new extension
 	(open(OUT, ">$trimmedCS")) || return 0;
 	
 	if($ut_qv_file) {
 	    (open(QIN, "$ut_qv_file")) || return 0;
 	    $trimmedQV = $ut_qv_file;
-	    $trimmedQV =~ s/\..*$//g;
+	    $trimmedQV =~ s/\.[^\/]+$//g;   ## s/\..*$//g bug-fix 1.2.4
 	    $trimmedQV .= "_trimmed.qual";
 	    (open(QOUT, ">$trimmedQV")) || return 0;
 	}
@@ -7208,7 +7208,7 @@ __END__
 
 ShortStack.pl
 
-Copyright (C) 2012-2013 Michael J. Axtell                                                             
+Copyright (C) 2012-2014 Michael J. Axtell                                                             
                                                                                                  
 This program is free software: you can redistribute it and/or modify                             
 it under the terms of the GNU General Public License as published by                             
@@ -7237,7 +7237,7 @@ Shahid S., Axtell MJ. (2013) Identification and annotation of small RNA genes us
 
 =head1 VERSION
 
-1.2.3 :: Released November 1, 2013
+1.2.4 :: Released January 21, 2014
 
 =head1 AUTHOR
 
