@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 use Getopt::Long;
 
-$version = "0.1.2";
+$version = "0.1.3";
 
 # Define a usage statement
 $usage = "$0 $version
@@ -16,15 +16,16 @@ C\. SAM lines for unmapped reads will be suppressed\!
 C\. SAM lines for mapped reads that have an invalid CIGAR string will be suppressed\!
 
 USAGE:
-1\. For \.bam files : samtools view [input\.bam\] | $0 --prefix [prefix] --genome [genome\.fasta]
-2\. For \.sam\.gz files : gzip -d -c [input\.sam\.gz] | $0 --prefix [prefix] --genome [genome\.fasta]
-3\. For uncompressed \.sam files : $0 --prefix [prefix] --genome [genome\.fasta] < [input\.sam]
-4\. Directly from bowtie version 1 \(eg 0-12-7, 0-12-8\): bowtie [bowtie options] -S [bowtie_index] [reads] | $0 --prefix [prefix] --genome [genome]
+1\. For \.bam files : samtools view [input\.bam\] | $0 --prefix [prefix] --genome [genome\.fasta] -- sortmem [INT]
+2\. For \.sam\.gz files : gzip -d -c [input\.sam\.gz] | $0 --prefix [prefix] --genome [genome\.fasta] -- sortmem [INT]
+3\. For uncompressed \.sam files : $0 --prefix [prefix] --genome [genome\.fasta] --sortmem [INT] < [input\.sam]
+4\. Directly from bowtie version 1 \(eg 0.12.x): bowtie [bowtie options] -S [bowtie_index] [reads] | $0 --prefix [prefix] --genome [genome] --sortmem [INT]
 
 
-OPTIONS \(both required\)
--- prefix [string] : base name for the final \.bam and \.bam\.bai files that will be created
--- genome [string] : Path to the fasta formatted genome file used for the mapping
+OPTIONS
+--prefix [string] : base name for the final \.bam and \.bam\.bai files that will be created :: REQUIRED
+--genome [string] : Path to the fasta formatted genome file used for the mapping :: REQUIRED
+--sortmem [integer] : Amount of memory to allocate to samtools sort, in bytes.  If not specified, defaults to 500000000 (e.g. 476.8Mb). Giving more memory to sorting causes fewer temp files to be created, and thus faster sorting.
 
 Type perldoc $0 for more details or see the README
 
@@ -34,9 +35,11 @@ Type perldoc $0 for more details or see the README
 # initial option definitions
 $prefix = '';
 $genome = '';
+$sortmem = '';
 
 # get user options from command line
 GetOptions ('prefix=s' => \$prefix,
+	    'sortmem=i' => \$sortmem,
 	    'genome=s' => \$genome);
 
 # Verify existence of prefix
@@ -56,6 +59,12 @@ if($samtools_version eq "not found") {
     die "samtools not found\n$full_samtools_test_text\n\n$usage\n";
 }
 
+# if option --sortmem is specified by user, verify it is an integer
+if($sortmem) {
+    unless($sortmem =~ /^\d+$/) {
+	die "Invalid entry for option --sortmem\.  Must be an integer\n";
+    }
+}
 
 # Initialize temp file
 $tempfile = "$prefix" . "\.sam\.gz";
@@ -208,7 +217,11 @@ print STDERR "SAM LINES SUPPRESSED BECAUSE THEY HAD INVALID CIGAR STRINGS: $no_C
 print STDERR "\nCreating initial \.bam file\n";
 system "samtools view -bT $genome $tempfile > $tempfile2";
 print STDERR "\nSorting bamfile by chromosomal location\n";
-system "samtools sort $tempfile2 $prefix";
+if($sortmem) {
+    system "samtools sort -m $sortmem $tempfile2 $prefix";
+} else {
+    system "samtools sort $tempfile2 $prefix";
+}
 print STDERR "\nIndexing the sorted file\n";
 system "samtools index $final_file";
 
@@ -287,7 +300,7 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.                                                              
                                                                                                  
 This program is distributed in the hope that it will be useful,                                  
-    but WITHOUT ANY WARRANTY; without even the implied warranty of                                   
+but WITHOUT ANY WARRANTY; without even the implied warranty of                                   
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                                    
 GNU General Public License for more details.                                                     
                                                                                                  
@@ -302,15 +315,15 @@ Output a .bam file sorted by chromosomal location, and a corresponding .bai inde
 
 =head1 CITATION
 
-If you use ShortStack in your work, please cite 
+If you use Prep_bam.pl in your work, please cite 
 
-Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  RNA. (In press).
-
-As of this version release, a manuscript describing ShortStack is in press at the journal "RNA".  It might be published by the time you are reading this, so please check Pubmed before citing!
+Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  RNA. doi:10.1261/rna.035279.112
 
 =head1 VERSIONS
 
-0.1.2 : THIS VERSION.  March 18, 2013.  Updates to documentation infromation only, program itself is the same as 0.1.1.  First released with ShortStack 0.4.2.
+0.1.3 : THIS VERSION. Developed April 12, 2013. First relased April 24, 2013 with ShortStack 0.4.3.
+
+0.1.2 : March 18, 2013.  Updates to documentation infromation only, program itself is the same as 0.1.1.  First released with ShortStack 0.4.2.
 
 0.1.1 : June 28, 2012.  Frist released with ShortStack 0.1.4.  Fixes program so it no longer breaks when unmapped lines are encountered (now it simply ignores them).  This also allows direct piping of bowtie data directly into Prep_bam.pl
 
@@ -337,26 +350,28 @@ ensure 'perl' is located in /usr/bin/ .. if not, edit line 1 of script according
 =head1 USAGE
                                                                                                                              
 1. For .bam files: 
-    
-    samtools view [input.bam] | Prep_bam.pl --prefix [prefix] --genome [genome.fasta]                                  
+	
+	samtools view [input.bam] | Prep_bam.pl --prefix [prefix] --genome [genome.fasta] --sortmem [INT]                                 
 
 2. For .sam.gz files:
 
-    gzip -d -c [input.sam.gz] | Prep_bam.pl --prefix [prefix] --genome [genome.fasta]                          
+	gzip -d -c [input.sam.gz] | Prep_bam.pl --prefix [prefix] --genome [genome.fasta] --sortmem [INT]                          
 
 3. For uncompressed .sam files:
 
-    Prep_bam.pl --prefix [prefix] --genome [genome.fasta] < [input.sam]     
+	Prep_bam.pl --prefix [prefix] --genome [genome.fasta] --sortmem [INT] < [input.sam]     
 
-4. To pipe in bowtie (version 1 e.g. 0.12.8) sam output directly:
+4. To pipe in bowtie (version 1 e.g. 0.12.x) sam output directly:
 
-    bowtie [bowtie_options] -S [bowtie_index] [trimmed_reads] | Prep_bam.pl --prefix [prefix] --genome [genome] 
+	bowtie [bowtie_options] -S [bowtie_index] [trimmed_reads] | Prep_bam.pl --prefix [prefix] --genome [genome] --sortmem [INT]
 
 =head1 OPTIONS
 
--- prefix [string] : base name for the final .bam and .bam.bai files that will be created    
+--prefix [string] : base name for the final .bam and .bam.bai files that will be created :: REQUIRED
                                       
--- genome [string] : Path to the fasta formatted genome file used for the mapping           
+--genome [string] : Path to the fasta formatted genome file used for the mapping :: REQUIRED
+
+--sortmem [integer] : Amount of memory, in bytes, to allocate to the samtools sort function. If not specified, samtools sort defaults to 500,000,000 (e.g. 476.8Mb).  Allocating more memory speeds sorting. :: OPTIONAL            
 
 =head1 NOTES
 
@@ -373,5 +388,8 @@ If there are already NH:i: tags in the input data, they will be discarded and ov
 Michael J. Axtell, Penn State University, mja18@psu.edu
 
 =cut
+
+
+
 
 

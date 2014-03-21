@@ -4,19 +4,18 @@ SYNOPSIS
     chromosomal location, and a corresponding .bai index file.
 
 CITATION
-    If you use ShortStack in your work, please cite
+    If you use Prep_bam.pl in your work, please cite
 
     Axtell MJ. (2013) ShortStack: Comprehensive annotation and
-    quantification of small RNA genes. RNA. (In press).
-
-    As of this version release, a manuscript describing ShortStack is in
-    press at the journal "RNA". It might be published by the time you are
-    reading this, so please check Pubmed before citing!
+    quantification of small RNA genes. RNA. doi:10.1261/rna.035279.112
 
 VERSIONS
-    0.1.2 : THIS VERSION. March 18, 2013. Updates to documentation
-    infromation only, program itself is the same as 0.1.1. First released
-    with ShortStack 0.4.2.
+    0.1.3 : THIS VERSION. Developed April 12, 2013. First relased April 24,
+    2013 with ShortStack 0.4.3.
+
+    0.1.2 : March 18, 2013. Updates to documentation infromation only,
+    program itself is the same as 0.1.1. First released with ShortStack
+    0.4.2.
 
     0.1.1 : June 28, 2012. Frist released with ShortStack 0.1.4. Fixes
     program so it no longer breaks when unmapped lines are encountered (now
@@ -47,26 +46,31 @@ INSTALL
 USAGE
     1. For .bam files:
 
-        samtools view [input.bam] | Prep_bam.pl --prefix [prefix] --genome [genome.fasta]                                  
+            samtools view [input.bam] | Prep_bam.pl --prefix [prefix] --genome [genome.fasta] --sortmem [INT]                                 
 
     2. For .sam.gz files:
 
-        gzip -d -c [input.sam.gz] | Prep_bam.pl --prefix [prefix] --genome [genome.fasta]                          
+            gzip -d -c [input.sam.gz] | Prep_bam.pl --prefix [prefix] --genome [genome.fasta] --sortmem [INT]                          
 
     3. For uncompressed .sam files:
 
-        Prep_bam.pl --prefix [prefix] --genome [genome.fasta] < [input.sam]     
+            Prep_bam.pl --prefix [prefix] --genome [genome.fasta] --sortmem [INT] < [input.sam]     
 
-    4. To pipe in bowtie (version 1 e.g. 0.12.8) sam output directly:
+    4. To pipe in bowtie (version 1 e.g. 0.12.x) sam output directly:
 
-        bowtie [bowtie_options] -S [bowtie_index] [trimmed_reads] | Prep_bam.pl --prefix [prefix] --genome [genome] 
+            bowtie [bowtie_options] -S [bowtie_index] [trimmed_reads] | Prep_bam.pl --prefix [prefix] --genome [genome] --sortmem [INT]
 
 OPTIONS
-    -- prefix [string] : base name for the final .bam and .bam.bai files
-    that will be created
+    --prefix [string] : base name for the final .bam and .bam.bai files that
+    will be created :: REQUIRED
 
-    -- genome [string] : Path to the fasta formatted genome file used for
-    the mapping
+    --genome [string] : Path to the fasta formatted genome file used for the
+    mapping :: REQUIRED
+
+    --sortmem [integer] : Amount of memory, in bytes, to allocate to the
+    samtools sort function. If not specified, samtools sort defaults to
+    500,000,000 (e.g. 476.8Mb). Allocating more memory speeds sorting. ::
+    OPTIONAL
 
 NOTES
   Input format and assumptions
