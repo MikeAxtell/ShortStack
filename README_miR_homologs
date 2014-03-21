@@ -3,10 +3,25 @@ SYNOPSIS
     miRNAs, and analysis of predicted secondary structure.
 
 VERSIONS
-    0.1 : This version. Initial release. May 4, 2012
+    0.2 : THIS VERSION. Released June 12, 2012 in ShortStack v 0.1.3
+    package. Fixes major bug in hairpin structure parsing that was causing
+    inappropriate rejection of valid hairpins. Mirrors the same bug fix in
+    ShortStack v 0.1.3
+
+    0.1 : Initial release. May 4, 2012
 
 AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
+
+CITATION
+    If you use miR_homologs in your work, please cite
+
+    Axtell MJ. (2012) ShortStack: Comprehensive annotation and
+    quantification of small RNA genes. In prep.
+
+    A manuscript describing the ShortStack package will be submitted
+    sometime in the Spring/Summer of 2012, so check Pubmed first or look for
+    an update!
 
 INSTALL
     install samtools from <http://samtools.sourceforge.net/> and ensure that
@@ -57,6 +72,62 @@ QUICK START
 
     7. To run with default parameters, call "miR_homologs.pl [in.bam]
     [genome.fasta]". See OPTIONS below for other options and run modes.
+
+TEST
+    Some Arabidopsis test data can be found at
+    http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
+
+    1. Athaliana_genome.tgz : The "TAIR10" Arabidopsis thaliana
+    (ecotype-Col-0) genome assembly including the plastid and mitochrondria,
+    and it's .fai index. Retrieved from Phytozome. This is the assembly to
+    which the .bam files in this directory were mapped.
+
+    2. col_leaf_ok.bam[.bai] : Sorted and indexed small RNA-seq alignments
+    in BAM format. Derived from wild-type rosette leaves -- Liu et al.
+    (2012) Plant Physiology PMID: 22474216. This alignment contains
+    26,523,213 mapped reads, 14,351,052 of which were "uniquely" mapped
+    (just one alignment), and a total of 104,980,568 alignments. The small
+    RNA sizes range from 15-27nts. To create this alignment, the raw
+    .csfasta and .QV.qual files were combined to make a colorspace-fastq
+    formatted file, adapters were trimmed along with the corresponding
+    quality values (including the hybrid 3' color and Q value), and mapped
+    using bowtie 0.12.7. The bowtie settings were -C -v 1 --best --strata -k
+    50 --col-keepends -S, which allow zero or one mismatch, keeping only the
+    best scoring 'stratum', and retaining only the first 50 alignments
+    observed, and outputting in sam format. SAM lines corresponding to
+    unmapped reads were filtered out. The SAM file was then processed with
+    Prep_bam.pl (included in ShortStack package) to add the NH:i: tags to
+    each alignment, and to output a chromosomal-sorted alignment in the BAM
+    format.
+
+    3. ath_mb18_ShortStack_loci.txt : Coordinates for Arabidopsis thaliana
+    MIRNA hairpin sequences, as determined by taking the top-scoring hit
+    from a blastn search using miRBase 18 ath- hairpins as queries against
+    the reference genome. This file is useful as input for a ShortStack run
+    in --count mode.
+
+    4. ath_mature_nr.bam[.bai] : Sorted and indexed alignments of all
+    non-redundant mature Arabidopsis thaliana miRNAs from miRBase18 against
+    the A. thaliana reference genome. Mapped with bowtie 0.12.7 using
+    settings -f -v 0 -m 20 ... perfect matches only, no alignments reported
+    if more than 20 were observed. These alignments are useful for testing
+    the miR_homologs.pl helper script.
+
+    Some Tests:
+
+    A) full de-novo annotation run:
+
+        ./ShortStack.pl col_leaf_ok.bam Athaliana_167.fa
+
+    B) count mode run to quantify and annotate known miRBase MIRNA loci:
+
+    ./ShortStack.pl --count ath_mb18_ShortStack_loci.txt col_leaf_ok.bam
+    Athaliana_167.fa
+
+    C) Analyze annotated miRBase mature miRNAs for acceptable structure with
+    miR_homologs.pl:
+
+        ./miR_homologs.pl ath_mature_nr.bam Athaliana_167.fa
 
 OPTIONS
     --outdir [string] : Name of directory to be created to receive results
@@ -130,12 +201,12 @@ SUGGESTED WORKFLOW
     above. Repeat-masking not necessary if strategy below is used. Index the
     genome file by typing
 
-    samtools index [genome]
+        samtools index [genome]
 
     Since the suggested workflow uses bowtie 0.12.7 as the aligner, you also
     need to build a bowtie index for the genome.
 
-    ./bowtie-build [genome] [prefix]
+        ./bowtie-build [genome] [prefix]
 
   Alignment
 
@@ -147,8 +218,7 @@ SUGGESTED WORKFLOW
     lines corresponding to unmapped queries. An example aligner call might
     look like:
 
-    ./bowtie -f -v 0 -a -m 20 -S [index] [queries.fasta] | awk '$3!="*"' >
-    [output.sam]
+        ./bowtie -f -v 0 -a -m 20 -S [index] [queries.fasta] | awk '$3!="*"' > [output.sam]
 
   Processing alignments
 
@@ -156,18 +226,18 @@ SUGGESTED WORKFLOW
     to get a chrosomal-sorted .bam file. Use samtools to manipulate the
     alignment as follows:
 
-    samtools view -b -S [output.sam] > [output_unsorted.bam]
+        samtools view -b -S [output.sam] > [output_unsorted.bam]
 
-    samtools sort [output_unsorted.bam] [output_sorted_prefix]
-
-    samtools index [output_sorted_prefix.bam]
+        samtools sort [output_unsorted.bam] [output_sorted_prefix]
+    
+        samtools index [output_sorted_prefix.bam]
 
     The resulting [output_sorted_prefix.bam] file is ready for use by
     miR_homologs.
 
   Run
 
-    ./miR_homologs.pl [options] [output_sorted_prefix.bam] [genome.fasta]
+        ./miR_homologs.pl [options] [output_sorted_prefix.bam] [genome.fasta]
 
 OUTPUT
     Each MIRNA locus that passes the analysis will have its own simple text

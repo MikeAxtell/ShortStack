@@ -1,12 +1,12 @@
 #!/usr/bin/perl -w
 
 # miR_homologs.pl -- given a chromosomal-sorted .bam file of query miRNAs aligned against a reference, examine for conformity to Meyers et al. criteria for MIRNAs, assuming the aligned query is the mature miRNA
-# Type perldoc miR_homologs.pl for full description or see the README
+# Type perldoc miR_homologs.pl for full description; see the License and full documentation after the __END__ symbol in this script, or see the README
 
 use Getopt::Long;
 use strict;
 
-my $version = "0.1";
+my $version = "0.2";
 
 # usage statement
 my $usage = "
@@ -374,13 +374,19 @@ sub folder_mh {
     my $locus;
     my $fold_seq;
     my $brax;
-    my $delta_G;
+    #my $delta_G;  # deprecated as of v. 0.2
     my %output = ();  
     my $structure_details;
     my $start;
     my $entry;  ## tab-delimited .. brax, start, helix_info (e.g. 123-150,180-200), strand "Watson" or "Crick"
     my $revcomp;
     
+    my $adj_st;
+    my %regions = ();
+    my $brax_section;
+    my $left;
+    my $right;
+
     # first, get some information to enable a crude progress bar
     my $n_loci_to_fold = scalar ( keys %$to_fold);
     my $x = 0;
@@ -410,12 +416,13 @@ sub folder_mh {
 		die "FATAL in sub-routine \'folder\' : failed to parse brackets from RNALfold output line:\n$_\n";
 	    }
 	    
-	    if($_ =~ /\s+\((.*\d+.*)\)/) {
-		$delta_G = $1;
-		$delta_G =~ s/\s//g;
-	    } else {
-		die "FATAL in sub-routine \'folder\' : failed to parse deltaG from RNALfold output line: $_\n";
-	    }
+	 # delta G not tracked as of v 0.2
+	    #if($_ =~ /\s+\((.*\d+.*)\)/) {
+	#	$delta_G = $1;
+	#	$delta_G =~ s/\s//g;
+	#    } else {
+	#	die "FATAL in sub-routine \'folder\' : failed to parse deltaG from RNALfold output line: $_\n";
+	#    }
 	    
 	    if($_ =~ /(\d+)\s*$/) {
 		$start = $1;
@@ -423,14 +430,20 @@ sub folder_mh {
 		die "FATAL in sub-routine \'folder\' : failed to parse start position from RNALfold output line $_\n";
 	    }
 
-	    # send the structure to the general structure evaluation sub-routine, which returns zero to reject, one to keep
-	    $structure_details = evaluate_structure_general($brax,$$min_paired,$$min_frac_paired);
-
-	    # if it is OK, add to output
-	    unless($structure_details eq "bogus") {
-		# structure details are 123-150,180-200 .. e.g. start and stop positions of the helix of interest, one-based coordinates, relative to the brackets themselves.
-		$entry = "$brax\t$start\t$structure_details\t$delta_G";
-		push(@{$output{$locus}}, $entry);
+	    %regions = get_distinct_hps($brax);
+	    while(($left, $right) = each %regions) {
+		$brax_section = substr($brax,($left - 1),($right-$left+1));
+		
+		# send the structure to the general structure evaluation sub-routine, which returns zero to reject, one to keep
+		$structure_details = evaluate_structure_general($brax_section,$$min_paired,$$min_frac_paired);
+		
+		# if it is OK, adjust the coordinates, and add to output
+		unless($structure_details eq "bogus") {
+		    # structure details are 123-150,180-200 .. e.g. start and stop positions of the helix of interest, one-based coordinates, relative to the brackets themselves.
+		    $adj_st = $left + $start - 1;
+		    $entry = "$brax_section\t$adj_st\t$structure_details";
+		    push(@{$output{$locus}}, $entry);
+		}
 	    }
 	}
 	close RNALFOLD;
@@ -575,7 +588,7 @@ sub hairpin_coords_mh {
     my $local_offset;
     my $brax;
     my $inp;
-    my $delta_G;
+    #my $delta_G;
     ## coordinates within the initial query region.
     my $left_1_start;
     my $left_1_stop;
@@ -613,7 +626,9 @@ sub hairpin_coords_mh {
 	@inputs = @{$$input_hps{$locus}};
 	foreach $inp (@inputs) {
 	    @fields = split ("\t", $inp);
-	    $delta_G = pop @fields;
+	    #$delta_G = pop @fields;
+	    
+	    ## HERE
 	    $in_helix_coords = pop @fields;
 	    $local_offset = pop @fields;
 	    $brax = pop @fields;
@@ -648,7 +663,8 @@ sub hairpin_coords_mh {
 	    
 	    $brax_true = "$start_true" . "-" . "$stop_true";
 	    $helix_true = "$left_true_start" . "-" . "$left_true_stop" . "," . "$right_true_start" . "-" . "$right_true_stop";
-	    $true_entry = "$brax\t$brax_true\t$helix_true\t$delta_G\t$strand_folded";
+	    #$true_entry = "$brax\t$brax_true\t$helix_true\t$delta_G\t$strand_folded";
+	    $true_entry = "$brax\t$brax_true\t$helix_true\t$strand_folded";
 	    
 	    ## TEST
 #	    print STDERR "\tOUTPUT: $true_entry\n";
@@ -700,6 +716,9 @@ sub remove_redundant_hps_mh {
     my @entriesW = ();
     my @entriesC = ();
 
+    my $q_size;
+    my $s_size;
+
     while(($locus) = each %$input_hps) {
 	if($locus =~ /^(\S+):(\d+)-(\d+):(\S):/) {
 	    if($4 eq "+") {
@@ -728,8 +747,8 @@ sub remove_redundant_hps_mh {
 	    @fields = split ("\t", $entry);
 	    $helix_coords = $fields[2];
 	    $hp_length = length $fields[0];  ## the brackets
-	    $delta_G_per_nt = $fields[3] / $hp_length;
-	    $tmp_entry = "$helix_coords\t$delta_G_per_nt";
+	    #$delta_G_per_nt = $fields[3] / $hp_length;
+	    $tmp_entry = "$helix_coords";
 	 #   $strand = $fields[4];
 	    if($strand eq "Watson") {
 		push(@tmpW, $tmp_entry);
@@ -745,13 +764,14 @@ sub remove_redundant_hps_mh {
 		next;
 	    }
 	    $tmp_entry = $tmpW[$x];
-	    @q_fields = split ("\t", $tmp_entry);
-	    ## q_fields[1] is the query delta_g per nt
-	    @q_ranges = split (",", $q_fields[0]);
+	    #@q_fields = split ("\t", $tmp_entry);
+
+	    @q_ranges = split (",", $tmp_entry);
 	    ## q_ranges[0] is the 5p, [1] is the 3p
 	    @q_5p_range = split ("-", $q_ranges[0]);
 	    @q_3p_range = split ("-", $q_ranges[1]);
 	    # in the above, [0] is the start, [1] is the stop.
+	    $q_size = abs($q_5p_range[0] - $q_3p_range[1]);
 	    
 	    # go through all pairwise combinations
 	    for($y = 0; $y < (scalar @tmpW); ++$y) {
@@ -762,11 +782,12 @@ sub remove_redundant_hps_mh {
 		    next;  ## don't both with entries already on the delete list
 		}
 		$sub_entry = $tmpW[$y];
-		@s_fields = split ("\t", $sub_entry);
-		## s_fields[1] is the subject deltaG per nt
-		@s_ranges = split (",", $s_fields[0]);
+		#@s_fields = split ("\t", $sub_entry);
+
+		@s_ranges = split (",", $sub_entry);
 		@s_5p_range = split ("-", $s_ranges[0]);
 		@s_3p_range = split ("-", $s_ranges[1]);
+		$s_size = abs($s_5p_range[0] - $s_3p_range[1]);
 		
 		# is there overlap in both the 5p and 3 ranges?
 
@@ -774,13 +795,14 @@ sub remove_redundant_hps_mh {
 		$three_p_overlap = range_overlap(\@q_3p_range,\@s_3p_range);
 		## zero returned for no overlap, 1 for overlap
 		if(($five_p_overlap) and ($three_p_overlap)) {
-		    # we will delete the one with the higher per-nt delta G
-		    if($q_fields[1] > $s_fields[1]) {
+		    # we will delete the shorter one
+		    if($q_size <= $s_size) {
 			$to_deleteW{$x} = 1;
 		    } else {
 			$to_deleteW{$y} = 1;
 		    }
 		}
+
 	    }
 	}
 	## add the surviving hairpins to the output hash
@@ -804,7 +826,8 @@ sub remove_redundant_hps_mh {
 	    @q_5p_range = split ("-", $q_ranges[0]);
 	    @q_3p_range = split ("-", $q_ranges[1]);
 	    # in the above, [0] is the start, [1] is the stop.
-	    
+	    $q_size = abs($q_5p_range[0] - $q_3p_range[1]);
+    
 	    # go through all pairwise combinations
 	    for($y = 0; $y < (scalar @tmpC); ++$y) {
 		if($x == $y) {
@@ -819,6 +842,7 @@ sub remove_redundant_hps_mh {
 		@s_ranges = split (",", $s_fields[0]);
 		@s_5p_range = split ("-", $s_ranges[0]);
 		@s_3p_range = split ("-", $s_ranges[1]);
+		$s_size = abs($s_5p_range[0] - $s_3p_range[1]);
 		
 		# is there overlap in both the 5p and 3 ranges?
 
@@ -826,8 +850,8 @@ sub remove_redundant_hps_mh {
 		$three_p_overlap = range_overlap(\@q_3p_range,\@s_3p_range);
 		## zero returned for no overlap, 1 for overlap
 		if(($five_p_overlap) and ($three_p_overlap)) {
-		    # we will delete the one with the higher per-nt delta G
-		    if($q_fields[1] > $s_fields[1]) {
+		    # delete the shorter of the two
+		    if($q_size <= $s_size) {
 			$to_deleteC{$x} = 1;
 		    } else {
 			$to_deleteC{$y} = 1;
@@ -1540,6 +1564,41 @@ sub check_overlap {
     return %output;
 }
 
+sub get_distinct_hps {
+    # given a brax, return a hash with keys as starts and values as stops for all distinct hairpins in the input
+    my($brax) = @_;  ## simply passed as scalar
+    my @chars = split('', $brax);
+    my $i = 0;
+    my %pairs = get_left_right($brax);
+    my %rl_pairs = ();
+    my $r;
+    my $l;
+    while(($l,$r) = each %pairs) {
+	$rl_pairs{$r} = $l;
+    }
+    my $last_right;  # right means ")"
+    my $first_left;  # left means "("
+    my %regions = (); ## left(key), right(value)
+    foreach my $ch (@chars) {
+	++$i;  ## one-based position
+	if($ch eq "\(") {
+	    if($last_right) {
+		$regions{"$rl_pairs{$last_right}"} = $last_right;
+		$last_right = '';
+	    }
+	} elsif ($ch eq "\)") {
+	    $last_right = $i;
+	}
+    }
+    # the last one
+    if($last_right) {
+	if(exists($rl_pairs{$last_right})) {
+	    $regions{"$rl_pairs{$last_right}"} = $last_right;
+	}
+    }
+    return %regions;
+}
+
 			
 __END__
 =head1 LICENSE
@@ -1567,11 +1626,22 @@ Annotation of putative MIRNA loci based on alignments of known mature miRNAs, an
 
 =head1 VERSIONS
 
-0.1 : This version. Initial release. May 4, 2012
+0.2 : THIS VERSION.  Released June 12, 2012 in ShortStack v 0.1.3 package.  Fixes major bug in hairpin structure parsing that was causing inappropriate rejection of valid hairpins.  Mirrors the same bug fix in ShortStack v 0.1.3
+
+0.1 : Initial release. May 4, 2012
 
 =head1 AUTHOR
 
 Michael J. Axtell, Penn State University, mja18@psu.edu
+
+=head1 CITATION
+
+If you use miR_homologs in your work, please cite 
+
+Axtell MJ. (2012) ShortStack: Comprehensive annotation and quantification of small RNA genes.  In prep.
+
+A manuscript describing the ShortStack package will be submitted sometime in the Spring/Summer of 2012, so check Pubmed first or look for an update!
+
 
 =head1 INSTALL
 
@@ -1613,6 +1683,32 @@ miR_homologs.pl [options] [alignments.bam] [genome.fasta]
 6. Convert the alignment to a .bam file sorted by chromosomal position.   See samtools documentation for methods.
 
 7. To run with default parameters, call "miR_homologs.pl [in.bam] [genome.fasta]".  See OPTIONS below for other options and run modes.
+
+=head1 TEST
+
+Some Arabidopsis test data can be found at http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
+
+1.  Athaliana_genome.tgz : The "TAIR10" Arabidopsis thaliana (ecotype-Col-0) genome assembly including the plastid and mitochrondria, and it's .fai index.  Retrieved from Phytozome.  This is the assembly to which the .bam files in this directory were mapped.
+
+2.  col_leaf_ok.bam[.bai] : Sorted and indexed small RNA-seq alignments in BAM format.  Derived from wild-type rosette leaves -- Liu et al. (2012) Plant Physiology PMID: 22474216.  This alignment contains 26,523,213 mapped reads, 14,351,052 of which were "uniquely" mapped (just one alignment), and a total of 104,980,568 alignments.  The small RNA sizes range from 15-27nts.  To create this alignment, the raw .csfasta and .QV.qual files were combined to make a colorspace-fastq formatted file, adapters were trimmed along with the corresponding quality values (including the hybrid 3' color and Q value), and mapped using bowtie 0.12.7.  The bowtie settings were -C -v 1 --best --strata -k 50 --col-keepends -S, which allow zero or one mismatch, keeping only the best scoring 'stratum', and retaining only the first 50 alignments observed, and outputting in sam format.  SAM lines corresponding to unmapped reads were filtered out.  The SAM file was then processed with Prep_bam.pl (included in ShortStack package) to add the NH:i: tags to each alignment, and to output a chromosomal-sorted alignment in the BAM format.
+
+3. ath_mb18_ShortStack_loci.txt : Coordinates for Arabidopsis thaliana MIRNA hairpin sequences, as determined by taking the top-scoring hit from a blastn search using miRBase 18 ath- hairpins as queries against the reference genome.  This file is useful as input for a ShortStack run in --count mode.
+
+4.  ath_mature_nr.bam[.bai] : Sorted and indexed alignments of all non-redundant mature Arabidopsis thaliana miRNAs from miRBase18 against the A. thaliana reference genome.  Mapped with bowtie 0.12.7 using settings -f -v 0 -m 20 ... perfect matches only, no alignments reported if more than 20 were observed.  These alignments are useful for testing the miR_homologs.pl helper script.
+
+Some Tests:
+
+A) full de-novo annotation run:
+
+    ./ShortStack.pl col_leaf_ok.bam Athaliana_167.fa
+
+B) count mode run to quantify and annotate known miRBase MIRNA loci:
+
+./ShortStack.pl --count ath_mb18_ShortStack_loci.txt col_leaf_ok.bam Athaliana_167.fa
+
+C) Analyze annotated miRBase mature miRNAs for acceptable structure with miR_homologs.pl:
+
+    ./miR_homologs.pl ath_mature_nr.bam Athaliana_167.fa
 
 
 =head1 OPTIONS
@@ -1656,33 +1752,33 @@ Typcially queries should be a set of non-redundant mature miRNA sequences, all u
 
 FASTA headers should be short and devoid of whitespace, as described above.  Repeat-masking not necessary if strategy below is used.  Index the genome file by typing 
 
-samtools index [genome]
+    samtools index [genome]
 
 Since the suggested workflow uses bowtie 0.12.7 as the aligner, you also need to build a bowtie index for the genome.
 
-./bowtie-build [genome] [prefix]
+    ./bowtie-build [genome] [prefix]
 
 =head2 Alignment
 
 We currently use bowtie version 1 (0.12.7) for alignments.  Settings -f -v 0 -a -m 20 -S (fasta formatted input, retain only exact matches, retain all valid alignments subject to a cap of 20, queries with 20 or more alignments are suppressed, output in SAM format).  We also find it helpful to scrub the results on the fly with a awk command to omit .sam lines corresponding to unmapped queries.  An example aligner call might look like:
 
-./bowtie -f -v 0 -a -m 20 -S [index] [queries.fasta] | awk '$3!="*"' > [output.sam]
+    ./bowtie -f -v 0 -a -m 20 -S [index] [queries.fasta] | awk '$3!="*"' > [output.sam]
 
 =head2 Processing alignments
 
 After the above, we are left with a read-sorted .sam file, and we need to get a chrosomal-sorted .bam file.  Use samtools to manipulate the alignment as follows:
 
-samtools view -b -S [output.sam] > [output_unsorted.bam]
+    samtools view -b -S [output.sam] > [output_unsorted.bam]
 
-samtools sort [output_unsorted.bam] [output_sorted_prefix]
-
-samtools index [output_sorted_prefix.bam]
+    samtools sort [output_unsorted.bam] [output_sorted_prefix]
+    
+    samtools index [output_sorted_prefix.bam]
 
 The resulting [output_sorted_prefix.bam] file is ready for use by miR_homologs.
 
 =head2 Run
 
-./miR_homologs.pl [options] [output_sorted_prefix.bam] [genome.fasta]
+    ./miR_homologs.pl [options] [output_sorted_prefix.bam] [genome.fasta]
 
 =head1 OUTPUT
 

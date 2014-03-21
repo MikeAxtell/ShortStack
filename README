@@ -13,6 +13,16 @@ CITATION
     an update!
 
 VERSIONS
+    0.1.3 : June 12 2012. THIS VERSION. Critical bug fix: Fixed issue in
+    analysis of RNALfold-derived secondary structures that was causing a
+    substantial rate of acceptable hairpin structures to be incorrectly
+    rejected .. thus under-reporting hairpin-and MIRNA-derived loci.
+    Additionally, removed the option --maxtofoldwindow ; all loci are now
+    folded and analyzed unless running in nohp mode. Other smaller fixes and
+    changes including fixing the column names on the
+    "Hairpin-MIRNA_summary.txt" file ... previously, the "Name" and "Locus"
+    columns lacked headers.
+
     0.1.2 : May 17, 2012. Changes to simplify downstream analysis of the
     Results.txt file, and to phasing analysis. Details: A) changed format of
     'DicerCall' column in result to remove the colon-delimted fractions ..
@@ -85,6 +95,61 @@ QUICK START
     [in.bam] [genome.fasta]". See OPTIONS below for other options and run
     modes.
 
+TEST
+    Some Arabidopsis test data can be found at
+    http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
+
+    1. Athaliana_genome.tgz : The "TAIR10" Arabidopsis thaliana
+    (ecotype-Col-0) genome assembly including the plastid and mitochrondria,
+    and it's .fai index. Retrieved from Phytozome. This is the assembly to
+    which the .bam files in this directory were mapped.
+
+    2. col_leaf_ok.bam[.bai] : Sorted and indexed small RNA-seq alignments
+    in BAM format. Derived from wild-type rosette leaves -- Liu et al.
+    (2012) Plant Physiology PMID: 22474216. This alignment contains
+    26,523,213 mapped reads, 14,351,052 of which were "uniquely" mapped
+    (just one alignment), and a total of 104,980,568 alignments. The small
+    RNA sizes range from 15-27nts. To create this alignment, the raw
+    .csfasta and .QV.qual files were combined to make a colorspace-fastq
+    formatted file, adapters were trimmed along with the corresponding
+    quality values (including the hybrid 3' color and Q value), and mapped
+    using bowtie 0.12.7. The bowtie settings were -C -v 1 --best --strata -k
+    50 --col-keepends -S, which allow zero or one mismatch, keeping only the
+    best scoring 'stratum', and retaining only the first 50 alignments
+    observed, and outputting in sam format. SAM lines corresponding to
+    unmapped reads were filtered out. The SAM file was then processed with
+    Prep_bam.pl (included in ShortStack package) to add the NH:i: tags to
+    each alignment, and to output a chromosomal-sorted alignment in the BAM
+    format.
+
+    3. ath_mb18_ShortStack_loci.txt : Coordinates for Arabidopsis thaliana
+    MIRNA hairpin sequences, as determined by taking the top-scoring hit
+    from a blastn search using miRBase 18 ath- hairpins as queries against
+    the reference genome. This file is useful as input for a ShortStack run
+    in --count mode.
+
+    4. ath_mature_nr.bam[.bai] : Sorted and indexed alignments of all
+    non-redundant mature Arabidopsis thaliana miRNAs from miRBase18 against
+    the A. thaliana reference genome. Mapped with bowtie 0.12.7 using
+    settings -f -v 0 -m 20 ... perfect matches only, no alignments reported
+    if more than 20 were observed. These alignments are useful for testing
+    the miR_homologs.pl helper script.
+
+    Some Tests:
+
+    A) full de-novo annotation run:
+
+        ./ShortStack.pl col_leaf_ok.bam Athaliana_167.fa
+
+    B) count mode run to quantify and annotate known miRBase MIRNA loci:
+
+        ./ShortStack.pl --count ath_mb18_ShortStack_loci.txt col_leaf_ok.bam Athaliana_167.fa
+
+    C) Analyze annotated miRBase mature miRNAs for acceptable structure with
+    miR_homologs.pl:
+
+        ./miR_homologs.pl ath_mature_nr.bam Athaliana_167.fa
+
 OPTIONS
     --outdir [string] : Name of directory to be created to receive results
     of the run. Deafults to "ShortStack_[time]", where time is the number of
@@ -112,12 +177,6 @@ OPTIONS
 
     --maxhpsep [integer] : Maximum allowed span for a base-pair during
     hairpin search. Default = 300. Must be between 50 and 2000.
-
-    --maxfoldwindow [integer] : Maximum size of input genomic DNA allowed to
-    fold during hairpin search. Default = 1000. Clusters whose unpadded
-    region is larger than --maxfoldwindow will not be subject to hairpin
-    search. Increasing maxfoldwindow could drastically increase run times.
-    Allowed values are between 50 and 100,000
 
     --minfracpaired [float] : Minimum fraction of paired nucleotides
     required within a valid hairpin structure. Default = 0.67. Allowed
@@ -403,9 +462,8 @@ OUTPUT
 
     Column 1: Acceptable Hairpin : Indicates whether the cluster has a
     possible hairpin whose structure conforms to the --minfracpaired and
-    --minntspaired settings. Note that a zero will be applied if no hairpins
-    are found OR in the cases where no RNA folding is attempted (because the
-    cluster size exceeds option --maxfoldwindow.
+    --minntspaired settings. Note that a zero will be applied if no
+    acceptable hairpins are found.
 
     Column 2: Coverage Pattern : Indicates whether the small RNAs have a
     coverage pattern that is consistent with biogenesis from the putative
@@ -500,40 +558,38 @@ KEY METHODS
 
   Hairpin analysis in de novo mode
 
-    1. Clusters whose length exceeds the maximum folding window specified in
-    option --maxfoldwindow will not be analyzed for hairpins / MIRNAs.
+    1. The genomic window to be subject to RNA folding is first determined.
+    For loci whose length is greater than or equal to 1,000nts, the window
+    of genomic DNA corresponding to the locus itself is used. For loci less
+    than 1,000nts in length, a window, centered upon the middle of the
+    locus, with a size of the lesser of 1,000nts OR 3 x
+    unpadded_cluster_length is used. (The unpadded cluster length is the
+    length - (2 * option --pad)). If 3 x unpadded_cluster_length is less
+    than 250nts, a window size of 250nts is applied.
 
-    2. For all other clusters, a genomic window centered on the middle of
-    cluster, with a length of 3x the unpadded cluster length is calculated.
-    The unpadded cluster length is the length - (2 * option --pad). If the
-    size of this window exceeds option --maxfoldwindow, RNA structure
-    prediction will not take place. On the opposite end, if the 3 *
-    (unpadded cluster length) size is less than 250nts, a 250nt window
-    centered on the cluster will be folded.
-
-    3. Both the top and bottom genomic strands are then subjected to
-    secondary structure prediction using RNALfold (options -d 2 -noLP
-    (--maxhpsep)), which returns a diverse set of often overlapping
+    2. Both the top and bottom genomic strands from the window are then
+    subjected to secondary structure prediction using RNALfold (options -d 2
+    -noLP (--maxhpsep)), which returns a diverse set of often overlapping
     predicted structures.
 
-    4. The structures are parsed, retaining only those that satisfy options
+    3. The structures are parsed, retaining only those that satisfy options
     --minfracpaired and --minntspaired. minfracpaired refers to the fraction
     of nts in the 'lowest' helix that are paired, NOT to the fraction of ALL
     nts in the window that are paired. Same for --minntspaired .. only the
     positions within the lowest helix are considered.
 
-    5. Redundant hairpins are then removed. Redundant hairpins are those
+    4. Redundant hairpins are then removed. Redundant hairpins are those
     whose 5' arms and 3' arms overlap. In pairwise comparisons of redundant
-    hairpins, the hairpin with the lowest deltaG / nt is retained.
+    hairpins, the longest hairpin is retained.
 
-    6. Hairpins that don't have overlap with the original cluster are then
+    5. Hairpins that don't have overlap with the original cluster are then
     removed. Because the folding window is often extended substantially
     around the cluster, there could be many putative hairpins that are not
     within the original cluster. To have overlap, at least one of the
     hairpin's helical arms must have at least 20nts within the original
     cluster coordinates.
 
-    7. The pattern of small RNA expression relative to the remaining
+    6. The pattern of small RNA expression relative to the remaining
     hairpins is then examined. To examine the coverage pattern, the hairpin
     window (not the original cluster window) is first, temporarily, expanded
     to include an upstream flanking region equal in length to the 5' arm,
@@ -545,7 +601,7 @@ KEY METHODS
     fraction specififed in option --minfrachpdepth in order to pass this
     step.
 
-    8. Clusters with one or more hairpins that make it through step 7 intact
+    7. Clusters with one or more hairpins that make it through step 6 intact
     are considered to be hairpin-derived, and will be subject to MIRNA
     analysis later on. The original cluster coordinates are removed, and
     replaced by new clusters defined based upon the location of the hairpin,
@@ -562,23 +618,21 @@ KEY METHODS
     the cluster locations after analyzing the hairpins. Step by step,
     relative to the step discussed above in de novo mode...
 
-    1. Same as step one above
-
-    2. Only the actual input region is folded, not a extended window around
+    1. Only the actual input region is folded, not a extended window around
     the unpadded region.
+
+    2. Same as step 2 above
 
     3. Same as step 3 above
 
     4. Same as step 4 above
 
-    5. Same as step 5 above
-
-    6. Same as step 6 above, except that it is never relevant, as all
+    5. Same as step 5 above, except that it is never relevant, as all
     hairpins will for certain be within the original cluster
 
-    7. Same as step 7 above.
+    6. Same as step 6 above.
 
-    8. Same as step 8 above, EXCEPT that no padding of the cluster takes
+    7. Same as step 7 above, EXCEPT that no padding of the cluster takes
     place, AND, in case more than one valid hairpin is returned, only one
     (arbitrarily chosen) is retained.
 
@@ -598,10 +652,10 @@ KEY METHODS
 
     Criteria for MIRNA annotation by ShortStack :
 
-    1. The putative hairpin must have a valid structure (step 4 in hairpin
+    1. The putative hairpin must have a valid structure (step 3 in hairpin
     analysis above: satisfying options --minfracpaired and --minntspaired)
     and have a pattern of small RNA coverage consistent with small RNA
-    biogenesis preferentially from the hairpin arms (step 7 in hairpin
+    biogenesis preferentially from the hairpin arms (step 6 in hairpin
     analysis above).
 
     2. There must be at least one candidate mature miRNA that comprises at

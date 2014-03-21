@@ -1,12 +1,12 @@
 #!/usr/bin/perl -w
-# See below the __END__ mark for docmentation, license, etc., or just see the README distributed with this script
+# See below the __END__ mark for docmentation, license, citation, etc., or just see the README distributed with this script
 
 use Getopt::Long;
 use strict;
 
-############### MAIN PROGRAM BLOCK
+###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.1.2";
+my $version = "0.1.3";
 #####
 
 ##### get options and validate them
@@ -22,7 +22,7 @@ my $pad = 100;
 my $dicermin = 20;
 my $dicermax = 24;
 my $maxhpsep = 300;
-my $maxfoldwindow = 1000;
+#my $maxfoldwindow = 1000;  # obsoleted v.0.1.3
 my $minfracpaired = 0.67;
 my $minntspaired = 30;
 my $minfrachpdepth = 0.5;
@@ -42,7 +42,6 @@ GetOptions ('outdir=s' => \$outdir,
 	    'dicermin=i' => \$dicermin,
 	    'dicermax=i' => \$dicermax,
 	    'maxhpsep=i' => \$maxhpsep,
-	    'maxfoldwindow=i' => \$maxfoldwindow,
 	    'minfracpaired=f' => \$minfracpaired,
 	    'minntspaired=i' => \$minntspaired,
 	    'minfrachpdepth=f' => \$minfrachpdepth,
@@ -92,11 +91,6 @@ unless(($dicermax >= 15) and ($dicermax <= 35) and ($dicermin <= $dicermax)) {
 # ensure that option --maxhpsep is present and logical -- 50 >= x <= 2000
 unless(($maxhpsep >= 50) and ($maxhpsep <= 2000)) {
     die "Option --maxhpsep must be a number between 50 and 2000\n\n$usage\n";
-}
-
-#ensure that option --maxfoldwindow is present and logical -- 50 >= x <= 100,000
-unless(($maxfoldwindow >= 50) and ($maxfoldwindow <= 100000)) {
-    die "Option --maxfoldwindow must be a number between 50 and one hundred thousand\n\n$usage\n";
 }
 
 # ensure that option --minfracpaired is present and logical -- 0 > x <= 1
@@ -218,7 +212,6 @@ if($nohp) {
     print STDERR "Running in \"nohp\" mode: Hairpins and MIRNAs will not be inferred\n";
 } else {
     print STDERR "Maximum allowed separation of a base pair to span during hairpin prediction: $maxhpsep\n";
-    print STDERR "Maximum genomic window to input to RNALfold: $maxfoldwindow\n";
     print STDERR "Minimum fraction of paired nts allowable in a valid hairpin structure: $minfracpaired\n";
     print STDERR "Minimum number of base pairs within a valid hairpin structure: $minntspaired\n";
     print STDERR "Minimum fraction of coverage in hairpin helix to keep hairpin: $minfrachpdepth\n";
@@ -261,7 +254,6 @@ if($nohp) {
     print LOG "Running in \"nohp\" mode: Hairpins and MIRNAs will not be inferred\n";
 } else {
     print LOG "Maximum allowed separation of a base pair to span during hairpin prediction: $maxhpsep\n";
-    print LOG "Maximum genomic window to input to RNALfold: $maxfoldwindow\n";
     print LOG "Minimum fraction of paired nts allowable in a valid hairpin structure: $minfracpaired\n";
     print LOG "Minimum number of base pairs within a valid hairpin structure: $minntspaired\n";
     print LOG "Minimum fraction of coverage in hairpin helix to keep hairpin: $minfrachpdepth\n";
@@ -332,9 +324,9 @@ if($nohp) {
     # if running in --count mode, only the exact interval defined in the a priori file will be folded.  Else, the de novo method takes a larger window
     my %to_fold = ();
     if($count) {
-	%to_fold = get_folding_regions_countmode(\$genome,\@clusters,\$maxfoldwindow);
+	%to_fold = get_folding_regions_countmode(\$genome,\@clusters);
     } else {
-	%to_fold = get_folding_regions(\$genome,\@clusters,\$maxfoldwindow,\$pad);  ## hash structure: 'sequence', 'start', 'stop'  strand is always Watson
+	%to_fold = get_folding_regions(\$genome,\@clusters,\$pad);  ## hash structure: 'sequence', 'start', 'stop'  strand is always Watson
     }
     print STDERR "\n\n";
 
@@ -346,13 +338,13 @@ if($nohp) {
     #fold each query and retain only qualifying structures
 
     print STDERR "\tFolding sequences and identifying qualifying hairpins\.\.\.";
-    my %qualifying_hairpins = folder(\%to_fold,\$maxhpsep,\$minntspaired,\$minfracpaired);  ## each entry has locus as key and an array of entries.  Each entry is tab-delim w/ brax, local-start, structure_details, deltaG, and strand
-
+    my %qualifying_hairpins = folder(\%to_fold,\$maxhpsep,\$minntspaired,\$minfracpaired);  ## each entry has locus as key and an array of entries.  Each entry is tab-delim w/ brax, local-start, structure_details, and strand
+    
     #convert the coordinates of the qualifying hairpins to the true chromosomal coordinates
     print STDERR "\tConverting hairpin coordinates to true genomic coordinates\.\.\.";
     my %true_hps = hairpin_coords(\%to_fold,\%qualifying_hairpins);  ## structure same as %qualifying hairpins
     print STDERR "Done\n";
-
+    
     print STDERR "\tRemoving redundant hairpins on a per-locus basis\.\.\.";
     my %true_hps_trimmed = remove_redundant_hps(\%true_hps); ## structure same as %qualifying hairpins
     print STDERR "Done\n";
@@ -467,7 +459,7 @@ close BIG;
 unless($nohp) {
     my $hpfile = "$outdir" . "\/" . "Hairpin-MIRNA_summary\.txt";
     open (HPSUM, ">$hpfile");
-    print HPSUM "\#Acceptable Hairpin\tCoverage Pattern\tCandidates >20\%\tCandidates <= 4mm\tCandidates not loop-spanning\tStars <= 4mm\tStars not loop-spanning\tStars Expressed\tCandidate plus Star >= 25\%\tNon-Redundant\n";
+    print HPSUM "\#Locus\tName\tAcceptable Hairpin\tCoverage Pattern\tCandidates >20\%\tCandidates <= 4mm\tCandidates not loop-spanning\tStars <= 4mm\tStars not loop-spanning\tStars Expressed\tCandidate plus Star >= 25\%\tNon-Redundant\n";
     foreach my $abc (@final_clusters) {
 	print HPSUM "$abc\t$names{$abc}\t";
 	my @testest = @{$miRNAs{$abc}};
@@ -658,7 +650,6 @@ OPTIONS:
 --dicermin [integer] : smallest size of the Dicer-derived small RNAs \(must be between 15-35 and less than or equal to option --dicermax\; default: 20\)
 --dicermax [integer] : largest size of the Dicer-derived small RNAs \(must be between 15-35 and more than or equal to option --dicermin\; default: 24\)
 --maxhpsep [integer] : maximum allowed separation of a base pair to span during hairpin prediction \(option -L for RNALfold\; must be between 50 and 2000\;default: 300\)
---maxfoldwindow [integer] : maximum genomic window size to fold\.  The smaller of 4 x locus size or this value is folded\; default: 1000
 --minfracpaired [float] : minimum fraction of paired nts allowable in a hairpin structure\; default: 0.67
 --minntspaired [integer] : minimum number of base-pairs in an accetable hairpin structure\; default: 30
 --minfrachpdepth [float] : minimum fraction of coverage in hairpin helix to keep hairpin\; default: 0.5
@@ -1119,7 +1110,7 @@ sub get_names_countmode {
 		
 
 sub get_folding_regions {
-    my($gen_file,$info,$max_size,$pad) = @_;  ## passed as references .. scalar, array, scalar, and scalar, respectively
+    my($gen_file,$info,$pad) = @_;  ## passed as references .. scalar, array, scalar, and scalar, respectively
     my $locus;
 
     my %to_fold = ();
@@ -1161,20 +1152,15 @@ sub get_folding_regions {
 	} else {
 	    die "Fatal in sub-routine get_folding_regions: could not parse locus name $locus\n";
 	}
-	
 
 	$locus_size = $stop - $start + 1;
-	
-	# calc. 3x the unpadded locus
 	$unp_locus_size_3x = int (3 * ($locus_size - (2 * $$pad)));  ## the unpadded region is the locus size - (2 * $pad).
-	
-	# if the 3x unpadded size is too big, don't fold
-	if($unp_locus_size_3x > $$max_size) {
-	    next;
-	}
-	
-	# if the 3x unpadded size is too small, fold a 250nt window instead
-	if($unp_locus_size_3x < 250) {
+
+	if($locus_size >= 1000) {
+	    $get_size = $locus_size;
+	} elsif($unp_locus_size_3x > 1000) {
+	    $get_size = 1000;
+	} elsif($unp_locus_size_3x < 250) {
 	    $get_size = 250;
 	} else {
 	    $get_size = $unp_locus_size_3x;
@@ -1244,7 +1230,7 @@ sub get_folding_regions {
 
 
 sub get_folding_regions_countmode {
-    my($gen_file,$info,$max_size) = @_;  ## passed as references .. scalar, array, and scalar, respectively
+    my($gen_file,$info) = @_;  ## passed as references .. scalar, array
     my $locus;
 
     my %to_fold = ();
@@ -1288,13 +1274,6 @@ sub get_folding_regions_countmode {
 	    die "Fatal in sub-routine get_folding_regions: could not parse locus name $locus\n";
 	}
 	
-	# check size
-	$locus_size = $stop - $start + 1;
-	
-	# if the locus size is larger than the max folding area, move on .. we will not be examing hairpins at such loci
-	if($locus_size > $$max_size) {
-	    next;
-	}
 	
 	# call samtools faidx to get the FASTA formatted version of the whole thing
 	$subseq = '';
@@ -1337,6 +1316,12 @@ sub folder {
     my $start;
     my $entry;  ## tab-delimited .. brax, start, helix_info (e.g. 123-150,180-200), strand "Watson" or "Crick"
     my $revcomp;
+    my %regions = ();
+    my $brax_section;
+    my $left;
+    my $right;
+
+    my $adj_st;
     
     # first, get some information to enable a crude progress bar
     my $n_loci_to_fold = scalar ( keys %$to_fold);
@@ -1368,27 +1353,35 @@ sub folder {
 		die "FATAL in sub-routine \'folder\' : failed to parse brackets from RNALfold output line:\n$_\n";
 	    }
 	    
-	    if($_ =~ /\s+\((.*\d+.*)\)/) {
-		$delta_G = $1;
-		$delta_G =~ s/\s//g;
-	    } else {
-		die "FATAL in sub-routine \'folder\' : failed to parse deltaG from RNALfold output line: $_\n";
-	    }
+	    ## Note, as of v.0.1.3, deltaG is no longer used. 
+	    ##if($_ =~ /\s+\((.*\d+.*)\)/) {
+	    #	$delta_G = $1;
+	    #	$delta_G =~ s/\s//g;
+	    #} else {
+	    #	die "FATAL in sub-routine \'folder\' : failed to parse deltaG from RNALfold output line: $_\n";
+	    #}
 	    
 	    if($_ =~ /(\d+)\s*$/) {
 		$start = $1;
 	    } else {
 		die "FATAL in sub-routine \'folder\' : failed to parse start position from RNALfold output line $_\n";
 	    }
+	    
+	    # new v0.1.3 .. split the RNALfold-provided structure into distinct hairpins .. this fixes a major problem in earlier versions with false negatives on hairpin discovery!
+	    %regions = get_distinct_hps($brax);
+	    while(($left, $right) = each %regions) {
+		$brax_section = substr($brax,($left - 1),($right-$left+1));
+	    
+		# send the structure to the general structure evaluation sub-routine, which returns zero to reject, one to keep
+		$structure_details = evaluate_structure_general($brax_section,$$min_paired,$$min_frac_paired);
 
-	    # send the structure to the general structure evaluation sub-routine, which returns zero to reject, one to keep
-	    $structure_details = evaluate_structure_general($brax,$$min_paired,$$min_frac_paired);
-
-	    # if it is OK, add to output
-	    unless($structure_details eq "bogus") {
-		# structure details are 123-150,180-200 .. e.g. start and stop positions of the helix of interest, one-based coordinates, relative to the brackets themselves.
-		$entry = "$brax\t$start\t$structure_details\t$delta_G\t" . "Watson";
-		push(@{$output{$locus}}, $entry);
+		# if it is OK, adjust the coordinates, and add to output
+		unless($structure_details eq "bogus") {
+		    # structure details are 123-150,180-200 .. e.g. start and stop positions of the helix of interest, one-based coordinates, relative to the brackets themselves.
+		    $adj_st = $left + $start - 1;
+		    $entry = "$brax_section\t$adj_st\t$structure_details\t" . "Watson";
+		    push(@{$output{$locus}}, $entry);
+		}
 	    }
 	}
 	close RNALFOLD;
@@ -1412,27 +1405,36 @@ sub folder {
 		die "FATAL in sub-routine \'folder\' : failed to parse brackets from RNALfold output line:\n$_\n";
 	    }
 	    
-	    if($_ =~ /\s+\((.*\d+.*)\)/) {
-		$delta_G = $1;
-		$delta_G =~ s/\s//g;
-	    } else {
-		die "FATAL in sub-routine \'folder\' : failed to parse deltaG from RNALfold output line: $_\n";
-	    }
+	    ## Note, as of v.0.1.3, deltaG is no longer used. 
+	    #if($_ =~ /\s+\((.*\d+.*)\)/) {
+	    #	$delta_G = $1;
+	    #	$delta_G =~ s/\s//g;
+	    #} else {
+	    #	die "FATAL in sub-routine \'folder\' : failed to parse deltaG from RNALfold output line: $_\n";
+	    #}
 	    
 	    if($_ =~ /(\d+)\s*$/) {
 		$start = $1;
 	    } else {
 		die "FATAL in sub-routine \'folder\' : failed to parse start position from RNALfold output line $_\n";
 	    }
-
-	    # send the structure to the general structure evaluation sub-routine, which returns zero to reject, one to keep
-	    $structure_details = evaluate_structure_general($brax,$$min_paired,$$min_frac_paired);
-
-	    # if it is OK, add to output
-	    unless($structure_details eq "bogus") {
-		# structure details are 123-150,180-200 .. e.g. start and stop positions of the helix of interest, one-based coordinates, relative to the brackets themselves.
-		$entry = "$brax\t$start\t$structure_details\t$delta_G\t" . "Crick";
-		push(@{$output{$locus}}, $entry);
+	    
+            # new v0.1.3 .. split the RNALfold-provided structure into distinct hairpins .. this fixes a major problem in earlier versions with false negatives on hairpin discovery!
+	    %regions = get_distinct_hps($brax);
+	    while(($left, $right) = each %regions) {
+		$brax_section = substr($brax,($left - 1),($right-$left+1));
+		
+		# send the structure to the general structure evaluation sub-routine, which returns zero to reject, one to keep
+		$structure_details = evaluate_structure_general($brax_section,$$min_paired,$$min_frac_paired);
+		
+		# if it is OK, adjust the coordinates, and add to output
+		unless($structure_details eq "bogus") {
+		    
+		    # structure details are 123-150,180-200 .. e.g. start and stop positions of the helix of interest, one-based coordinates, relative to the brackets themselves.
+		    $adj_st = $left + $start - 1;
+		    $entry = "$brax_section\t$adj_st\t$structure_details\t" . "Crick";
+		    push(@{$output{$locus}}, $entry);
+		}
 	    }
 	}
 	close RNALFOLD;
@@ -1450,6 +1452,41 @@ sub folder {
     }
     print STDERR " Done\n";
     return %output;
+}
+
+sub get_distinct_hps {
+    # given a brax, return a hash with keys as starts and values as stops for all distinct hairpins in the input
+    my($brax) = @_;  ## simply passed as scalar
+    my @chars = split('', $brax);
+    my $i = 0;
+    my %pairs = get_left_right($brax);
+    my %rl_pairs = ();
+    my $r;
+    my $l;
+    while(($l,$r) = each %pairs) {
+	$rl_pairs{$r} = $l;
+    }
+    my $last_right;  # right means ")"
+    my $first_left;  # left means "("
+    my %regions = (); ## left(key), right(value)
+    foreach my $ch (@chars) {
+	++$i;  ## one-based position
+	if($ch eq "\(") {
+	    if($last_right) {
+		$regions{"$rl_pairs{$last_right}"} = $last_right;
+		$last_right = '';
+	    }
+	} elsif ($ch eq "\)") {
+	    $last_right = $i;
+	}
+    }
+    # the last one
+    if($last_right) {
+	if(exists($rl_pairs{$last_right})) {
+	    $regions{"$rl_pairs{$last_right}"} = $last_right;
+	}
+    }
+    return %regions;
 }
 
 sub evaluate_structure_general {
@@ -1587,7 +1624,7 @@ sub hairpin_coords {
     my $local_offset;
     my $brax;
     my $inp;
-    my $delta_G;
+    #my $delta_G;  deprecated v0.1.3
     ## coordinates within the initial query region.
     my $left_1_start;
     my $left_1_stop;
@@ -1620,7 +1657,7 @@ sub hairpin_coords {
 	foreach $inp (@inputs) {
 	    @fields = split ("\t", $inp);
 	    $strand_folded = pop @fields;
-	    $delta_G = pop @fields;
+	    #$delta_G = pop @fields;
 	    $in_helix_coords = pop @fields;
 	    $local_offset = pop @fields;
 	    $brax = pop @fields;
@@ -1659,7 +1696,7 @@ sub hairpin_coords {
 	    
 	    $brax_true = "$start_true" . "-" . "$stop_true";
 	    $helix_true = "$left_true_start" . "-" . "$left_true_stop" . "," . "$right_true_start" . "-" . "$right_true_stop";
-	    $true_entry = "$brax\t$brax_true\t$helix_true\t$delta_G\t$strand_folded";
+	    $true_entry = "$brax\t$brax_true\t$helix_true\t$strand_folded";
 	    
 	    ## TEST
 #	    print STDERR "\tOUTPUT: $true_entry\n";
@@ -1688,8 +1725,8 @@ sub remove_redundant_hps {
     my %to_deleteW = ();
     my %to_deleteC = ();
     my $x;
-
-    my $delta_G_per_nt;
+    
+    #my $delta_G_per_nt;
     
     my @q_fields = ();
     my @q_ranges = ();
@@ -1711,7 +1748,9 @@ sub remove_redundant_hps {
     
     my @entriesW = ();
     my @entriesC = ();
-
+    
+    my $q_size;
+    my $s_size;
     while(($locus) = each %$input_hps) {
 	## TEST
 	#print STDERR "LOCUS: $locus\n";
@@ -1734,9 +1773,9 @@ sub remove_redundant_hps {
 	    @fields = split ("\t", $entry);
 	    $helix_coords = $fields[2];
 	    $hp_length = length $fields[0];  ## the brackets
-	    $delta_G_per_nt = $fields[3] / $hp_length;
-	    $tmp_entry = "$helix_coords\t$delta_G_per_nt";
-	    $strand = $fields[4];
+	    #$delta_G_per_nt = $fields[3] / $hp_length;
+	    $tmp_entry = "$helix_coords";
+	    $strand = $fields[3];
 	    if($strand eq "Watson") {
 		push(@tmpW, $tmp_entry);
 		push(@entriesW, $entry);
@@ -1751,14 +1790,13 @@ sub remove_redundant_hps {
 		next;
 	    }
 	    $tmp_entry = $tmpW[$x];
-	    @q_fields = split ("\t", $tmp_entry);
-	    ## q_fields[1] is the query delta_g per nt
-	    @q_ranges = split (",", $q_fields[0]);
+	    #@q_fields = split ("\t", $tmp_entry);
+	    @q_ranges = split (",", $tmp_entry);
 	    ## q_ranges[0] is the 5p, [1] is the 3p
 	    @q_5p_range = split ("-", $q_ranges[0]);
 	    @q_3p_range = split ("-", $q_ranges[1]);
 	    # in the above, [0] is the start, [1] is the stop.
-	    
+	    $q_size = abs($q_5p_range[0] - $q_3p_range[1]);
 	    # go through all pairwise combinations
 	    for($y = 0; $y < (scalar @tmpW); ++$y) {
 		if($x == $y) {
@@ -1768,11 +1806,11 @@ sub remove_redundant_hps {
 		    next;  ## don't both with entries already on the delete list
 		}
 		$sub_entry = $tmpW[$y];
-		@s_fields = split ("\t", $sub_entry);
-		## s_fields[1] is the subject deltaG per nt
-		@s_ranges = split (",", $s_fields[0]);
+		#@s_fields = split ("\t", $sub_entry);
+		@s_ranges = split (",", $sub_entry);
 		@s_5p_range = split ("-", $s_ranges[0]);
 		@s_3p_range = split ("-", $s_ranges[1]);
+		$s_size = abs($s_5p_range[0] - $s_3p_range[1]);
 		
 		# is there overlap in both the 5p and 3 ranges?
 
@@ -1780,8 +1818,8 @@ sub remove_redundant_hps {
 		$three_p_overlap = range_overlap(\@q_3p_range,\@s_3p_range);
 		## zero returned for no overlap, 1 for overlap
 		if(($five_p_overlap) and ($three_p_overlap)) {
-		    # we will delete the one with the higher per-nt delta G
-		    if($q_fields[1] > $s_fields[1]) {
+		    # we will delete the shorter one
+		    if($q_size <= $s_size) {
 			$to_deleteW{$x} = 1;
 		    } else {
 			$to_deleteW{$y} = 1;
@@ -1803,14 +1841,14 @@ sub remove_redundant_hps {
 		next;
 	    }
 	    $tmp_entry = $tmpC[$x];
-	    @q_fields = split ("\t", $tmp_entry);
-	    ## q_fields[1] is the query delta_g per nt
-	    @q_ranges = split (",", $q_fields[0]);
+	    #@q_fields = split ("\t", $tmp_entry);
+
+	    @q_ranges = split (",", $tmp_entry);
 	    ## q_ranges[0] is the 5p, [1] is the 3p
 	    @q_5p_range = split ("-", $q_ranges[0]);
 	    @q_3p_range = split ("-", $q_ranges[1]);
 	    # in the above, [0] is the start, [1] is the stop.
-	    
+	    $q_size = abs($q_5p_range[0] - $q_3p_range[1]);
 	    # go through all pairwise combinations
 	    for($y = 0; $y < (scalar @tmpC); ++$y) {
 		if($x == $y) {
@@ -1820,20 +1858,22 @@ sub remove_redundant_hps {
 		    next;  ## don't both with entries already on the delete list
 		}
 		$sub_entry = $tmpC[$y];
-		@s_fields = split ("\t", $sub_entry);
-		## s_fields[1] is the subject deltaG per nt
-		@s_ranges = split (",", $s_fields[0]);
+		#@s_fields = split ("\t", $sub_entry);
+
+		@s_ranges = split (",", $sub_entry);
 		@s_5p_range = split ("-", $s_ranges[0]);
 		@s_3p_range = split ("-", $s_ranges[1]);
-		
+		$s_size = abs($s_5p_range[0] - $s_3p_range[1]);
+
 		# is there overlap in both the 5p and 3 ranges?
 
 		$five_p_overlap = range_overlap(\@q_5p_range,\@s_5p_range);
 		$three_p_overlap = range_overlap(\@q_3p_range,\@s_3p_range);
+		
 		## zero returned for no overlap, 1 for overlap
 		if(($five_p_overlap) and ($three_p_overlap)) {
-		    # we will delete the one with the higher per-nt delta G
-		    if($q_fields[1] > $s_fields[1]) {
+		    # delete the shorter of the two
+		    if($q_size <= $s_size) {
 			$to_deleteC{$x} = 1;
 		    } else {
 			$to_deleteC{$y} = 1;
@@ -2369,7 +2409,7 @@ sub hp_output {
 	@brax_coords = split ("-",$l_data_fields[1]);
 	# sort so that the lower coordinate is always in the [0]
 	@brax_coords = sort {$a <=> $b} @brax_coords;
-	$strand = $l_data_fields[4];  ## either 'Watson' or 'Crick'
+	$strand = $l_data_fields[3];  ## either 'Watson' or 'Crick'
 	
 	# retrieve the genome sequence corresponding to the padded hp / the whole cluster
 	if($locus =~ /^(\S+):(\d+)-(\d+)$/) {
@@ -4083,6 +4123,8 @@ A manuscript describing the ShortStack package will be submitted sometime in the
 
 =head1 VERSIONS
 
+0.1.3 : June 12 2012.  THIS VERSION.  Critical bug fix:  Fixed issue in analysis of RNALfold-derived secondary structures that was causing a substantial rate of acceptable hairpin structures to be incorrectly rejected .. thus under-reporting hairpin-and MIRNA-derived loci.  Additionally, removed the option --maxtofoldwindow ; all loci are now folded and analyzed unless running in nohp mode.  Other smaller fixes and changes including fixing the column names on the "Hairpin-MIRNA_summary.txt" file ... previously, the "Name" and "Locus" columns lacked headers.
+
 0.1.2 : May 17, 2012.  Changes to simplify downstream analysis of the Results.txt file, and to phasing analysis.  Details: A) changed format of 'DicerCall' column in result to remove the colon-delimted fractions .. now it simply reports size or 'N'  B) Changed format of phasing analysis results to split the phase offset, p-value, and false-discovery rate call into three separate columns.  C) added option of --phasesize none to suppress analysis of phasing at all clusters.
 
 0.1.1 : May 4, 2012.  Added helper script "miR_homologs.pl" to package.  No change to ShortStack.pl code itself except version change.
@@ -4135,6 +4177,32 @@ Shortstack.pl [options] [in.bam] [genome.fasta]
 
 8. For a full de-novo run with default parameters, call "Shortstack.pl [in.bam] [genome.fasta]".  See OPTIONS below for other options and run modes.
 
+=head1 TEST
+
+Some Arabidopsis test data can be found at http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
+
+1.  Athaliana_genome.tgz : The "TAIR10" Arabidopsis thaliana (ecotype-Col-0) genome assembly including the plastid and mitochrondria, and it's .fai index.  Retrieved from Phytozome.  This is the assembly to which the .bam files in this directory were mapped.
+
+2.  col_leaf_ok.bam[.bai] : Sorted and indexed small RNA-seq alignments in BAM format.  Derived from wild-type rosette leaves -- Liu et al. (2012) Plant Physiology PMID: 22474216.  This alignment contains 26,523,213 mapped reads, 14,351,052 of which were "uniquely" mapped (just one alignment), and a total of 104,980,568 alignments.  The small RNA sizes range from 15-27nts.  To create this alignment, the raw .csfasta and .QV.qual files were combined to make a colorspace-fastq formatted file, adapters were trimmed along with the corresponding quality values (including the hybrid 3' color and Q value), and mapped using bowtie 0.12.7.  The bowtie settings were -C -v 1 --best --strata -k 50 --col-keepends -S, which allow zero or one mismatch, keeping only the best scoring 'stratum', and retaining only the first 50 alignments observed, and outputting in sam format.  SAM lines corresponding to unmapped reads were filtered out.  The SAM file was then processed with Prep_bam.pl (included in ShortStack package) to add the NH:i: tags to each alignment, and to output a chromosomal-sorted alignment in the BAM format.
+
+3. ath_mb18_ShortStack_loci.txt : Coordinates for Arabidopsis thaliana MIRNA hairpin sequences, as determined by taking the top-scoring hit from a blastn search using miRBase 18 ath- hairpins as queries against the reference genome.  This file is useful as input for a ShortStack run in --count mode.
+
+4.  ath_mature_nr.bam[.bai] : Sorted and indexed alignments of all non-redundant mature Arabidopsis thaliana miRNAs from miRBase18 against the A. thaliana reference genome.  Mapped with bowtie 0.12.7 using settings -f -v 0 -m 20 ... perfect matches only, no alignments reported if more than 20 were observed.  These alignments are useful for testing the miR_homologs.pl helper script.
+
+Some Tests:
+
+A) full de-novo annotation run:
+
+    ./ShortStack.pl col_leaf_ok.bam Athaliana_167.fa
+
+B) count mode run to quantify and annotate known miRBase MIRNA loci:
+
+    ./ShortStack.pl --count ath_mb18_ShortStack_loci.txt col_leaf_ok.bam Athaliana_167.fa
+
+C) Analyze annotated miRBase mature miRNAs for acceptable structure with miR_homologs.pl:
+
+    ./miR_homologs.pl ath_mature_nr.bam Athaliana_167.fa
+
 
 =head1 OPTIONS
 
@@ -4151,8 +4219,6 @@ Shortstack.pl [options] [in.bam] [genome.fasta]
 --dicermax [integer] : Largest size in the Dicer size range (or size range of interest).  Deafult = 24.  Must be between 15 and 35, and more than or equal to --dicermin
 
 --maxhpsep [integer] : Maximum allowed span for a base-pair during hairpin search.  Default = 300.  Must be between 50 and 2000.
-
---maxfoldwindow [integer] : Maximum size of input genomic DNA allowed to fold during hairpin search.  Default = 1000.  Clusters whose unpadded region is larger than --maxfoldwindow will not be subject to hairpin search.  Increasing maxfoldwindow could drastically increase run times.  Allowed values are between 50 and 100,000
 
 --minfracpaired [float] : Minimum fraction of paired nucleotides required within a valid hairpin structure.  Default = 0.67.  Allowed values are greater than 0 and less than or equal to 1.
 
@@ -4272,7 +4338,7 @@ Hairpins and MIRNAs are graphically indicated: The helical arms will be shown as
 
 This is a tab-delimited text file showing in detail the results of the hairping and MIRNA analysis procedure.  If the run was in --nohp mode, this file will not be created.  The first line begins with a comment symbol "#" and contains column headers.  Each subsequent row describes a cluster.  A value of zero indicates failure of the specific test for that column.  A value of one (or more for some columns) indicates success of that test.
 
-Column 1: Acceptable Hairpin : Indicates whether the cluster has a possible hairpin whose structure conforms to the --minfracpaired and --minntspaired settings.  Note that a zero will be applied if no hairpins are found OR in the cases where no RNA folding is attempted (because the cluster size exceeds option --maxfoldwindow.
+Column 1: Acceptable Hairpin : Indicates whether the cluster has a possible hairpin whose structure conforms to the --minfracpaired and --minntspaired settings.  Note that a zero will be applied if no acceptable hairpins are found.
 
 Column 2: Coverage Pattern : Indicates whether the small RNAs have a coverage pattern that is consistent with biogenesis from the putative hairpin.  To examine the coverage pattern, the hairpin size is first, temporarily, expanded to include an upstream flanking region equal in length to the 5' arm, and a downstream flanking region equal in length to the 3' arm.  The per-nucleotide depth of coverage is then determined across the extended region.  The sum of coverage on the sense strand (relative to the hairpin direction) within the two arms is divided by the total sum of coverage on both strands of the extended region.  This ratio must be >= to the fraction specififed in option --minfrachpdepth in order to pass this step.
 
@@ -4314,41 +4380,37 @@ Cluster discovery proceeds in two simple steps:
 
 =head2 Hairpin analysis in de novo mode
 
-1.  Clusters whose length exceeds the maximum folding window specified in option --maxfoldwindow will not be analyzed for hairpins / MIRNAs.
+1.  The genomic window to be subject to RNA folding is first determined.  For loci whose length is greater than or equal to 1,000nts, the window of genomic DNA corresponding to the locus itself is used.  For loci less than 1,000nts in length, a window, centered upon the middle of the locus, with a size of the lesser of 1,000nts OR 3 x unpadded_cluster_length is used. (The unpadded cluster length is the length - (2 * option --pad)). If 3 x unpadded_cluster_length is less than 250nts, a window size of 250nts is applied.
 
-2.  For all other clusters, a genomic window centered on the middle of cluster, with a length of  3x the unpadded cluster length is calculated.  The unpadded cluster length is the length - (2 * option --pad).  If the size of this window exceeds option --maxfoldwindow, RNA structure prediction will not take place.  On the opposite end, if the 3 * (unpadded cluster length) size is less than 250nts, a 250nt window centered on the cluster will be folded.
+2.  Both the top and bottom genomic strands from the window are then subjected to secondary structure prediction using RNALfold (options -d 2 -noLP (--maxhpsep)), which returns a diverse set of often overlapping predicted structures.
 
-3.  Both the top and bottom genomic strands are then subjected to secondary structure prediction using RNALfold (options -d 2 -noLP (--maxhpsep)), which returns a diverse set of often overlapping predicted structures.
+3.  The structures are parsed, retaining only those that satisfy options --minfracpaired and --minntspaired.  minfracpaired refers to the fraction of nts in the 'lowest' helix that are paired, NOT to the fraction of ALL nts in the window that are paired.  Same for --minntspaired .. only the positions within the lowest helix are considered.
 
-4.  The structures are parsed, retaining only those that satisfy options --minfracpaired and --minntspaired.  minfracpaired refers to the fraction of nts in the 'lowest' helix that are paired, NOT to the fraction of ALL nts in the window that are paired.  Same for --minntspaired .. only the positions within the lowest helix are considered.
+4.  Redundant hairpins are then removed.  Redundant hairpins are those whose 5' arms and 3' arms overlap.  In pairwise comparisons of redundant hairpins, the longest hairpin is retained.
 
-5.  Redundant hairpins are then removed.  Redundant hairpins are those whose 5' arms and 3' arms overlap.  In pairwise comparisons of redundant hairpins, the hairpin with the lowest deltaG / nt is retained.
+5.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window is often extended substantially around the cluster, there could be many putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 20nts within the original cluster coordinates.
 
-6.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window is often extended substantially around the cluster, there could be many putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 20nts within the original cluster coordinates.
+6. The pattern of small RNA expression relative to the remaining hairpins is then examined.  To examine the coverage pattern, the hairpin window (not the original cluster window) is first, temporarily, expanded to include an upstream flanking region equal in length to the 5' arm, and a downstream flanking region equal in length to the 3' arm.  The per-nucleotide depth of coverage is then determined across the extended region.  The sum of coverage on the sense strand (relative to the hairpin direction) within the two arms is divided by the total sum of coverage on both strands of the extended region.  This ratio must be >= to the fraction specififed in option --minfrachpdepth in order to pass this step.
 
-7. The pattern of small RNA expression relative to the remaining hairpins is then examined.  To examine the coverage pattern, the hairpin window (not the original cluster window) is first, temporarily, expanded to include an upstream flanking region equal in length to the 5' arm, and a downstream flanking region equal in length to the 3' arm.  The per-nucleotide depth of coverage is then determined across the extended region.  The sum of coverage on the sense strand (relative to the hairpin direction) within the two arms is divided by the total sum of coverage on both strands of the extended region.  This ratio must be >= to the fraction specififed in option --minfrachpdepth in order to pass this step.
-
-8. Clusters with one or more hairpins that make it through step 7 intact are considered to be hairpin-derived, and will be subject to MIRNA analysis later on.  The original cluster coordinates are removed, and replaced by new clusters defined based upon the location of the hairpin, padded by 15nts on each side.  Note an original cluster could have more than one causal hairpin.  Original clusters are removed, and replaced by one (or potentially more than one) new clusters centred around the causal hairpin(s).  Also note that this can result in final clusters that have some overlap.
+7. Clusters with one or more hairpins that make it through step 6 intact are considered to be hairpin-derived, and will be subject to MIRNA analysis later on.  The original cluster coordinates are removed, and replaced by new clusters defined based upon the location of the hairpin, padded by 15nts on each side.  Note an original cluster could have more than one causal hairpin.  Original clusters are removed, and replaced by one (or potentially more than one) new clusters centred around the causal hairpin(s).  Also note that this can result in final clusters that have some overlap.
 
 =head2 Hairpin analysis in --count mode
 
 In --count mode, hairpin analysis differs in that it does NOT fold an extended region around the unpadded input cluster, nor does it redefine the cluster locations after analyzing the hairpins.  Step by step, relative to the step discussed above in de novo mode...
 
-1. Same as step one above
+1. Only the actual input region is folded, not a extended window around the unpadded region.
 
-2. Only the actual input region is folded, not a extended window around the unpadded region.
+2. Same as step 2 above
 
 3. Same as step 3 above
 
 4. Same as step 4 above
 
-5. Same as step 5 above
+5. Same as step 5 above, except that it is never relevant, as all hairpins will for certain be within the original cluster
 
-6. Same as step 6 above, except that it is never relevant, as all hairpins will for certain be within the original cluster
+6. Same as step 6 above.
 
-7. Same as step 7 above.
-
-8. Same as step 8 above, EXCEPT that no padding of the cluster takes place, AND, in case more than one valid hairpin is returned, only one (arbitrarily chosen) is retained.
+7. Same as step 7 above, EXCEPT that no padding of the cluster takes place, AND, in case more than one valid hairpin is returned, only one (arbitrarily chosen) is retained.
 
 =head2 MIRNA Annotation
 
@@ -4356,7 +4418,7 @@ MIRNA locus annotation is designed to satisfy the criteria for de novo annotatio
 
 Criteria for MIRNA annotation by ShortStack : 
 
-1. The putative hairpin must have a valid structure (step 4 in hairpin analysis above: satisfying options --minfracpaired and --minntspaired) and have a pattern of small RNA coverage consistent with small RNA biogenesis preferentially from the hairpin arms (step 7 in hairpin analysis above).
+1. The putative hairpin must have a valid structure (step 3 in hairpin analysis above: satisfying options --minfracpaired and --minntspaired) and have a pattern of small RNA coverage consistent with small RNA biogenesis preferentially from the hairpin arms (step 6 in hairpin analysis above).
 
 2. There must be at least one candidate mature miRNA that comprises at least 20% of the total abundance of small RNAs mapped to the hairpin.
 
