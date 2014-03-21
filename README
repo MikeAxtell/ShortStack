@@ -27,8 +27,11 @@ CITATION
     quantification of small RNA genes. RNA 19:740-751.
     doi:10.1261/rna.035279.112
 
+    Shahid S., Axtell MJ. (2013) Identification and annotation of small RNA
+    genes using ShortStack. Methods doi:10.1016/j.ymeth.2013.10.004
+
 VERSION
-    1.2.0 :: Released October 16, 2013
+    1.2.1 :: Released October 23, 2013
 
 AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
@@ -144,6 +147,10 @@ OPTIONS
     files, corresponding to trimmed colorspace-fasta files provided in
     option --trimmedCS. Multiple datasets can be provided as a
     comma-delimited list.
+
+    --bowtie_cores [integer] : Number of processor cores to use during
+    bowtie alignment. Be sure to reserve 3 cores for the rest of alignment
+    pipeline. Default: 1.
 
     --align_only : Exits program after completion of small RNA-seq data
     alignment, creating BAM file.
@@ -703,40 +710,7 @@ KEY METHODS
     removed. Because the folding window could have been extended around the
     cluster, there could be putative hairpins that are not within the
     original cluster. To have overlap, at least one of the hairpin's helical
-    arms must have at least 1nt within the original cluster coordinates.
-
-    8. The pattern of small RNA expression relative to the remaining
-    hairpins is then examined. The per-nucleotide coverage across every
-    base, on both strands separately, across the original locus coordinates
-    is calculated. If there is a single hairpin whose 5' and 3' arms contain
-    >= [--minfrachpdepth] of the total coverage of the original locus, the
-    hairpin is kept for futher analysis. If more than one hairpin meets this
-    criterion, than the one with the highest coverage fraction in the arms
-    is retained. Note that this step contains a correction for reads that
-    are "dyads" .. reads that map twice to a hairpin, once in each arm, on
-    opposite strands... this happens for perfect inverted repeat loci. Such
-    reads are counted towards the sense strand only for a given hairpin.
-
-    9. The pattern of small RNA expression relative to the single hairpin
-    candidate is further scrutinized for polarity. The fraction of all
-    mappings in the hairpin interval must be >= [--minstrandfrac]. As in
-    step 8, this step corrects for "dyad" reads (see above). Hairpins that
-    pass this step are either HP or MIRNA loci. The coordinates of the
-    originally determined de novo locus are discarded, and replaced with the
-    hairpin coordinates.
-
-    10. Each potential hairpin that remains is next analyzed to see if it
-    qualifies as a MIRNA. MIRNA locus annotation is designed to satisfy the
-    criteria for de novo annotation of plant MIRNAs as described in Meyers
-    et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682. In fact,
-    ShortStack's criteria is a little stricter than Meyers et al., in that
-    ShortStack has an absolute requirement for sequencing of the exact
-    predicted miRNA* sequence for a candidate mature miRNA. It is important
-    to note that ShortStack's MIRNA annotation method is designed to reduce
-    false positives at the expense of an increased rate of false negatives.
-    In other words, there are likely many bona fide MIRNA loci not annotated
-    as such because they don't quite meet the strict criteria set forth
-    below.
+    arms must hateria set forth below.
 
     - Hairpin Size: The total number of pairs in the hairpin must be <=
     [--maxmiRHPPairs]
@@ -745,7 +719,27 @@ KEY METHODS
     comprises at least 20% of the total abundance of small RNAs mapped to
     the hairpin.
 
-    - Duplex: Both partners in a candidate miRNA/m, for a cluster located at
+    - Duplex: Both partners in a candidate miRNA/miRNA* duplex must not span
+    any loops (i.e. neither is allowed to have base-pairs to itself). In
+    addition, there must be <= [--maxmiRUnpaired] unpaired mature miRNA nts
+    in the miRNA/miRNA* duplex, and <= [--maxmiRUnpaired] unpaired miRNA*
+    nts in the miRNA/miRNA* duplex.
+
+    - Star: The exact predicted miRNA*s of candidate miRNAs must have at
+    least one mapped read, and the total abundance of any candidate mature
+    miRNA/miRNA* pair must be at least 25% of the total small RNA abundance
+    at the locus. Finally, redundant candidate mature miRNAs are removed, as
+    the steps above initially might classify a small RNA as both a miRNA*
+    and mature miRNA. In such cases, the partner with the higher abundance
+    is called the miRNA, the other the miRNA*.
+
+    Hairpin loci passing all four of these loci are annotated as MIRNAs.
+    Those failing one or more are reported as HP loci instead.
+
+  Quantification of clusters
+
+    All mappings with at lease one nt of overlap within the cluster are
+    tallied as being within the cluster. Thus, for a cluster located at
     Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and 2000-2021 are
     all counted as being within the cluster during quantification. Note that
     it's possible to count the same mapping within non-overlapping clusters.

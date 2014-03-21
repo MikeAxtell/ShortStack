@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "1.2.0"; 
+my $version_num = "1.2.1";   ## adding option for multiple cores during bowtie alignments
 
 
 ##### get options and validate them
@@ -63,6 +63,9 @@ my $trimmedCS;
 my $untrimmedCSQV;
 my $trimmedCSQV;
 
+## New in 1.2.1 .. multicore usage during bowtie alignment
+my $bowtie_cores = 1;  ## default is 1
+
 # get user options from command line
 GetOptions ('outdir=s' => \$outdir,
 	    'mindepth=i' => \$mindepth,
@@ -98,6 +101,7 @@ GetOptions ('outdir=s' => \$outdir,
 	    'bamfile=s' => \$bamfile,
 	    'align_only' => \$align_only,
 	    'read_group=s' => \$read_group,
+	    'bowtie_cores=i' => \$bowtie_cores,
 	    'version' => \$version,
 	    'help' => \$help);
 
@@ -378,6 +382,17 @@ if($maxLoopLength) {
     $maxLoopLength = 15;
 }
 
+## Check the option bowtie_cores .. integer of 1 or more
+if($bowtie_cores =~ /^\d+$/) {
+    unless($bowtie_cores >= 1) {
+	log_it($logfile, "\nFATAL: Option --bowtie_cores must be an integer of 1 or more\n");
+	exit;
+    }
+} else {
+	log_it($logfile, "\nFATAL: Option --bowtie_cores must be an integer of 1 or more\n");
+	exit;
+}
+
 ###############
 # check that the genome file is at the end of @ARGV
 my $genome = pop @ARGV;
@@ -594,7 +609,7 @@ if(($mode == 1) or ($mode == 2)) {
     }
     my @bamfiles = ();
     foreach $to_align_file (@to_align_files) {
-	$bamfile = perform_alignment($to_align_file,$genome,$filetype);
+	$bamfile = perform_alignment($to_align_file,$genome,$filetype,$bowtie_cores);
 	unless(-r $bamfile) {
 	    log_it($logfile,"\nFATAL: Failed to read bamfile $bamfile after sub-routine perform_alignment\n");
 	    exit;
@@ -1050,6 +1065,8 @@ OPTIONS:
 --trimmedCS [string] : Path to trimmed and ready to map small RNA-seq data in Colorspace-FASTA format. Multiple datasets can be provided as a comma-delimited list.
 
 --trimmedCSQV [string] : Path to trimmed color-space quality value files, corresponding to trimmed colorspace-fasta files provided in option --trimmedCS. Multiple datasets can be provided as a comma-delimited list.
+
+--bowtie_cores [integer] : Number of processor cores to use during bowtie alignment. Be sure to reserve 3 cores for the rest of alignment pipeline. Default: 1.
 
 --align_only : Exits program after completion of small RNA-seq data alignment, creating BAM file.
 
@@ -6590,7 +6607,7 @@ sub trim_FQ {
 }
 
 sub perform_alignment {
-    my($infile,$genome,$type) = @_;
+    my($infile,$genome,$type,$cores) = @_;
     log_it($logfile,"\nBeginning alignment of reads from $infile to genome $genome ...\n");
     log_it($logfile, "\tCheck for ebwt bowtie indices for the genome: ");
     
@@ -6606,7 +6623,7 @@ sub perform_alignment {
     }
     
     # build bowtie query string
-    my $bowtie = "bowtie";
+    my $bowtie = "bowtie -p $cores";
     if($type eq "a") {
 	$bowtie .= " -f -v 1 -a --best --strata -S $genome $infile";
     } elsif ($type eq "q") {
@@ -7188,9 +7205,11 @@ If you use ShortStack in your work, please cite
 
 Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  RNA 19:740-751. doi:10.1261/rna.035279.112
 
+Shahid S., Axtell MJ. (2013) Identification and annotation of small RNA genes using ShortStack. Methods doi:10.1016/j.ymeth.2013.10.004
+
 =head1 VERSION
 
-1.2.0 :: Released October 16, 2013
+1.2.1 :: Released October 23, 2013
 
 =head1 AUTHOR
 
@@ -7274,7 +7293,9 @@ A full tutorial with sample Arabidopsis data can be found at http://axtelldata.b
 
 --trimmedCS [string] : Path to trimmed and ready to map small RNA-seq data in Colorspace-FASTA format. Multiple datasets can be provided as a comma-delimited list.                                                                             
                                                                                                                                                                                                                                                 
---trimmedCSQV [string] : Path to trimmed color-space quality value files, corresponding to trimmed colorspace-fasta files provided in option --trimmedCS. Multiple datasets can be provided as a comma-delimited list.              
+--trimmedCSQV [string] : Path to trimmed color-space quality value files, corresponding to trimmed colorspace-fasta files provided in option --trimmedCS. Multiple datasets can be provided as a comma-delimited list.   
+
+--bowtie_cores [integer] : Number of processor cores to use during bowtie alignment. Be sure to reserve 3 cores for the rest of alignment pipeline. Default: 1.              
 
 --align_only : Exits program after completion of small RNA-seq data alignment, creating BAM file.
 
@@ -7509,19 +7530,21 @@ Cluster discovery proceeds in two simple steps:
 
 6.  Redundant hairpins are then removed.  Redundant hairpins are those whose 5' arms and 3' arms overlap.  In pairwise comparisons of redundant hairpins, the longest hairpin is retained.
 
-7.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window could have been extended around the cluster, there could be  putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 1nt within the original cluster coordinates.
-
-8. The pattern of small RNA expression relative to the remaining hairpins is then examined.  The per-nucleotide coverage across every base, on both strands separately, across the original locus coordinates is calculated.  If there is a single hairpin whose 5' and 3' arms contain >= [--minfrachpdepth] of the total coverage of the original locus, the hairpin is kept for futher analysis.  If more than one hairpin meets this criterion, than the one with the highest coverage fraction in the arms is retained.  Note that this step contains a correction for reads that are "dyads" .. reads that map twice to a hairpin, once in each arm, on opposite strands... this happens for perfect inverted repeat loci.  Such reads are counted towards the sense strand only for a given hairpin.
-
-9. The pattern of small RNA expression relative to the single hairpin candidate is further scrutinized for polarity.  The fraction of all mappings in the hairpin interval must be >= [--minstrandfrac].  As in step 8, this step corrects for "dyad" reads (see above).  Hairpins that pass this step are either HP or MIRNA loci.  The coordinates of the originally determined de novo locus are discarded, and replaced with the hairpin coordinates.
-
-10.  Each potential hairpin that remains is next analyzed to see if it qualifies as a MIRNA.  MIRNA locus annotation is designed to satisfy the criteria for de novo annotation of plant MIRNAs as described in Meyers et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682.  In fact, ShortStack's criteria is a little stricter than Meyers et al., in that ShortStack has an absolute requirement for sequencing of the exact predicted miRNA* sequence for a candidate mature miRNA.  It is important to note that ShortStack's MIRNA annotation method is designed to reduce false positives at the expense of an increased rate of false negatives.  In other words, there are likely many bona fide MIRNA loci not annotated as such because they don't quite meet the strict criteria set forth below. 
+7.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window could have been extended around the cluster, there could be  putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must hateria set forth below. 
 
 - Hairpin Size:  The total number of pairs in the hairpin must be <= [--maxmiRHPPairs]
 
 - Precision: There must be at least one candidate mature miRNA that comprises at least 20% of the total abundance of small RNAs mapped to the hairpin.  
 
-- Duplex:  Both partners in a candidate miRNA/m, for a cluster located at Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and 2000-2021 are all counted as being within the cluster during quantification.  Note that it's possible to count the same mapping within non-overlapping clusters.
+- Duplex:  Both partners in a candidate miRNA/miRNA* duplex must not span any loops (i.e. neither is allowed to have base-pairs to itself).  In addition, there must be <= [--maxmiRUnpaired] unpaired mature miRNA nts in the miRNA/miRNA* duplex, and <= [--maxmiRUnpaired] unpaired miRNA* nts in the miRNA/miRNA* duplex.
+
+- Star: The exact predicted miRNA*s of candidate miRNAs must have at least one mapped read, and the total abundance of any candidate mature miRNA/miRNA* pair must be at least 25% of the total small RNA abundance at the locus.  Finally, redundant candidate mature miRNAs are removed, as the steps above initially might classify a small RNA as both a miRNA* and mature miRNA.  In such cases, the partner with the higher abundance is called the miRNA, the other the miRNA*.
+
+Hairpin loci passing all four of these loci are annotated as MIRNAs.  Those failing one or more are reported as HP loci instead.
+
+=head2 Quantification of clusters
+
+All mappings with at lease one nt of overlap within the cluster are tallied as being within the cluster.  Thus, for a cluster located at Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and 2000-2021 are all counted as being within the cluster during quantification.  Note that it's possible to count the same mapping within non-overlapping clusters.
 
 =head2 Analysis of Phasing
 
