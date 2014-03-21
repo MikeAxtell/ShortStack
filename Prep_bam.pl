@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 use Getopt::Long;
 
-$version = "0.1.1-DEV";
+$version = "0.1.1";
 
 # Define a usage statement
 $usage = "$0 $version
@@ -12,12 +12,14 @@ Output a \.bam file sorted by chromosomal location, and a corresponding \.bai in
 NOTES:
 A\. If your input already has NH:i: tags, the orignal tags will be over-written\!
 B\. Ensure that your input is sorted by read name\!
-C\. Ensure that your input has CIGAR strings entered \(column 5 of the SAM format\) if you want to analyze the data with ShortStack\.pl
+C\. SAM lines for unmapped reads will be suppressed\!
+C\. SAM lines for mapped reads that have an invalid CIGAR string will be suppressed\!
 
 USAGE:
-1\. For \.bam files : samtools view [input\.bam\] | $0 --prefix [prefix] --genome [genome\.fasta]\n
-2\. For \.sam\.gz files : gzip -d -c [input\.sam\.gz] | $0 --prefix [prefix] --genome [genome\.fasta]\n
+1\. For \.bam files : samtools view [input\.bam\] | $0 --prefix [prefix] --genome [genome\.fasta]
+2\. For \.sam\.gz files : gzip -d -c [input\.sam\.gz] | $0 --prefix [prefix] --genome [genome\.fasta]
 3\. For uncompressed \.sam files : $0 --prefix [prefix] --genome [genome\.fasta] < [input\.sam]
+4\. Directly from bowtie version 1 \(eg 0-12-7, 0-12-8\): bowtie [bowtie options] -S [bowtie_index] [reads] | $0 --prefix [prefix] --genome [genome]
 
 
 OPTIONS \(both required\)
@@ -84,6 +86,9 @@ $j = 0;
 %freqs = ();
 %sizes = ();  # if CIGAR strings available, size distribution of mapped reads will be reported
 
+$unmapped_tally = 0;
+$no_CIGAR_tally = 0;
+
 $last_read = "not_a_read";
 @storage = (); 
 while (<STDIN>) {
@@ -110,17 +115,23 @@ while (<STDIN>) {
 	}
     }
     
-    # check for proper CIGAR string, and if not present, make a note and warn the user at the end
+    # check to see if this is a real alignment, or just an unmapped read.  Tally it and ignore if unmapped
+    $mapped = check_mapped($fields[1]);
+    unless($mapped) {
+	++$unmapped_tally;
+	next;
+    }
+    # check for proper CIGAR string, and if not present, ignore the line and tally it
     if($fields[5] eq "\*") {
-	$cigar_warning = 1;
+	++$no_CIGAR_tally;
+	next;
     }
     
     if($last_read ne $fields[0]) {  ## you have passed into the next entry, or the first one, so evaluate if there is any data
-	# get read size of CURRENT mapping, if its mapped
-	unless($fields[1] & 4) {
-	    $read_size = parse_cigar($fields[5]);
-	    ++$sizes{$read_size};
-	}
+	# get read size of CURRENT mapping
+	$read_size = parse_cigar($fields[5]);
+	++$sizes{$read_size};
+
 	if((scalar @storage) > 0) {
 	    ++$freqs{$mappings};
 	    ## process the previous read, output
@@ -138,17 +149,9 @@ while (<STDIN>) {
 	$mappings = 0;
     }
     ## store the current line
+    ++$mappings;  # for the current line
     push(@storage,$_);
     
-    ## check the flag to see if read is unmapped
-    ## examines the flag-sum to see if either '4' or '8' is present (see SAM specification)
-    $mapped = check_mapped($fields[1]);
-    ## above $mapped is zero if not mapped, 1 if mapped
-    
-    if($mapped) {
-	++$mappings;
-	## for mapped reads, get the flags, if present, for the current mapping
-    }
     $last_read = $fields[0];
 }
 
@@ -196,10 +199,10 @@ foreach $fre (@f) {
 print STDERR "TOTAL READS MAPPED: $total_mapped\n";
 print STDERR "TOTAL MAPPINGS: $total_mappings\n";
 
-if($cigar_warning) {
-    print STDERR "\n\*\*\* WARNING \*\*\*\n";
-    print STDERR "CIGAR strings are missing from at least some of your mapped reads\.  This alignment therefore cannot be analyzed by ShortStack\.pl\.  Use an aligner that outputs proper CIGAR strings in the SAM/BAM format\.\n";
-}
+# Report on suppressed lines
+print STDERR "SAM LINES SUPPRESSED BECAUSE THEY WERE FOR UNMAPPED READS: $unmapped_tally\n";
+print STDERR "SAM LINES SUPPRESSED BECAUSE THEY HAD INVALID CIGAR STRINGS: $no_CIGAR_tally\n";
+
 
 # use samtools to create a location-sorted .bam file from the read-sorted .sam.gz temp file
 print STDERR "\nCreating initial \.bam file\n";
@@ -272,7 +275,6 @@ sub parse_cigar {
 }
 
 __END__
-
 =head1 LICENSE
 
 Prep_bam.pl
@@ -298,6 +300,12 @@ Input a sam, sam.gz, or bam file sorted by read names,
 Tally mappings per read and note with NH:i: tags,                                                                                    
 Output a .bam file sorted by chromosomal location, and a corresponding .bai index file.
 
+=head1 VERSIONS
+
+0.1.1 : THIS VERSION.  June 28, 2012.  Frist released with ShortStack 0.1.4.  Fixes program so it no longer breaks when unmapped lines are encountered (now it simply ignores them).  This also allows direct piping of bowtie data directly into Prep_bam.pl
+
+0.1.0 : Initial release. April 29, 2012
+
 =head1 INSTALL
 
 install samtools from <http://samtools.sourceforge.net/> and ensure that samtools is in your PATH
@@ -318,11 +326,21 @@ ensure 'perl' is located in /usr/bin/ .. if not, edit line 1 of script according
 
 =head1 USAGE
                                                                                                                              
-1. For .bam files : samtools view [input.bam] | $0 --prefix [prefix] --genome [genome.fasta]                                  
+1. For .bam files: 
+    
+    samtools view [input.bam] | Prep_bam.pl --prefix [prefix] --genome [genome.fasta]                                  
 
-2. For .sam.gz files : gzip -d -c [input.sam.gz] | $0 --prefix [prefix] --genome [genome.fasta]                          
+2. For .sam.gz files:
 
-3. For uncompressed .sam files : $0 --prefix [prefix] --genome [genome.fasta] < [input.sam]      
+    gzip -d -c [input.sam.gz] | Prep_bam.pl --prefix [prefix] --genome [genome.fasta]                          
+
+3. For uncompressed .sam files:
+
+    Prep_bam.pl --prefix [prefix] --genome [genome.fasta] < [input.sam]     
+
+4. To pipe in bowtie (version 1 e.g. 0.12.8) sam output directly:
+
+    bowtie [bowtie_options] -S [bowtie_index] [trimmed_reads] | Prep_bam.pl --prefix [prefix] --genome [genome] 
 
 =head1 OPTIONS
 
@@ -339,14 +357,6 @@ It is critical that the input sam, sam.gz, or bam file be sorted by read name. A
 =head2 Exisiting NH:i: tags
 
 If there are already NH:i: tags in the input data, they will be discarded and over-written by the script.
-
-=head2 CIGAR strings
-
-The presence of proper CIGAR strings on all mappings is checked, and a warning is issued if any are missing.  The CIGAR string is used by ShortStack.pl to determine the length of the mapped small RNA, so if any are missing, the alignment cannot be analyzed by ShortStack.pl.  If that happens, consider using another aligner, or change your alignment protocol, so that proper CIGAR strings are present in column 6 of the SAM format (see SAM specification for details).
-
-=head1 VERSIONS
-
-0.1.0 : Initial release. April 29, 2012
 
 =head1 AUTHOR
 
