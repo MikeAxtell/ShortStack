@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "1.0.0";
+my $version_num = "1.0.1";
 
 
 ##### get options and validate them
@@ -6520,7 +6520,7 @@ sub check_ebwt {
 sub bowtie_build {
     my($fasta) = @_;
     my $log = "$fasta" . "_bowtie_build_log.txt";
-    system("bowtie-build $fasta $fasta 2>&1> $log");
+    system("bowtie-build $fasta $fasta > $log");
     return $log;
 }
 
@@ -6625,6 +6625,8 @@ sub validate_bam {
     return $n_mapped;
 }
     
+__END__
+
 =head1 LICENSE
 
 ShortStack.pl
@@ -6656,7 +6658,7 @@ Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of sma
 
 =head1 VERSION
 
-1.0.0 :: Released September 19, 2013
+1.0.1 :: Released September 19, 2013
 
 =head1 AUTHOR
 
