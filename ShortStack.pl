@@ -6,8 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.2.3";
-#####
+my $version = "0.3.0";
 
 ##### get options and validate them
 
@@ -23,7 +22,7 @@ my $dicermin = 20;
 my $dicermax = 24;
 my $maxhpsep = 300;
 my $minfracpaired = 0.67;
-my $minntspaired = 30;
+my $minntspaired = 15; ## lowered to 15 from 30 as of version 0.3.0
 my $minfrachpdepth = 0.67;  ## raised from 0.5 as of version 0.2.1
 my $minstrandfrac = 0.8;
 my $mindicerfrac = 0.85;
@@ -33,6 +32,12 @@ my $raw = '';
 my $phasesize = 21;
 my $phaseFDR = 0.05;
 my $inv_file = '';
+my $flag_file = "NULL";
+my $maxmiRHPPairs = '';  ## parameter added as of version 0.3.0
+my $maxmiRUnpaired = '';  ## parameter added as of version 0.3.0
+my $miRType = "plant";  ## parameter added as of version 0.3.0
+my $maxdGperStem = -0.5;  ## parameter added as of version 0.3.0
+my $maxLoopLength = '';  ## parameter added as of version 0.3.0
 
 # get user options from command line
 GetOptions ('outdir=s' => \$outdir,
@@ -52,6 +57,12 @@ GetOptions ('outdir=s' => \$outdir,
 	    'raw' => \$raw,
 	    'phasesize=s' => \$phasesize,
 	    'inv_file=s' => \$inv_file,
+	    'flag_file=s' => \$flag_file,
+	    'maxmiRHPPairs=i' => \$maxmiRHPPairs,
+	    'maxmiRUnpaired=i' => \$maxmiRUnpaired,
+	    'miRType=s' => \$miRType,
+	    'maxdGperStem=f' => \$maxdGperStem,
+	    'maxLoopLength=i' => \$maxLoopLength,
 	    'phaseFDR=f' => \$phaseFDR);
 
 # Validate the options
@@ -68,6 +79,9 @@ if(-d $outdir) {
 } else {
     system "mkdir $outdir";
 }
+
+#designate a log file
+my $logfile = "$outdir" . "\/" . "Log\.txt";
 
 unless(($mindepth > 0) and
        ($mindepth < 1000000)) {
@@ -124,6 +138,8 @@ if($count) {
     unless(-r $count) {
 	die "FATAL: Option --count : File $count could not be read\n\n$usage\n";
     }
+    # As of version 0.3.0, count mode also forces nohp mode
+    $nohp = 1;
 }
 
 # check the --phasesize option to see if it is a number between --dicermin and --dicermax, OR 'all', OR 'none'
@@ -143,6 +159,41 @@ if($phasesize =~ /^\d+$/) {
 unless(($phaseFDR >= 0) and
        ($phaseFDR <= 1)) {
     die "FATAL: Option --phaseFDR must be a number between 0 and 1\n\n$usage\n";
+}
+
+# parse the mirType and the associated settings
+unless(($miRType eq "plant") or ($miRType eq "animal")) {
+    die "FATAL: Option --miRType $miRType is invalid\.  Must be either \'plant\' , \'animal\', or unspecified \(unspecified defaults to \'plant\'\)\n\n$usage\n";
+}
+my $maxmiRHPPairs_override = 0;
+my $maxmiRUnpaired_override = 0;
+my $maxLoopLength_override = 0;
+
+if($maxmiRHPPairs) {
+    log_it($logfile, "\n\tNote: Option --maxmiRHPPairs was explicitly set to $maxmiRHPPairs by user: Overides setting provided by option --miRType of $miRType\n\n");
+    $maxmiRHPPairs_override = 1;
+} elsif ($miRType eq "plant") {
+    $maxmiRHPPairs = 150;
+} elsif ($miRType eq "animal") {
+    $maxmiRHPPairs = 45;
+}
+
+if($maxmiRUnpaired) {
+    log_it($logfile, "\n\tNote: Option --maxmiRUnpaired was explicitly set to $maxmiRUnpaired by user: Overrides setting provided by option --miRType of $miRType\n\n");
+    $maxmiRUnpaired_override = 1;
+} elsif ($miRType eq "plant") {
+    $maxmiRUnpaired = 5;
+} elsif ($miRType eq "animal") {
+    $maxmiRUnpaired = 6;
+}
+
+if($maxLoopLength) {
+    log_it($logfile,"\n\tNote: Option --maxLoopLength was explicitly set to $maxLoopLength by user: Overrides setting provided by option --miRType of $miRType\n\n");
+    $maxLoopLength_override = 1;
+} elsif ($miRType eq "plant") {
+    $maxLoopLength = 100000;  ## an arbitrarily high number
+} elsif ($miRType eq "animal") {
+    $maxLoopLength = 15;
 }
 
 
@@ -191,125 +242,107 @@ if($inv_file) {
     }
     # if the run is in 'nohp' mode, than this file is irrelevant, so warn the user about that
     if($nohp) {
-	print STDERR "\nWARNING: An einverted \.inv file was provided \($inv_file\) but this run is in nohp mode, so the einverted file will be ignored\n\n";
+	log_it($logfile,"\nWARNING: An einverted \.inv file was provided \($inv_file\) but this run is in nohp mode, so the einverted file will be ignored\n\n");
     }
 } else {
     unless($nohp) {
-	print STDERR "\nWARNING: No einverted \.inv file was provided \(option --inv_file\)\.  This may decrease the annotation accuracy, especially for loci deriving from large inverted repeats\n\n";
+	log_it($logfile,"\nWARNING: No einverted \.inv file was provided \(option --inv_file\)\.  This may decrease the annotation accuracy, especially for loci deriving from large inverted repeats\n\n");
     }
 }
 
+#### 
+# See if the user provided a flag_file, and if so, make sure it is readable
+if($flag_file ne "NULL") {
+    unless(-r $flag_file) {
+	die "FATAL: The provided flag file $flag_file from user option --flag_file could not be read\n$usage\n";
+    }
+}
+##
 
-#open a log file
-my $logfile = "$outdir" . "\/" . "Log\.txt";
-open(LOG, ">$logfile");
+
 
 ##### Report to user on initialization of the run
-print STDERR "\n$0 $version\n";
-print STDERR `date`;
-print STDERR "samtools $samtools_version";
-print STDERR "Mapped small RNAs: $bamfile\n";
-print STDERR "Genome: $genome\n";
-print STDERR "Output Directory: $outdir\n";
+log_it ($logfile,"\n$0 $version\n");
+log_it ($logfile,`date`);
+log_it ($logfile,"samtools $samtools_version");
+log_it ($logfile,"Mapped small RNAs: $bamfile\n");
+log_it ($logfile,"Genome: $genome\n");
+log_it ($logfile,"Output Directory: $outdir\n");
 unless($nohp) {
-    print STDERR "einverted \.inv file of Inverted Repeats:";
+    log_it ($logfile,"einverted \.inv file of Inverted Repeats:");
     if(-r $inv_file) {
-	print STDERR " $inv_file\n";
+	log_it ($logfile," $inv_file\n");
     } else {
-	print STDERR " NOT PROVIDED, hairpins from RNALfold only\n";
+	log_it ($logfile," NOT PROVIDED, hairpins from RNALfold only\n");
     }
 }
-print STDERR "Number of mapped reads in $bamfile:";
-if($reads) {
-    print STDERR " User Provided: $reads\n";
+log_it ($logfile,"Flag file of loci to report if overlapped: ");
+if($flag_file ne "NULL") {
+    log_it ($logfile,"$flag_file\n");
 } else {
-    print STDERR " Not provided: Forcing run in --raw mode\n";
+    log_it ($logfile,"Not Provided\n");
+}
+log_it ($logfile,"Number of mapped reads in $bamfile:");
+if($reads) {
+    log_it ($logfile," User Provided: $reads\n");
+} else {
+    log_it ($logfile," Not provided: Forcing run in --raw mode\n");
     $raw = 1;
 }
-print STDERR "Clusters:";
+log_it ($logfile,"Clusters:");
 if($count) {
-    print STDERR " Running in \"count\" mode\. User provided clusters from file $count\n";
+    log_it ($logfile," Running in \"count\" mode\. User provided clusters from file $count\n");
 } else {
-    print STDERR " To be calculated de novo\n";
-    print STDERR "Island threshold: $mindepth mappings\n";
-    print STDERR "Padding around initial islands: $pad nts\n";
+    log_it ($logfile," To be calculated de novo\n");
+    log_it ($logfile,"Island threshold: $mindepth mappings\n");
+    log_it ($logfile,"Padding around initial islands: $pad nts\n");
 }
-print STDERR "Dicer size range: $dicermin to $dicermax\n";
+log_it ($logfile,"Dicer size range: $dicermin to $dicermax\n");
 if($nohp) {
-    print STDERR "Running in \"nohp\" mode: Hairpins and MIRNAs will not be inferred\n";
+    log_it ($logfile,"Running in \"nohp\" mode: Hairpins and MIRNAs will not be inferred\n");
 } else {
-    print STDERR "Maximum allowed separation of a base pair to span during hairpin prediction: $maxhpsep\n";
-    print STDERR "Minimum fraction of paired nts allowable in a valid hairpin structure: $minfracpaired\n";
-    print STDERR "Minimum number of base pairs within a valid hairpin structure: $minntspaired\n";
-    print STDERR "Minimum fraction of coverage in hairpin helix to keep hairpin: $minfrachpdepth\n";
-}
-print STDERR "Minimum fraction of mappings to assign a polarity to a non-hairpin cluster: $minstrandfrac\n";
-print STDERR "Minimum fraction of mappings within the Dicer size range to annotate a locus as Dicer-derived: $mindicerfrac\n";
-print STDERR "Cluster type to analyze for phasing: $phasesize\n";
-print STDERR "False Discovery Rate for Significantly Phased Clusters: $phaseFDR\n";
-print STDERR "Reporting units: ";
-if($raw) {
-    print STDERR "Raw mappings\n\n";
-} else {
-    print STDERR "Mappings per million mapped\n\n";
-}
-
-### Duplicate the above to the log
-##### Report to user on initialization of the run
-print LOG "\n$0 $version\n";
-print LOG `date`;
-print LOG "samtools $samtools_version";
-print LOG "Mapped small RNAs: $bamfile\n";
-print LOG "Genome: $genome\n";
-print LOG "Output Directory: $outdir\n";
-unless($nohp) {
-    print LOG "einverted \.inv file of Inverted Repeats:";
-    if(-r $inv_file) {
-	print LOG " $inv_file\n";
+    log_it ($logfile,"Maximum allowed separation of a base pair to span during hairpin prediction: $maxhpsep\n");
+    log_it ($logfile,"Minimum fraction of paired nts allowable in a valid hairpin structure: $minfracpaired\n");
+    log_it ($logfile,"Minimum number of base pairs within a valid hairpin structure: $minntspaired\n");
+    log_it ($logfile,"Maximum deltaG per stem length for a valid hairpin structure: $maxdGperStem\n");
+    log_it ($logfile,"Minimum fraction of coverage in hairpin helix to keep hairpin: $minfrachpdepth\n");
+    log_it ($logfile,"microRNA type: $miRType\n");
+    log_it ($logfile,"\tMaximum number of base pairs in hairpin for MIRNAs: $maxmiRHPPairs");
+    if($maxmiRHPPairs_override) {
+	log_it ($logfile," Overrides normal setting for type $miRType\n");
     } else {
-	print LOG " NOT PROVIDED, hairpins from RNALfold only\n";
+	log_it ($logfile,"\n");
+    }
+    log_it ($logfile,"\tMaximum number of unpaired miRNA nts in miR/miR\* duplex: $maxmiRUnpaired");
+    if($maxmiRUnpaired_override) {
+	log_it ($logfile," Overrides normal setting for type $miRType\n");
+    } else {
+	log_it ($logfile,"\n");
+    }
+    log_it ($logfile,"\tMaximum loop size for miRNA or other hpRNA loci: $maxLoopLength");
+    if($maxLoopLength_override) {
+	log_it ($logfile," Overrides normal setting for type $miRType\n");
+    } else {
+	log_it ($logfile,"\n");
     }
 }
-print LOG "Number of mapped reads in $bamfile:";
-if($reads) {
-    print LOG " User Provided: $reads\n";
-} else {
-    print LOG " Not provided: Forcing run in --raw mode\n";
-}
-print LOG "Clusters:";
-if($count) {
-    print LOG " Running in \"count\" mode\. User provided clusters from file $count\n";
-} else {
-    print LOG " To be calculated de novo\n";
-    print LOG "Island threshold: $mindepth mappings\n";
-    print LOG "Max padding around initial islands: $pad nts\n";
-}
-print LOG "Dicer size range: $dicermin to $dicermax\n";
-if($nohp) {
-    print LOG "Running in \"nohp\" mode: Hairpins and MIRNAs will not be inferred\n";
-} else {
-    print LOG "Maximum allowed separation of a base pair to span during hairpin prediction: $maxhpsep\n";
-    print LOG "Minimum fraction of paired nts allowable in a valid hairpin structure: $minfracpaired\n";
-    print LOG "Minimum number of base pairs within a valid hairpin structure: $minntspaired\n";
-    print LOG "Minimum fraction of coverage in hairpin helix to keep hairpin: $minfrachpdepth\n";
-}
-print LOG "Minimum fraction of mappings to assign a polarity to a non-hairpin cluster: $minstrandfrac\n";
-print LOG "Minimum fraction of mappings within the Dicer size range to annotate a locus as Dicer-derived: $mindicerfrac\n";
-print LOG "Cluster type to analyze for phasing: $phasesize\n";
-print LOG "False Discovery Rate for Significantly Phased Clusters: $phaseFDR\n";
-print LOG "Reporting units: ";
+log_it ($logfile,"Minimum fraction of mappings to assign a polarity to a non-hairpin cluster: $minstrandfrac\n");
+log_it ($logfile,"Minimum fraction of mappings within the Dicer size range to annotate a locus as Dicer-derived: $mindicerfrac\n");
+log_it ($logfile,"Cluster type to analyze for phasing: $phasesize\n");
+log_it ($logfile,"False Discovery Rate for Significantly Phased Clusters: $phaseFDR\n");
+log_it ($logfile,"Reporting units: ");
 if($raw) {
-    print LOG "Raw mappings\n\n";
+    log_it ($logfile,"Raw mappings\n\n");
 } else {
-    print LOG "Mappings per million mapped\n\n";
+    log_it ($logfile,"Mappings per million mapped\n\n");
 }
 
 # Next, check for the presence of .fai index file corresponding to the genome.  If not found, create one with samtools
 my $expected_faidx = "$genome" . "\.fai";
 unless(-e $expected_faidx) {
-    print STDERR "Expected genome index $expected_faidx for genome file $genome not found\.  Creating it using samtools faidx";
+    log_it ($logfile,"Expected genome index $expected_faidx for genome file $genome not found\.  Creating it using samtools faidx");
     system "samtools faidx $genome";
-    print STDERR " done\n\n";
+    log_it ($logfile," done\n\n");
 }
 
 ###############################################
@@ -317,145 +350,225 @@ unless(-e $expected_faidx) {
 ##### Phase One: Identify Clusters
 my %names = ();  ## keys = locusIDs (e.g. Chr1:1-1000) , values = name designations
 
-print STDERR `date`;
-print STDERR "Phase One: Identifying Clusters";
+log_it ($logfile,`date`);
+log_it ($logfile,"Phase One: Identifying Clusters");
 my @clusters = ();
 if($count) {
-    print STDERR " a priori from file $count\n";
-    print LOG "Clusters determined a priori from file $count\n";
+    log_it ($logfile," a priori from file $count\n");
     @clusters = get_clusters_a_priori($count);
     %names = get_names_countmode($count);  ## if names not present in count file, arbitrary names assigned
 } else {
-    print STDERR " de novo\n";
-    print LOG "Cluster determined de novo\n";
+    log_it ($logfile," de novo\n");
     my @first_clusters = get_clusters($bamfile,$mindepth);
     @clusters = merge_clusters(\@first_clusters,\$pad,\$genome);
 }
 
-unless((scalar @clusters) > 0) {
-    die "Sorry, no clusters meeting your criteria were found in these data\.\n";
+my $phase_one_n_clusters;
+if(@clusters) {
+    $phase_one_n_clusters = scalar @clusters;
+    log_it ($logfile,"Phase One complete: Found $phase_one_n_clusters Clusters\n");
+} else {
+    log_it ($logfile,"Sorry, no clusters meeting your criteria were found in these data\.\n");
+    exit;
 }
 
 
 ##### Phase Two: Gather genomic sequences for input into RNA folding
 my @final_clusters = ();
-my %hp_clusters = ();
+## my %hp_clusters = ();
 my %miRNAs = ();
-my %put_mir = ();  ## only really used when option --putativemir is called
+## my %put_mir = ();  ## only really used when option --putativemir is called
+my %final_hps = ();
 
 if($nohp) {
-    print STDERR "Running in nohp mode -- skipping phases 2, 3, and 4\n\n";
+    log_it ($logfile,"Running in nohp mode -- skipping phases 2, 3, and 4\n\n");
     @final_clusters = @clusters;
     unless($count) {
 	# if clusters were de novo, generate arbitrary names for them now if the hairpin routines are being skipped
 	%names = get_names_simple(\@final_clusters);
     }
 } else {
-    print STDERR "\n";
-    print STDERR `date`;
-    print STDERR "Phase Two: Gathering genome sequence for RNA secondary structure prediction\n";
-    
-    # if running in --count mode, only the exact interval defined in the a priori file will be folded.  Else, the de novo method takes a larger window
-    my %to_fold = ();
-    if($count) {
-	%to_fold = get_folding_regions_countmode(\$genome,\@clusters);
-    } else {
-	%to_fold = get_folding_regions(\$genome,\@clusters,\$pad);  ## hash structure: 'sequence', 'start', 'stop'  strand is always Watson
-    }
-    print STDERR "\n\n";
+    log_it ($logfile,"\n");
+    log_it ($logfile,`date`);
+    log_it ($logfile,"Phase Two: Gathering genome sequence for RNA secondary structure prediction\n");
 
-    #### Phase three: Assess correlation of clusters with qualifying inverted repeats
+    my %to_fold = get_folding_regions(\$genome,\@clusters,\$pad,\$maxhpsep);  ## hash structure: 'sequence', 'start', 'stop'  strand is always Watson
 
-    print STDERR `date`;
-    print STDERR "Phase Three: Identification of hairpin-associated small RNA clusters\n";
+    log_it ($logfile,"\n\n");
+
+    #### Phase three: Identify qualifying hairpins
+
+    log_it ($logfile,`date`);
+    log_it ($logfile,"Phase Three: Identification of qualified hairpins overlapping clusters\n");
 
     #fold each query and retain only qualifying structures
 
-    print STDERR "\tFolding sequences and identifying qualifying hairpins\.\.\.";
-    my %qualifying_hairpins = folder(\%to_fold,\$maxhpsep,\$minntspaired,\$minfracpaired);  ## each entry has locus as key and an array of entries.  Each entry is tab-delim w/ brax, local-start, structure_details, and strand
+    log_it ($logfile,"\tFolding sequences and identifying qualifying hairpins\.\.\.\n");
+
+    my %qualifying_hairpins = folder(\%to_fold,\$maxhpsep,\$minntspaired,\$minfracpaired,\$maxdGperStem,\$maxLoopLength);
+    ## Hash structure:  key is locus.  value is an array.  Each array entry is tab-delimited string containing:
+    # 0 : brax
+    # 1 : adj_start
+    # 2 : details
+    # 3 : strand (Watson or Crick)
+    #### 0 - 3 are as before  .. new ones are below
+    # 4 : pairs
+    # 5 : frac_paired
+    # 6 : stem_length
+    # 7 : loop_length
+    # 8 : dGperStem
+
     
     #convert the coordinates of the qualifying hairpins to the true chromosomal coordinates
-    print STDERR "\tConverting hairpin coordinates to true genomic coordinates\.\.\.";
+    log_it ($logfile,"\tConverting hairpin coordinates to true genomic coordinates\.\.\.");
     my %true_hps = hairpin_coords(\%to_fold,\%qualifying_hairpins);  ## structure same as %qualifying hairpins
-    print STDERR "Done\n";
+    ### same structure as %qualifying_hairpins, except field[1] of each entry is now a start-stop
     
-    ## HERE einverted
+    log_it ($logfile,"Done\n");
+    
+    ## take in the einverted file
     if(-r $inv_file) {
-	print STDERR "\tParsing inverted repeats from file $inv_file\.\.\.\n";
-	my @initial_irs = parse_inv(\$inv_file,\$minntspaired,\$minfracpaired);  ## each entry is tab-delimited .. [0] pseudo-brax, [1] helix-coords, [2] helix_details, [3] strand, [4] Chr (to be removed during merge)
-	print STDERR "\tdone\n";
+	log_it ($logfile,"\tParsing inverted repeats from file $inv_file\.\.\.\n");
+	my @initial_irs = parse_inv(\$inv_file,\$minntspaired,\$minfracpaired,\$maxdGperStem,\$maxLoopLength);
+	## each line is tab-delimited, with the same fields as in %true_hps, except addition of an extra field ([9]), which is the chr
+	
+	log_it ($logfile,"\tdone\n");
 	my $initial_ir_tally = scalar @initial_irs;
-	print STDERR "\t\tFound $initial_ir_tally potential qualifying IRs\n";
-	print STDERR "\tMerging einverted-derived inverted repeats with clusters and with RNAL-fold derived hairpins\.\.\.";
+	log_it ($logfile,"\t\tFound $initial_ir_tally potential qualifying IRs\n");
+	log_it ($logfile,"\tMerging einverted-derived inverted repeats with clusters and with RNAL-fold derived hairpins\.\.\.");
 	my ($in_irs,$out_irs) = merge_inv(\@initial_irs,\%true_hps,\@clusters);
-	print STDERR " done\n";
-	print STDERR "\t\tFrom the $in_irs potentially qualifying IRs, $out_irs had overlap with one or more clusters and were merged with RNALfold hairpins\n";
+	log_it ($logfile," done\n");
+	log_it ($logfile,"\t\tFrom the $in_irs potentially qualifying IRs, $out_irs had overlap with one or more clusters and were merged with RNALfold hairpins\n");
     }
 
-    print STDERR "\tRemoving redundant hairpins on a per-locus basis\.\.\.";
-    my %true_hps_trimmed = remove_redundant_hps(\%true_hps); ## structure same as %qualifying hairpins
-    print STDERR "Done\n";
+    log_it ($logfile,"\tRemoving redundant hairpins on a per-locus basis\.\.\.");
+    my %true_hps_trimmed = remove_redundant_hps(\%true_hps); ## structure same as %true_hps
+    log_it ($logfile,"Done\n");
     
     
-    print STDERR "\tRemoving hairpins that do not overlap clusters\.\.\.";
+    log_it ($logfile,"\tRemoving hairpins that do not overlap clusters\.\.\.");
     my %true_hps_3 = remove_nonoverlapped_hps(\%true_hps_trimmed);  ## structure same as %qualifying hairpins
-    print STDERR "Done\n";
+    log_it ($logfile,"Done\n");
     
-    print STDERR "\tFiltering hairpins based on expression evidence\.\.\.\n";
-    my %filtered_hps = hp_expression(\%true_hps_3,\$bamfile,\$minfrachpdepth);
+    ## Phase Four : Annotation of hpRNA and microRNA loci
+    log_it($logfile, "\n");
+    log_it($logfile, `date`);
+    log_it($logfile, "Phase Four: Annotation of hpRNA and microRNA loci\n");
+    
+    
+    log_it ($logfile,"\tFiltering hairpins based on expression evidence\.\.\.\n");
+    my %filtered_hps = hp_expression(\%true_hps_3,\$bamfile,\$minfrachpdepth);  ## radical changes 
+    ## Structure of hash .. key is locus, value is a single tab-delimited string.  Fields are as for %true_hps WITH ADDITION of [9] which is the frac_hp_depth
 
-    print STDERR "\n\n";
-    print STDERR `date`;
-    print STDERR "Phase 4: Annotation of miRNA and other hpRNA loci\n";
-    print STDERR "\tExamining candidate hairpins for miRNA and other hpRNA annotation\.\.\.\n";
+    ## NEW NEW NEW NEW
+    log_it ($logfile,"\tFinal filtering of hairpins, and annotation of miRNA and hpRNA loci\.\.\.\n");
+    %final_hps = final_hp(\%filtered_hps,\$genome,\$bamfile,\$reads,\$minstrandfrac,\$maxmiRHPPairs,\$maxmiRUnpaired);
     
-    my %trash = hp_output (\%filtered_hps,\$genome,\$bamfile,\$reads,\$minfrachpdepth,\$minstrandfrac);  ## the important result of this process is to modify the %filtered_hps hash
-    %trash = ();
-    print STDERR "\n";
+    ## structure like %filtered_hps, but expanded:
+    # [10] : hp_size_result
+    # [11] : prec_result
+    # [12] : duplex_result
+    # [13] : star_result
+    # [14] : hp_call
+    # [15] : output string of alignment to be written
+
     
-    print STDERR "\tFinishing parsing of hairpin-associated clusters\.\.\.";
-    if($count) {
-	## In count mode, clusters are not modified in position
-	## In addition, if there happens to be more than one qualified hairpin within a locus provided a priori, only the first one listed will be used!
-	@final_clusters = @clusters;
-	%hp_clusters = get_hp_clusters_countmode(\%filtered_hps);
-    } else {
-	%hp_clusters = get_hp_clusters(\%filtered_hps);
-	@final_clusters = get_final_clusters(\%filtered_hps,\@clusters,\%hp_clusters);
-	## not in count mode, so clusters have been de novo and haven't been named yet
-	%names = get_names_simple(\@final_clusters);
-    }
-    print STDERR "done\n";
+    log_it ($logfile,"\tFinishing parsing of hairpin-associated clusters\.\.\.");
+
+
+    @final_clusters = get_final_clusters(\%final_hps,\@clusters);
+    ## if we are doing hairpins, we know its not count mode, so clusters have been determined de novo and haven't been named yet
+    %names = get_names_simple(\@final_clusters);
+
+    log_it ($logfile,"done\n");
     ## Write the HP and MIRNA files
-    print STDERR "\tWriting miRNA and other hpRNA details to files\.\.\.";
-    my($n_miRNAs,$n_hpRNAs) = write_files(\%hp_clusters, \$outdir, \%names, \@final_clusters);
-    print STDERR " done\n";
+    log_it ($logfile,"\tWriting miRNA and other hpRNA details to files\.\.\.");
+    my($n_miRNAs,$n_hpRNAs) = write_files(\%final_hps, \$outdir, \%names, \@final_clusters);
+    log_it ($logfile," done\n");
     ## Report
     
     my $clus_count = scalar @final_clusters;
-    print STDERR "\tTotal Clusters: $clus_count\n\tmiRNA loci: $n_miRNAs\n\tother hpRNA loci: $n_hpRNAs\n\n";
-
+    log_it ($logfile,"\n\tTotal Clusters: $clus_count\n\tmiRNA loci: $n_miRNAs\n\tother hpRNA loci: $n_hpRNAs\n\n");
+    
 }
 
 ## Phase 5: Annotate and Quantify all clusters
-print STDERR `date`;
-print STDERR "Phase 5: Quantify all clusters\n";
+log_it ($logfile,`date`);
+log_it ($logfile,"Phase 5: Quantify all clusters\n");
 my %quant_master = quant(\@final_clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\$phaseFDR,\%names);
 
+# in this initial hash, the fields are
+#[0] : locus
+#[1] : name
+#[2] : strand  (+ or -)
+#[3] : frac_Watson
+#[4] : total
+#[5] : unique
+#[6] : rep_total
+#[7] : dicer_call
+#[8] : phase_offset
+#[9] : phase_pval
+#[10] : phase_FDR_call
+#[11] : short
+#[12] : long
+#[13 -- end] : dicer size mappings
+
+
 # modify the notations for hairpins
+
+# new fields to add
+#[0] : locus
+#[1] : name
+#[2] : HP_call  <<<<<
+#[3] : strand
+#[4] : frac_Watson
+#[5] : total
+#[6] : unique
+#[7] : rep_total
+#[8] : dicer_call
+#[9] : phase_offset
+#[10] : phase_pval
+#[11] : phase_FDR_call
+#[12] : pairs           <<<<<<
+#[13] : frac_paired    <<<<<<
+#[14] : stem_length    <<<<<<
+#[15] : loop_length    <<<<<<
+#[16] : dGperStem      <<<<<<
+#[17] : frac_hp        <<<<<<
+#[18] : hp_size_result <<<<<<
+#[19] : prec_result    <<<<<<
+#[20] : duplex_result  <<<<<<
+#[21] : star_result    <<<<<<
+#[22 -- end] : dicer size mappings
+
 my %quant_2 = ();
 if($nohp) {
     foreach my $f_clus (@final_clusters) {
 	my @qm_fields = split ("\t",$quant_master{$f_clus});
-	my @new_fields = @qm_fields[2..((scalar @qm_fields) -1)];
+	my @new_fields = @qm_fields[2..10];
 	unshift(@new_fields,"ND");
 	unshift(@new_fields,$qm_fields[1]);  ## name
 	unshift(@new_fields,$qm_fields[0]);  ## loc-coords
+	
+	push(@new_fields, "NA"); ## pairs
+	push(@new_fields, "NA"); ## frac_paired
+	push(@new_fields, "NA"); ## stem_length
+	push(@new_fields, "NA"); ## loop_length
+	push(@new_fields, "NA"); ## dGperStem
+	push(@new_fields, "NA"); ## frac_hp
+	push(@new_fields, "NA"); ## hp_size_result
+	push(@new_fields, "NA"); ## prec_result
+	push(@new_fields, "NA"); ## duplex_result
+	push(@new_fields, "NA"); ## star_result
+	
+	for(my $ii = 11; $ii < (scalar @qm_fields); ++$ii) {
+	    push(@new_fields, $qm_fields[$ii]);
+	}
 	my $new_entry = join("\t", @new_fields);
 	$quant_2{$f_clus} = $new_entry;
     }
 } else {
-    %quant_2 = mod_quant_hp(\%quant_master,\%hp_clusters);
+    %quant_2 = mod_quant_hp(\%quant_master,\%final_hps);
 }
 
 my %quant_3 = ();
@@ -465,144 +578,83 @@ if($raw) {
 } else {
     %quant_3 = convert_2_mpmm(\%quant_2,\$reads);
 }
-print STDERR "\n\n";
+log_it ($logfile,"\n\n");
+
+## Assess overlap with flag_file loci, if any
+
+my %quant_4 = ();
+unless($flag_file eq "NULL") {
+    log_it ($logfile,"\tAssessing overlap of small RNA loci with loci from flag file $flag_file\n");
+}
+%quant_4 = flag_overlap(\%quant_3, \$flag_file);
+
+## after this conversion, a new column is inserted.  Now the fields are:
+#[0] : locus
+#[1] : name
+#[2] : overlap      <<<<<<<<<
+#[3] : HP_call
+#[4] : strand
+#[5] : frac_Watson
+#[6] : total
+#[7] : unique
+#[8] : rep_total
+#[9] : dicer_call
+#[10] : phase_offset
+#[11] : phase_pval
+#[12] : phase_FDR_call
+#[13] : pairs          
+#[14] : frac_paired    
+#[15] : stem_length    
+#[16] : loop_length    
+#[17] : dGperStem      
+#[18] : frac_hp        
+#[19] : hp_size_result 
+#[20] : prec_result    
+#[21] : duplex_result  
+#[22] : star_result   
+#[23 -- end] : dicer size mappings
+
 
 ## Phase 6 .. Create output files and final reports
-print STDERR `date`;
-print STDERR "Phase 6: Outputting Results\n";
+log_it ($logfile,"\n");
+log_it ($logfile,`date`);
+log_it ($logfile,"Phase 6: Outputting Results\n");
 
 # output a .bed file
 # need difft. methods if hairpins/MIRNAs are included
 my $bed_text_for_log;
 if($nohp) {
-    $bed_text_for_log = write_bed_nohp(\@final_clusters,\%quant_3,\$outdir,\$dicermin,\$dicermax,\%names);
+    $bed_text_for_log = write_bed_nohp(\@final_clusters,\%quant_4,\$outdir,\$dicermin,\$dicermax,\%names);
 } else {
-    $bed_text_for_log = write_bed_with_hp(\@final_clusters,\%quant_3,\$outdir,\$dicermin,\$dicermax,\%names,\%hp_clusters);
+    $bed_text_for_log = write_bed_with_hp(\@final_clusters,\%quant_4,\$outdir,\$dicermin,\$dicermax,\%names,\%final_hps);
 }
 
 # write rgb information to log
-print LOG "\n$bed_text_for_log\n";
+log_it ($logfile,"\n$bed_text_for_log\n");
 
 # output the master file
 my $big_table = "$outdir" . "\/" . "Results\.txt";
 open(BIG, ">$big_table");
-print BIG "\#Locus\tName\tHP\tStrand\tFrac_Watson\tTotal\tUniques\tRep-total\tDicerCall\tPhaseOffset\tPhase_pval\tPhase_FDR_Call\tShort\tLong";
+print BIG "\#Locus\tName\tFlagOverlap\tHP\tStrand\tFrac_Watson\tTotal\tUniques\tRep-total\tDicerCall\tPhaseOffset\tPhase_pval\tPhase_FDR_Call\t";
+print BIG "Pairs\tFracPaired\tStemLength\tLoopLength\tdGperStem\tFracCovHP\tHPSizeResult\tPrecisionResult\tDuplexResult\tStarResult\tShort\tLong";
 for(my $d = $dicermin; $d <= $dicermax; ++$d) {
     print BIG "\t$d";
 } 
 print BIG "\n";
     
 foreach my $f_clus (@final_clusters) {
-    print BIG "$quant_3{$f_clus}\n";
+    print BIG "$quant_4{$f_clus}\n";
 }
 close BIG;
     
 # Provide a summary report to the user on STDERR and in the log
-print STDERR "\nSummary of Results:\n";
-print LOG "\nSummary of Results:\n";
-my %final_summary = ();
-if($nohp) {
-    %final_summary = final_summary_nohp(\%quant_3);
-    print STDERR "Dominant Size\tNumber of Clusters\n";
-    print LOG "Dominant Size\tNumber of Clusters\n";
-    if(exists($final_summary{'N'})) {
-	print STDERR "Non-Dicer\t$final_summary{'N'}\n";
-	print LOG "Non-Dicer\t$final_summary{'N'}\n";
-    } else {
-	print STDERR "Non-Dicer\t0\n";
-	print LOG "Non-Dicer\t0\n";
-    }
-    for(my $dsize = $dicermin; $dsize <= $dicermax; ++$dsize) {
-	print STDERR "$dsize\t";
-	print LOG "$dsize\t";
-	if(exists($final_summary{$dsize})) {
-	    print STDERR "$final_summary{$dsize}\n";
-	    print LOG "$final_summary{$dsize}\n";
-	} else {
-	    print STDERR "0\n";
-	    print LOG "0\n";
-	}
-    }
-    print STDERR "\n";
-    print STDERR "Significantly phased clusters \(size = $phasesize FDR = $phaseFDR\):\n";
-    print LOG "\n";
-    print LOG "Significantly phased clusters \(size = $phasesize FDR = $phaseFDR\):\n";
-    if(exists($final_summary{'phased'})) {
-	print STDERR "$final_summary{'phased'}\n";
-	print LOG "$final_summary{'phased'}\n";
-    } else {
-	print STDERR "0\n";
-	print LOG "0\n";
-    }
-} else {
-    %final_summary = final_summary(\%quant_3);
-    print STDERR "Dominant Size\tNOT-HAIRPINS\tHAIRPINS\tMIRNAs\n";
-    print LOG "Dominant Size\tNOT-HAIRPINS\tHAIRPINS\tMIRNAs\n";
-    if(exists($final_summary{'N'}{'X'})) {
-	print STDERR "Non-Dicer\t$final_summary{'N'}{'X'}\t";
-	print LOG "Non-Dicer\t$final_summary{'N'}{'X'}\t";
-    } else {
-	print STDERR "Non-Dicer\t0\t";
-	print LOG "Non-Dicer\t0\t";
-    }
-    if(exists($final_summary{'N'}{'HP'})) {
-	print STDERR "$final_summary{'N'}{'HP'}\t";
-	print LOG "$final_summary{'N'}{'HP'}\t";
-    } else {
-	print STDERR "0\t";
-	print LOG "0\t";
-    }
-    if(exists($final_summary{'N'}{'MIRNA'})) {
-	print STDERR "$final_summary{'N'}{'MIRNA'}\n";
-	print LOG "$final_summary{'N'}{'MIRNA'}\n";
-    } else {
-	print STDERR "0\n";
-	print LOG "0\n";
-    }
-    
-    
-    for(my $dsize = $dicermin; $dsize <= $dicermax; ++$dsize) {
-	print STDERR "$dsize\t";
-	print LOG "$dsize\t";
-	if(exists($final_summary{$dsize}{'X'})) {
-	    print STDERR "$final_summary{$dsize}{'X'}\t";
-	    print LOG "$final_summary{$dsize}{'X'}\t";
-	} else {
-	    print STDERR "0\t";
-	    print LOG "0\t";
-	}
-	if(exists($final_summary{$dsize}{'HP'})) {
-	    print STDERR "$final_summary{$dsize}{'HP'}\t";
-	    print LOG "$final_summary{$dsize}{'HP'}\t";
-	} else {
-	    print STDERR "0\t";
-	    print LOG "0\t";
-	}
-	if(exists($final_summary{$dsize}{'MIRNA'})) {
-	    print STDERR "$final_summary{$dsize}{'MIRNA'}\n";
-	    print LOG "$final_summary{$dsize}{'MIRNA'}\n";
-	} else {
-	    print STDERR "0\n";
-	    print LOG "0\n";
-	}
-    }
-    print STDERR "\n";
-    print STDERR "Significantly phased clusters \(size = $phasesize FDR = $phaseFDR\):\n";
-    print LOG "\n";
-    print LOG "Significantly phased clusters \(size = $phasesize FDR = $phaseFDR\):\n";
-    if(exists($final_summary{'phased'})) {
-	print STDERR "$final_summary{'phased'}\n";
-	print LOG "$final_summary{'phased'}\n";
-    } else {
-	print STDERR "0\n";
-	print LOG "0\n";
-    }
-}
-print STDERR "Completed\n";
-print STDERR `date`;
-print LOG "Completed\n";
-print LOG `date`;
-close LOG;
+log_it ($logfile,"\nSummary of Results:\n");
+
+summarize(\%quant_4,\$nohp,\$dicermin,\$dicermax,\$logfile);
+
+
+log_it ($logfile,"Completed\n");
+log_it ($logfile, `date`);
 
 
 ############### SUB ROUTINE BLOCKS
@@ -647,14 +699,20 @@ OPTIONS:
 --outdir [string] : name for output directory that ShortStack will create\.  Defaults to \"ShortStack_\[unix-time\]\" if not provided\.
 --reads [float] : number of mapped reads in bam_file\.  If not provided, ShortStack will force the analysis into \'raw\' mode, and no reads-per-million adjustments will be made\.
 --inv_file [string] : path to .inv file from einverted analysis of the genome_file in question\.  If not provided, warning is issued but analysis proceeds\.
+--flag_file [string] : path to file containing a list of loci to assess for overlap with small RNA loci\.  Optional\.
 --mindepth [integer] : threshold for calling islands \(in reads per million\; must be more than 0 and less than 1 million\; default: 20\)
 --pad [integer] : Number of nucleotides upstream and downstrem to extend initial islands during cluster definition\; default: 100
 --dicermin [integer] : smallest size of the Dicer-derived small RNAs \(must be between 15-35 and less than or equal to option --dicermax\; default: 20\)
 --dicermax [integer] : largest size of the Dicer-derived small RNAs \(must be between 15-35 and more than or equal to option --dicermin\; default: 24\)
 --maxhpsep [integer] : maximum allowed separation of a base pair to span during hairpin prediction \(option -L for RNALfold\; must be between 50 and 2000\;default: 300\)
 --minfracpaired [float] : minimum fraction of paired nts allowable in a hairpin structure\; default: 0.67
---minntspaired [integer] : minimum number of base-pairs in an accetable hairpin structure\; default: 30
+--minntspaired [integer] : minimum number of base-pairs in an accetable hairpin structure\; default: 15
 --minfrachpdepth [float] : minimum fraction of coverage in hairpin helix to keep hairpin\; default: 0.67
+--maxdGperStem [float] : maximum (deltaG/stem length) value for a valid hairpin\; stem length is 0.5 \* \(left stem + right stem\)\; default: -0.5
+--maxLoopLength [integer] : maximum allowed loop length for a valid hairpin\; default: set by --miRType \'plant\' be essentially unlimited \(100,000\)\.  --miRType \'animal\' sets it to 15\.
+--miRType [string] : Either 'plant' or 'animal'.  Sets maxmiRHPPairs, maxLoopLength, and maxmiRUnpaired to values specific to either kingdom\; default: \'plant\'
+--maxmiRHPPairs [integer] : Maximum number of base pairs in a MIRNA\. \; default: set by --miRType \'plant\' to 150\.  --miRType \'animal\' sets to 45 instead
+--maxmiRUnpaired [integer] : Maximum number of unpaired miRNA nts in a miRNA/miRNA\* duplex\; default: set by --miRType \'plant\' to 5\.  --miRType \'animal\' instead sets it to 6
 --minstrandfrac [float] : minimum fraction of mappings to assign a polarity to a non-hairpin cluster\; default: 0.8
 --mindicerfrac [float] : minimum fraction of mappings within the dicer size range to annotate a locus as Dicer-derived\; default: 0.85
 --count [string] : File containing a-priori defined clusters\.  Presence of --count triggers \"count\" mode, and de-novo cluster discovery is skipped\. Default: off
@@ -772,10 +830,6 @@ sub get_clusters {
 			    $cluster = "$last_chr" . ":" . "$current_start_coordinate" . "-" . "$end";
 			    push(@clusters, $cluster);
 			    
-			    # TEST
-			    #print STDERR "$cluster\n";
-			    # END TEST
-			    
 			    $last_good_coordinate = '';
 			    $current_start_coordinate = '';
 			    
@@ -807,9 +861,7 @@ sub get_clusters {
 		$end = $last_good_coordinate;
 		$cluster = "$last_chr" . ":" . "$current_start_coordinate" . "-" . "$end";
 		push(@clusters, $cluster);
-		# TEST
-		#print STDERR "$cluster\n";
-		# END TEST
+
 		$last_good_coordinate = '';
 		$current_start_coordinate = '';
 	    }
@@ -843,9 +895,7 @@ sub get_clusters {
 			    $end = $last_good_coordinate;
 			    $cluster = "$chr" . ":" . "$current_start_coordinate" . "-" . "$end";
 			    push(@clusters, $cluster);
-			    # TEST
-			    #print STDERR "$cluster\n";
-			    # END TEST
+
 			    $last_good_coordinate = '';
 			    $current_start_coordinate = '';
 			    
@@ -919,9 +969,7 @@ sub get_clusters {
 		    $end = $last_good_coordinate;
 		    $cluster = "$last_chr" . ":" . "$current_start_coordinate" . "-" . "$end";
 		    push(@clusters, $cluster);
-		    # TEST
-		    #print STDERR "$cluster\n";
-		    # END TEST
+
 
 		    $last_good_coordinate = '';
 		    $current_start_coordinate = '';
@@ -954,9 +1002,7 @@ sub get_clusters {
 	$end = $last_good_coordinate;
 	$cluster = "$last_chr" . ":" . "$current_start_coordinate" . "-" . "$end";
 	push(@clusters, $cluster);
-	# TEST
-	#print STDERR "$cluster\n";
-	# END TEST
+
 	$last_good_coordinate = '';
 	$current_start_coordinate = '';
     }
@@ -1112,7 +1158,7 @@ sub get_names_countmode {
 		
 
 sub get_folding_regions {
-    my($gen_file,$info,$pad) = @_;  ## passed as references .. scalar, array, scalar, and scalar, respectively
+    my($gen_file,$info,$pad,$maxhpsep) = @_;  ## passed as references .. scalar, array, scalar, and scalar, respectively
     my $locus;
 
     my %to_fold = ();
@@ -1120,7 +1166,7 @@ sub get_folding_regions {
     my $start;
     my $stop;
     my $locus_size;
-    my $unp_locus_size_3x;
+    my $unp_locus_size;
     my $get_size;
     my $middle;
     my $get_start;
@@ -1156,16 +1202,12 @@ sub get_folding_regions {
 	}
 
 	$locus_size = $stop - $start + 1;
-	$unp_locus_size_3x = int (3 * ($locus_size - (2 * $$pad)));  ## the unpadded region is the locus size - (2 * $pad).
+	$unp_locus_size = int($locus_size - (2 * $$pad));  ## the unpadded region is the locus size - (2 * $pad).
 
-	if($locus_size >= 1000) {
-	    $get_size = $locus_size;
-	} elsif($unp_locus_size_3x > 1000) {
-	    $get_size = 1000;
-	} elsif($unp_locus_size_3x < 250) {
-	    $get_size = 250;
+	if($unp_locus_size > $$maxhpsep) {
+	    next;  ## NOT folded if unpadded size is larger than the max hp sep
 	} else {
-	    $get_size = $unp_locus_size_3x;
+	    $get_size = $$maxhpsep;  ## otherwise, a window the size of the maxhpsep will be folded in all cases.
 	}
 	
 	# get the coordinates .. centered on the middle of the cluster
@@ -1308,11 +1350,11 @@ sub get_folding_regions_countmode {
 }
 
 sub folder {
-    my($to_fold,$L,$min_paired,$min_frac_paired) = @_;  ## passed by reference, hash and scalar, respectively
+    my($to_fold,$L,$min_paired,$min_frac_paired,$maxdGperStem,$maxLoopLength) = @_;  ## passed by reference: first is hash, rest are scalar
     my $locus;
     my $fold_seq;
     my $brax;
-    my $delta_G;
+
     my %output = ();  
     my $structure_details;
     my $start;
@@ -1324,6 +1366,21 @@ sub folder {
     my $right;
 
     my $adj_st;
+    
+    my $pairs;
+    my $frac_paired;
+    my $stem_length;
+    my $loop_length;
+    
+    my $seq_section;
+    my $left_stem_brax;
+    my $right_stem_brax;
+    my $left_stem_seq;
+    my $right_stem_seq;
+    
+    my $eval_string;
+    my $dG;
+    my $dGperStem;
     
     # first, get some information to enable a crude progress bar
     my $n_loci_to_fold = scalar ( keys %$to_fold);
@@ -1340,7 +1397,9 @@ sub folder {
 	}
 	
 	# First, the Watson Strand is folded
-	open(RNALFOLD, "echo $$to_fold{$locus}{'sequence'} | RNALfold -d 2 -noLP -L $$L |");
+	## compatible with either RNALfold 1.x or 2.x ... removed -noLP
+	
+	open(RNALFOLD, "echo $$to_fold{$locus}{'sequence'} | RNALfold -L $$L |");
 	while (<RNALFOLD>) {
 	    chomp;
 	    if($_ =~ /^[^\.\(\)]/) {
@@ -1354,14 +1413,6 @@ sub folder {
 	    } else {
 		die "FATAL in sub-routine \'folder\' : failed to parse brackets from RNALfold output line:\n$_\n";
 	    }
-	    
-	    ## Note, as of v.0.1.3, deltaG is no longer used. 
-	    ##if($_ =~ /\s+\((.*\d+.*)\)/) {
-	    #	$delta_G = $1;
-	    #	$delta_G =~ s/\s//g;
-	    #} else {
-	    #	die "FATAL in sub-routine \'folder\' : failed to parse deltaG from RNALfold output line: $_\n";
-	    #}
 	    
 	    if($_ =~ /(\d+)\s*$/) {
 		$start = $1;
@@ -1373,16 +1424,37 @@ sub folder {
 	    %regions = get_distinct_hps($brax);
 	    while(($left, $right) = each %regions) {
 		$brax_section = substr($brax,($left - 1),($right-$left+1));
-	    
-		# send the structure to the general structure evaluation sub-routine, which returns zero to reject, one to keep
-		$structure_details = evaluate_structure_general($brax_section,$$min_paired,$$min_frac_paired);
+		$seq_section = substr($$to_fold{$locus}{'sequence'}, ($start + $left - 2), ($right - $left + 1));
+		($structure_details,$pairs,$frac_paired,$stem_length,$loop_length) = evaluate_structure_general($brax_section,$$min_paired,$$min_frac_paired,$$maxLoopLength);
 
-		# if it is OK, adjust the coordinates, and add to output
+		# if it is OK so far, test via RNAeval of just the stem regions
 		unless($structure_details eq "bogus") {
 		    # structure details are 123-150,180-200 .. e.g. start and stop positions of the helix of interest, one-based coordinates, relative to the brackets themselves.
-		    $adj_st = $left + $start - 1;
-		    $entry = "$brax_section\t$adj_st\t$structure_details\t" . "Watson";
-		    push(@{$output{$locus}}, $entry);
+		    
+		    if($structure_details =~ /(\d+)-(\d+)\,(\d+)-(\d+)/) {
+			$left_stem_brax = substr($brax_section, ($1 - 1), ($2 - $1 + 1));
+			$right_stem_brax = substr($brax_section, ($3 - 1), ($4 - $3 + 1));
+			$left_stem_seq = substr($seq_section, ($1 - 1), ($2 - $1 + 1));
+			$right_stem_seq = substr($seq_section, ($3 - 1), ($4 - $3 + 1));
+			
+			$eval_string = "$left_stem_seq" . "\&" . "$right_stem_seq" . "\n" . "$left_stem_brax" . "\&" . "$right_stem_brax";
+			
+			$dG = dG_from_RNAeval($eval_string);
+			
+			unless($dG eq "FAIL") {
+			    $dGperStem = $dG / $stem_length;
+			    if($dGperStem <= $$maxdGperStem) {
+				
+				## OK
+		    
+				$adj_st = $left + $start - 1;
+				$entry = "$brax_section\t$adj_st\t$structure_details\t" . "Watson";
+				$entry .= "\t$pairs\t$frac_paired\t$stem_length\t$loop_length\t$dGperStem";
+				
+				push(@{$output{$locus}}, $entry);
+			    }
+			}
+		    }
 		}
 	    }
 	}
@@ -1392,7 +1464,7 @@ sub folder {
 	$revcomp = reverse $$to_fold{$locus}{'sequence'};
 	$revcomp =~ tr/ACUG/UGAC/;
 
-	open(RNALFOLD, "echo $revcomp | RNALfold -d 2 -noLP -L $$L |");
+	open(RNALFOLD, "echo $revcomp | RNALfold -L $$L |");
 	while (<RNALFOLD>) {
 	    chomp;
 	    if($_ =~ /^[^\.\(\)]/) {
@@ -1407,14 +1479,6 @@ sub folder {
 		die "FATAL in sub-routine \'folder\' : failed to parse brackets from RNALfold output line:\n$_\n";
 	    }
 	    
-	    ## Note, as of v.0.1.3, deltaG is no longer used. 
-	    #if($_ =~ /\s+\((.*\d+.*)\)/) {
-	    #	$delta_G = $1;
-	    #	$delta_G =~ s/\s//g;
-	    #} else {
-	    #	die "FATAL in sub-routine \'folder\' : failed to parse deltaG from RNALfold output line: $_\n";
-	    #}
-	    
 	    if($_ =~ /(\d+)\s*$/) {
 		$start = $1;
 	    } else {
@@ -1425,32 +1489,40 @@ sub folder {
 	    %regions = get_distinct_hps($brax);
 	    while(($left, $right) = each %regions) {
 		$brax_section = substr($brax,($left - 1),($right-$left+1));
-		
-		# send the structure to the general structure evaluation sub-routine, which returns zero to reject, one to keep
-		$structure_details = evaluate_structure_general($brax_section,$$min_paired,$$min_frac_paired);
+		$seq_section = substr($revcomp, ($start + $left - 2), ($right - $left + 1));
+
+
+		($structure_details,$pairs,$frac_paired,$stem_length,$loop_length) = evaluate_structure_general($brax_section,$$min_paired,$$min_frac_paired,$$maxLoopLength);
 		
 		# if it is OK, adjust the coordinates, and add to output
 		unless($structure_details eq "bogus") {
-		    
-		    # structure details are 123-150,180-200 .. e.g. start and stop positions of the helix of interest, one-based coordinates, relative to the brackets themselves.
-		    $adj_st = $left + $start - 1;
-		    $entry = "$brax_section\t$adj_st\t$structure_details\t" . "Crick";
-		    push(@{$output{$locus}}, $entry);
+		    if($structure_details =~ /(\d+)-(\d+)\,(\d+)-(\d+)/) {
+			$left_stem_brax = substr($brax_section, ($1 - 1), ($2 - $1 + 1));
+			$right_stem_brax = substr($brax_section, ($3 - 1), ($4 - $3 + 1));
+			$left_stem_seq = substr($seq_section, ($1 - 1), ($2 - $1 + 1));
+			$right_stem_seq = substr($seq_section, ($3 - 1), ($4 - $3 + 1));
+			
+			$eval_string = "$left_stem_seq" . "\&" . "$right_stem_seq" . "\n" . "$left_stem_brax" . "\&" . "$right_stem_brax";
+			$dG = dG_from_RNAeval($eval_string);
+			
+			unless($dG eq "FAIL") {
+			    $dGperStem = $dG / $stem_length;
+			    if($dGperStem <= $$maxdGperStem) {
+				
+				## OK
+				
+				$adj_st = $left + $start - 1;
+				$entry = "$brax_section\t$adj_st\t$structure_details\t" . "Crick";
+				$entry .= "\t$pairs\t$frac_paired\t$stem_length\t$loop_length\t$dGperStem";
+				
+				push(@{$output{$locus}}, $entry);
+			    }
+			}
+		    }
 		}
 	    }
 	}
 	close RNALFOLD;
-	
-	
-
-## TEST .. output to flat file
-#	if(@{$output{$locus}}) {
-#	    print "$locus\n";
-#	    foreach $entry (@{$output{$locus}}) {
-#		print"\t$entry\n";
-#	    }
-#	}
-	## end TEST
     }
     print STDERR " Done\n";
     return %output;
@@ -1494,7 +1566,7 @@ sub get_distinct_hps {
 sub evaluate_structure_general {
     ## this is the primary evaluation for putative hairpin secondary structures
     ## input is a scalar, dot-bracket string.  Other two inputs also scalar
-    my($brax,$min_paired,$min_paired_frac) = @_;
+    my($brax,$min_paired,$min_paired_frac,$maxLoopLength) = @_;
     my @chars = split ('', $brax);
     my $char;
     my $left_start;
@@ -1504,9 +1576,11 @@ sub evaluate_structure_general {
     my $i;
     my $left_true_stop;
     my $right_true_start;
-    my $pairs;
-    my $frac_paired;
-    my $to_return;  ## left_start-left_true_stop,right_true_start-right_stop
+    my $pairs = 0;
+    my $frac_paired = 0;
+    my $details;  ## left_start-left_true_stop,right_true_start-right_stop
+    my $stem_length = 0;
+    my $loop_length = 0;
     
     # make a hash where key is 1-based positions of ( and value is one-based position of corresponding )
     my %left_right = get_left_right($brax);
@@ -1563,35 +1637,29 @@ sub evaluate_structure_general {
 	    # calculate the fraction of nts in the bottom stem that are paired
 	    $frac_paired = (2 * $pairs) / (($right_stop - $right_true_start + 1) + ($left_true_stop - $left_start + 1));
 	    
-	    # For reference, here are the stats for Arabidopsis thaliana miRNAs (miRBase 18).
-	    # Note that 13 MIRNAs were excluded from analysis because of short side-branches at the ends. . untrimmed hps in miRBase
-	    # Stat       Number of pairs     fraction paired
-	    # mean        62.37769784         0.748874515
-	    # stdev       37.36382455         0.137359546
-	    # 10th p-tile 32                  0.600252207
-	    # 25th p-tile 39.25               0.714555596
-	    # 50th p-tile 50                  0.77694859
-	    # 75th p-tile 70.75               0.829021927
-	    # 90th p-tile 114.3               0.879151515
+	    # Determine the stem length, which is defined as 0.5 * (left_arm_length + right_arm_length)
+	    $stem_length = 0.5 * (($right_stop - $right_true_start + 1) + ($left_true_stop - $left_start + 1));
 	    
-	    # min       22                  0.171990172
-	    # max       213                 1
+	    # Determine the loop length
+	    $loop_length = $right_true_start - $left_true_stop - 1;
 	    
-	    # n         278
+	    # If everything is OK, send it back.  RNAeval will occur in the parent sub-routine
 	    
 	    if(($frac_paired >= $min_paired_frac) and
-	       ($pairs >= $min_paired)) {
-		$to_return = "$left_start" . "-$left_true_stop" . "," . "$right_true_start" . "-" . "$right_stop";
+	       ($pairs >= $min_paired) and
+	       ($loop_length <= $maxLoopLength)) {
+		
+		$details = "$left_start" . "-$left_true_stop" . "," . "$right_true_start" . "-" . "$right_stop";
 	    } else {
-		$to_return = "bogus";
+		$details = "bogus";
 	    }
 	} else {
-	    $to_return = "bogus";
+	    $details = "bogus";
 	}
     } else {
-	$to_return = "bogus";
+	$details = "bogus";
     }
-    return $to_return;
+    return ($details,$pairs,$frac_paired,$stem_length,$loop_length);
 }
 
 sub get_left_right {
@@ -1626,8 +1694,7 @@ sub hairpin_coords {
     my $local_offset;
     my $brax;
     my $inp;
-    #my $delta_G;  deprecated v0.1.3
-    ## coordinates within the initial query region.
+
     my $left_1_start;
     my $left_1_stop;
     my $right_1_start;
@@ -1650,23 +1717,14 @@ sub hairpin_coords {
     
     while(($locus) = each %$input_hps) {
 	
-	## TEST
-#	print STDERR "Locus: $locus\n";
-#	print STDERR "FoldedRegion: $$to_fold{$locus}{'start'} to $$to_fold{$locus}{'stop'} strand: $$to_fold{$locus}{'strand'}\n";
-	##
-	
 	@inputs = @{$$input_hps{$locus}};
 	foreach $inp (@inputs) {
 	    @fields = split ("\t", $inp);
-	    $strand_folded = pop @fields;
-	    #$delta_G = pop @fields;
-	    $in_helix_coords = pop @fields;
-	    $local_offset = pop @fields;
-	    $brax = pop @fields;
-	    
-	    ## TEST
-#	    print STDERR "\tINPUT: $inp\n";
-	    ##
+	    $strand_folded = $fields[3];
+
+	    $in_helix_coords = $fields[2];
+	    $local_offset = $fields[1];
+	    $brax = $fields[0];
 	    
 	    if($in_helix_coords =~ /^(\d+)-(\d+),(\d+)-(\d+)$/) {
 		$left_1_start = $local_offset + $1 - 1;
@@ -1699,10 +1757,7 @@ sub hairpin_coords {
 	    $brax_true = "$start_true" . "-" . "$stop_true";
 	    $helix_true = "$left_true_start" . "-" . "$left_true_stop" . "," . "$right_true_start" . "-" . "$right_true_stop";
 	    $true_entry = "$brax\t$brax_true\t$helix_true\t$strand_folded";
-	    
-	    ## TEST
-#	    print STDERR "\tOUTPUT: $true_entry\n";
-	    ##
+	    $true_entry .= "\t$fields[4]\t$fields[5]\t$fields[6]\t$fields[7]\t$fields[8]";
 	    
 	    push(@{$true_hps{$locus}}, $true_entry);
 	    
@@ -1754,10 +1809,7 @@ sub remove_redundant_hps {
     my $q_size;
     my $s_size;
     while(($locus) = each %$input_hps) {
-	## TEST
-	#print STDERR "LOCUS: $locus\n";
-	#print STDERR "INPUTS:\n";
-	##
+
 	@tmpW = ();  ## reset at each locus
 	%to_deleteW = ();  ## reset at each locus
 	@tmpC = ();  ## reset at each locus
@@ -1775,7 +1827,7 @@ sub remove_redundant_hps {
 	    @fields = split ("\t", $entry);
 	    $helix_coords = $fields[2];
 	    $hp_length = length $fields[0];  ## the brackets
-	    #$delta_G_per_nt = $fields[3] / $hp_length;
+
 	    $tmp_entry = "$helix_coords";
 	    $strand = $fields[3];
 	    if($strand eq "Watson") {
@@ -1930,9 +1982,7 @@ sub remove_nonoverlapped_hps {
     my $overlap2;
     
     while(($locus) = each %$input_hash) {
-	## TEST
-	#print STDERR "LOCUS: $locus\n";
-	##
+
 	# get the range of the actual locus
 	@loc_range = ();  ## clear at each iteration
 	if($locus =~ /\S+:(\d+)-(\d+)$/) {
@@ -1942,13 +1992,9 @@ sub remove_nonoverlapped_hps {
 	    die "Fatal in sub-routine remove_nonoverlapped_hps -- reg ex failure to larse locus name $locus\n";
 	}
 	@entries = @{$$input_hash{$locus}};
-	## TEST
-	#print STDERR "INPUT:\n";
-	##
+
 	foreach $entry (@entries) {
-	    ## TEST
-	    #print STDERR "\t$entry\n";
-	    ##
+
 	    @en_fields = split ("\t", $entry);
 	    @hp_ranges = split (",", $en_fields[2]);
 	    @range1 = split ("-", $hp_ranges[0]);
@@ -1963,9 +2009,7 @@ sub remove_nonoverlapped_hps {
 		
 		push(@{$scrubbed{$locus}}, $entry);
 		
-		## TEST
-		#print STDERR "\t\tKEPT\n";
-		##
+
 		
 	    }
 	}
@@ -1990,7 +2034,16 @@ sub range_overlap_count {
 
 sub hp_expression {
     my($input_hps,$bamfile,$min_frac) = @_; # passed by reference, hash and three scalars
-    
+   
+    my %original_locus_W = ();
+    my %original_locus_C = ();
+    my $orig_coverage;
+    my $orig_start;
+    my $orig_stop;
+    my @fields = ();
+    my $position;
+    my $read_length;
+ 
     my $cluster;
     my @hps = ();
     my $hp_entry;
@@ -1999,53 +2052,42 @@ sub hp_expression {
     my @fivep = ();
     my @threep = ();
     
-    my $strand;
     my $left_start;
     my $left_stop;
     my $right_start;
     my $right_stop;
-    my $left_flank_start;
-    my $right_flank_stop;
-    
-    my $chr;
-    my $sam_start;
-    my $sam_query;
-    
-    my @fields = ();
-    my $position;
-    my $read_length;
-    my $read_strand;
-    
-    my %total_coverage = ();
-    my %left_arm_coverage = ();
-    my %right_arm_coverage = ();
-    my $i;
-    
-    my $ok_strand_left_cov_sum;
-    my $ok_strand_right_cov_sum;
-    
-    my $sum;
-    my $qualifying_sum;
-    my $ratio;
     
     my %output_hash = ();
     
-    my $sum_left;  # 0.2.1
-    my $sum_right; # 0.2.1
+    my $i;
     
-    my %original_locus = (); ## 0.2.1
-    my $orig_coverage = 0;
-    my $orig_start; ## 0.2.1
-    my $orig_stop; ## 0.2.1
-    my $sum_hp_orig; ## 0.2.1
-    my $qual_sum_hp_orig;  ## 0.2.1
-    my $final_ratio; ## 0.2.1
-
+    my $hp_coverage;
+   
+    my $hp_cov_frac;
+    
+    my @alignments = ();
+    my $hp_strand;
+    
+    my %left_names = ();
+    my %right_names = ();
+    
+    my $stop;
+    my $readstrand;
+    my $readname;
+    
+    my %left_read_lengths = ();
+    
+    my $max_frac = 0;
+    my $max_string;
+    
     # for progress tracking
     my $n_to_examine = scalar (keys %$input_hps);  ## this is a bit crude, as loci will have varying numbers of hairpins within them
     my $five_percent = int (0.05 * $n_to_examine);
     my $x = 0;
     print STDERR "\n\tProgress within sub-routine \"hp_expression\" \(dots = five percent\): ";
+    
+    
+    
     
     while(($cluster) = each %$input_hps) {
 	# progress tracking
@@ -2055,9 +2097,9 @@ sub hp_expression {
 	    $x = 0;
 	}
 	# first, get the coverage total across the entire, original locus
-	%original_locus = ();
+	%original_locus_W = ();
+	%original_locus_C = ();
 	$orig_coverage = 0;
-	$qual_sum_hp_orig = 0;
 	if($cluster =~ /^\S+:(\d+)-(\d+)$/) {
 	    $orig_start = $1;
 	    $orig_stop = $2;
@@ -2065,10 +2107,16 @@ sub hp_expression {
 	    die "FATAL: Failed to parse cluster name $cluster in sub-routine hp_expression\n";
 	}
 	for($i = $orig_start; $i <= $orig_stop; ++$i) {
-	    $original_locus{$i} = 0;
+	    $original_locus_W{$i} = 0;
+	    $original_locus_C{$i} = 0;
 	}
+	## save all alignments 
+	## reset 
+	@alignments = ();
+	
 	open(SAM, "samtools view $$bamfile $cluster |");
 	while (<SAM>) {
+	    push(@alignments, $_);
 	    chomp;
 	    # skip headers, just in case
 	    if($_ =~ /^@/) {
@@ -2084,9 +2132,13 @@ sub hp_expression {
 	    }
 	    $read_length = parse_cigar ($fields[5]);
 	    for($i = $position; $i < ($position + $read_length); ++$i) {
-		if(exists($original_locus{$i})) {
+		if(exists($original_locus_W{$i})) {  ## exists will be same for both strands, so just using W is fine
 		    ++$orig_coverage;
-		    ++$original_locus{$i};
+		    if($fields[1] & 16) {
+			++$original_locus_C{$i};
+		    } else {
+			++$original_locus_W{$i};
+		    }
 		}
 	    }
 	}
@@ -2094,159 +2146,150 @@ sub hp_expression {
 	
 	@hps = @{$$input_hps{$cluster}};
 	foreach $hp_entry (@hps) {
+	    
+	    # reset
+	    $max_frac = 0;
+	    $max_string = '';
+	    
 	    @hp_fields = split ("\t", $hp_entry);
 	    @hp_arms = split (",", $hp_fields[2]);
 	    @fivep = split ("-", $hp_arms[0]);
 	    @threep = split ("-", $hp_arms[1]);
 	    
 	    if($fivep[0] < $fivep[1]) { ## sense 
-		$strand = "+";
+		$hp_strand = "W";
 		$left_start = $fivep[0];
 		$left_stop = $fivep[1];
 		$right_start = $threep[0];
 		$right_stop = $threep[1];
 	    } else {
 		## antisense
-		$strand = "-";
+		$hp_strand = "C";
 		$left_start = $threep[1];
 		$left_stop = $threep[0];
 		$right_start = $fivep[1];
 		$right_stop = $fivep[0];
 	    }
 	    
-	    $left_flank_start = $left_start - ($left_stop - $left_start);
-	    $right_flank_stop = $right_stop + ($right_stop - $right_start);
+	    ## check the coverage within the current hairpin
+	    ## at this point, not yet corrected for any 'dyads' formed by mapping of the same read to opposite strands and arms as
+	    ##  would happen for perfect inverted repeats
 	    
-	    # build query region for samtools view
-	    if($cluster =~ /^(\S+):/) {
-		$chr = $1;
-	    } else {
-		die "FATAL: in hp_expression sub-routine failure to parse chr from $cluster\n";
-	    }
-	    
-
-	    $sam_start = $left_flank_start;
-	    if($sam_start < 1) {
-		$sam_start = 1;  ## in case you are at the edge of the chr
-	    }
-	    $sam_query = "$chr" . ":" . "$sam_start" . "-" . "$right_flank_stop";
-	    
-	    # initialize tracking hashes
-	    %total_coverage = ();
-	    %left_arm_coverage = ();
-	    %right_arm_coverage = ();
-	    for($i = $left_flank_start; $i <= $right_flank_stop; ++$i) {
-		$total_coverage{$i} = 0;
-		if(($i >= $left_start) and
-		   ($i <= $left_stop)) {
-		    $left_arm_coverage{$i} = 0;
-		}
-		if(($i >= $right_start) and
-		   ($i <= $right_stop)) {
-		    $right_arm_coverage{$i} = 0;
-		}
-	    }
-	    
-            # get the alignments
-	    $ok_strand_left_cov_sum = 0;
-	    $ok_strand_right_cov_sum = 0;
-	    
-	    open(SAM, "samtools view $$bamfile $sam_query |");
-	    while (<SAM>) {
-		chomp;
-		# skip headers, just in case
-		if($_ =~ /^@/) {
-		    next;
-		}
-	
-		# get fields of interest for the current line
-		@fields = split ("\t", $_);
-		$position = $fields[3];
-		# ensure the read is mapped.  If not, go to the next line
-		if($fields[1] & 4 ) {
-		    next;
-		}
-		$read_length = parse_cigar ($fields[5]);
-		
-		if($fields[1] & 16) {
-		    $read_strand = "-";
+	    $hp_coverage = 0;  ## reset each time through the loop
+	    for($i = $left_start; $i <= $left_stop; ++$i) {
+		if($hp_strand eq "W") {
+		    if(exists($original_locus_W{$i})) {
+			$hp_coverage += $original_locus_W{$i};
+		    }
 		} else {
-		    $read_strand = "+";
+		    if(exists($original_locus_C{$i})) {
+			$hp_coverage += $original_locus_C{$i};
+		    }
 		}
+	    }
+	    for($i = $right_start; $i <= $right_stop; ++$i) {
+		if($hp_strand eq "W") {
+		    if(exists($original_locus_W{$i})) {
+			$hp_coverage += $original_locus_W{$i};
+		    }
+		} else {
+		    if(exists($original_locus_C{$i})) {
+			$hp_coverage += $original_locus_C{$i};
+		    }
+		}
+	    }
+	    
+	    ## determine the fraction of the original locus's coverage in the current hairpin
+	    ## protect against dividing by zero
+	    if($orig_coverage > 0) {
+		$hp_cov_frac = $hp_coverage / $orig_coverage;
+	    } else {
+		$hp_cov_frac = 0;
+	    }
+	    
+	    ## At this point, the fraction has not been corrected for dyads
+	    ## Consider the limiting case .. 100% of coverage is in the hairpin arms, and all
+	    ##  mappings are dyads.  Thus, the fraction would be 0.5.  To save time then, we can quit
+	    ##  on this hairpin if this preliminary fraction is < 0.5
+	    
 
-		# track
-		for($i = $position; $i <($position + $read_length); ++$i) {
-		    if(exists($total_coverage{$i})) {
-			++$total_coverage{$i};
+	    if ($hp_cov_frac < 0.5) {
+		next;
+	    } else {
+		## determine the hp_cov_frac, corrected for dyads
+		##  for any possible dyads.
+		
+		## first, get the read names for any possible dyads
+		# reset
+		%left_names = ();
+		%right_names = ();
+		foreach my $samline (@alignments) {
+		    chomp $samline;
+		    ## ignore headers
+		    if($samline =~ /^@/) {
+			next;
 		    }
-		    if (exists($left_arm_coverage{$i})) {
-			++$left_arm_coverage{$i};	
-			if($read_strand eq $strand) {
-			    ++$ok_strand_left_cov_sum;
+		    ## ignore unmapped reads
+		    @fields = split ("\t", $samline);
+		    if($fields[1] & 4) {
+			next;
+		    }
+		    ## determine stop position
+		    $read_length = parse_cigar ($fields[5]);
+		    $stop = $fields[3] + $read_length - 1;
+		    
+		    ## determine strand
+		    if($fields[1] & 16) {
+			$readstrand = "C";
+		    } else {
+			$readstrand = "W";
+		    }
+		    
+		    ## is it fully within the left arm?
+		    if(($fields[3] >= $left_start) and
+		       ($stop <= $left_stop)) {
+			$left_names{$fields[0]} = $readstrand;
+			$left_read_lengths{$fields[0]} = $read_length;
+		    }
+		    
+		    ## is it fully within the right arm?
+		    if(($fields[3] >= $right_start) and
+		       ($stop <= $right_stop)) {
+			$right_names{$fields[0]} = $readstrand;
+		    }
+		}
+		
+		while(($readname,$readstrand) = each %left_names) {
+		    if(exists($right_names{$readname})) {
+			if($readstrand ne $right_names{$readname}) {
+			    ## this is a dyad
+			    ## substract its length from the total coverage
+			    ## this is the equivalent of just not counting the 
+			    ## opposite polarity mapping in the total
+			    $read_length = $left_read_lengths{$readname};
+			    $orig_coverage -= $read_length;
 			}
 		    }
-		    if (exists($right_arm_coverage{$i})) {
-			++$right_arm_coverage{$i};
-			if($read_strand eq $strand) {
-			    ++$ok_strand_right_cov_sum;
-			}
+		}
+		
+		## recalculate the fraction and reevaluate
+		if($orig_coverage > 0) {
+		    $hp_cov_frac = $hp_coverage / $orig_coverage;
+		} else {
+		    $hp_cov_frac = 0;
+		}
+		
+		## if it meets the threshold, record it
+		if($hp_cov_frac >= $$min_frac) {
+		    if($hp_cov_frac > $max_frac) {
+			$max_frac = $hp_cov_frac;
+			$max_string = "$hp_entry" . "\t" . "$max_frac";   
 		    }
 		}
 	    }
-	    close SAM;
-	    
-	    # calculate the result
-	    $sum = 0;
-	    $qualifying_sum = 0;
-	    $sum_left = 0;
-	    $sum_right = 0;
-	    $sum_hp_orig = 0;  ## total coverage withing the HP arms only in coordinates within the original locus
-	    for($i = $left_flank_start; $i <= $right_flank_stop; ++$i) {
-		$sum += $total_coverage{$i};
-		if(exists($left_arm_coverage{$i})) {
-		    $sum_left += $left_arm_coverage{$i};
-		    if(exists($original_locus{$i})) {
-			$sum_hp_orig += $original_locus{$i};
-		    }
-		}
-		if(exists($right_arm_coverage{$i})) {
-		    $sum_right += $right_arm_coverage{$i};
-		    if(exists($original_locus{$i})) {
-			$sum_hp_orig += $original_locus{$i};
-		    }
-		}
-	    }
-	    $qualifying_sum = $sum_left + $sum_right;
-	    # protect against undefined errors
-	    if($sum == 0) {
-		$ratio = 0;
-	    } elsif (($ok_strand_left_cov_sum == 0) or  ## new in 0.2.1 .... has to be at least some reads on both arms of the correct strand to make it past this point
-		     ($ok_strand_right_cov_sum == 0)) {
-		$ratio = 0;
-	    } elsif ((($ok_strand_left_cov_sum + $ok_strand_right_cov_sum) / $qualifying_sum) <= 0.5) {
-		$ratio = 0;  ## a simple majority of coverage in the hp_arms has to be on the same strand as the hairpin itself
-	    } else {
-		$ratio = $qualifying_sum / $sum;
-	    }
-	    
-	    # is the observed ratio greater than the user's minimum fraction?
-	    if($ratio >= $$min_frac) {
-		# OK to keep the entry for now
-		$hp_entry .= "\t$ratio\t$sum_hp_orig\t$orig_coverage";
-		push(@{$output_hash{$cluster}}, $hp_entry);
-		$qual_sum_hp_orig += $sum_hp_orig;
-	    }
-	}
-	# final check .. does the qual_sum_hp_orig (which is from the surviving hairpins to this point) justify splitting the original locus?
-	## protect against undefined errors
-	if(exists($output_hash{$cluster})) {
-	    if($orig_coverage == 0) {
-		$final_ratio = 0;
-	    } else {
-		$final_ratio = $qual_sum_hp_orig / $orig_coverage;
-	    }
-	    if($final_ratio < $$min_frac) {
-		delete $output_hash{$cluster};
+	    ## If theres any that qualify, record it.  It will be the one with max fraction.  In case of tie, arbitrary one selected 
+	    if($max_frac >= $$min_frac) {
+		$output_hash{$cluster} = $max_string;
 	    }
 	}
     }
@@ -2256,80 +2299,74 @@ sub hp_expression {
     return %output_hash;
 }
 
-sub get_hp_clusters {
-    my ($input_hash) = @_;  ## passed by reference
-    my %output = ();
-    my @entries = ();
-    my $orig;
-    my $chr;
-    my $entry;
-    my @en_fields = ();
-    my @hp_coords = ();
-    my $new_hp_cluster;
-    my $start;
-    my $stop;
-    
-    while(($orig) = each %$input_hash) {
-	if($orig =~ /^(\S+):/) {
-	    $chr = $1;
-	} else {
-	    die "FATAL in sub-routine \"get_hp_clusters\" : could not parse chromosome name from $orig\n";
-	}
-	@entries = @{$$input_hash{$orig}};
-	foreach $entry (@entries) {
-	    @en_fields = split ("\t", $entry);
-	    @hp_coords = split ("-", $en_fields[1]);
-	    if($hp_coords[0] < $hp_coords[1]) {
-		$start = $hp_coords[0];
-		$stop = $hp_coords[1];
-	    } else {
-		$start = $hp_coords[1];
-		$stop = $hp_coords[0];
-	    }
-	    
-	    $new_hp_cluster = "$chr" . ":" . "$start" . "-" . "$stop";
-	    $output{$new_hp_cluster} = $entry;
-	}
-    }
-    return %output;
-}
+#sub get_hp_clusters {
+#    my ($input_hash) = @_;  ## passed by reference
+#    my %output = ();
 
-sub get_hp_clusters_countmode {
-    my ($input_hash) = @_;  ## passed by reference
-    my %output = ();
-    my @entries = ();
-    my $orig;
-    my $orig_size;
-    my $hp_size;
-    my @en_fields = ();
-    my @hp_coords = ();
+#    my $orig;
+#    my $chr;
+
+#    my @en_fields = ();
+#    my @hp_coords = ();
+#    my $new_hp_cluster;
+#    my $start;
+#    my $stop;
     
-    while(($orig) = each %$input_hash) {
-	@entries = @{$$input_hash{$orig}};
-	if((scalar @entries) == 1) {
-	    if($orig =~ /^\S+:(\d+)-(\d+)/) {
-		$orig_size = $2 - $1 + 1;
-	    } else {
-		# failsafe
-		$orig_size = 1000000000000000;
-	    }
-	    @en_fields = split ("\t", $entries[0]);
-	    @hp_coords = split ("-", $en_fields[1]);
-	    $hp_size = abs ($hp_coords[1] - $hp_coords[0]);
-	    if(($hp_size / $orig_size) > 0.9) {  ## 90% rule .. in count mode, HP or MIRNA is kept only if there is just one within the original cluster that accounts for more than 90% of the original cluster's length
-		$output{$orig} = $entries[0];  ## no padding, only the first entry is kept if there was more than one hp
-	    }
-	}
-    }
-    return %output;
-}
+#    while(($orig) = each %$input_hash) {
+#	if($orig =~ /^(\S+):/) {
+#	    $chr = $1;
+#	} else {
+#	    die "FATAL in sub-routine \"get_hp_clusters\" : could not parse chromosome name from $orig\n";
+#	}
+#	@en_fields = split ("\t", $input_hash{$orig});
+#	@hp_coords = split ("-", $en_fields[1]);
+#	if($hp_coords[0] < $hp_coords[1]) {
+#	    $start = $hp_coords[0];
+#	    $stop = $hp_coords[1];
+#	} else {
+#	    $start = $hp_coords[1];
+#	    $stop = $hp_coords[0];
+#	}
+	
+#	$new_hp_cluster = "$chr" . ":" . "$start" . "-" . "$stop";
+#	$output{$new_hp_cluster} = $entry;
+#    }
+#    return %output;
+#}
+
+#sub get_hp_clusters_countmode {
+#    my ($input_hash) = @_;  ## passed by reference
+#    my %output = ();
+#    my $orig;
+#    my $orig_size;
+#    my $hp_size;
+#    my @en_fields = ();
+#    my @hp_coords = ();
+#    
+#    while(($orig) = each %$input_hash) {
+#	if($orig =~ /^\S+:(\d+)-(\d+)/) {
+#	    $orig_size = $2 - $1 + 1;
+#	} else {
+#	    # failsafe
+#	    $orig_size = 1000000000000000;
+#	}
+#	@en_fields = split ("\t", $$input_hash{$orig});
+#	@hp_coords = split ("-", $en_fields[1]);
+#	$hp_size = abs ($hp_coords[1] - $hp_coords[0]);
+#	    if(($hp_size / $orig_size) > 0.9) {  ## 90% rule .. in count mode, HP or MIRNA is kept only if there is just one within the original cluster that accounts for more than 90% of the original cluster's length
+#		$output{$orig} = $entries[0];  ## no padding, only the first entry is kept if there was more than one hp
+#	    }
+#	}
+#    }
+#    return %output;
+#}
 
 sub get_final_clusters {
-    my($input_hp_hash,$orig_clus,$hp_clus_hash) = @_; # passed by reference ..hash-hash-array-hash
+    my($input_hp_hash,$orig_clus) = @_; # passed by reference ..hash-array
     my $orig;
     my @output = ();
     my $chr;
-    my @entries = ();
+
     my @en_fields = ();
     my @hp_coords = ();
     my $start;
@@ -2347,31 +2384,31 @@ sub get_final_clusters {
 	    } else {
 		die "FATAL in sub-routine \"get_hp_clusters\" : could not parse chromosome name from $orig\n";
 	    }
-	    @entries = @{$$input_hp_hash{$orig}};
-	    foreach $entry (@entries) {
-		@en_fields = split ("\t", $entry);
-		@hp_coords = split ("-", $en_fields[1]);
-		if($hp_coords[0] < $hp_coords[1]) {
-		    $start = $hp_coords[0];
-		    $stop = $hp_coords[1];
-		} else {
-		    $start = $hp_coords[1];
-		    $stop = $hp_coords[0];
-		}
-		
-		$new_hp_cluster = "$chr" . ":" . "$start" . "-" . "$stop";
-		
-		# check to see if you've got the name right
-		unless(exists($$hp_clus_hash{$new_hp_cluster})) {
-		    die "FATAL in sub-routine \"get_final_clusters\" : incorrect name for $new_hp_cluster\n";
-		}
-		
-		# add to array, after checking failsafe
-		unless(exists($failsafe{$new_hp_cluster})) {
-		    push(@output,$new_hp_cluster);
-		}
-		$failsafe{$new_hp_cluster} = 1;
+	    @en_fields = split ("\t", $$input_hp_hash{$orig});
+	    @hp_coords = split ("-", $en_fields[1]);
+	    if($hp_coords[0] < $hp_coords[1]) {
+		$start = $hp_coords[0];
+		$stop = $hp_coords[1];
+	    } else {
+		$start = $hp_coords[1];
+		$stop = $hp_coords[0];
 	    }
+	    
+	    $new_hp_cluster = "$chr" . ":" . "$start" . "-" . "$stop";
+	    
+	    # add to array, after checking failsafe
+	    unless(exists($failsafe{$new_hp_cluster})) {
+		push(@output,$new_hp_cluster);
+	    }
+	    $failsafe{$new_hp_cluster} = 1;
+	    
+	    # add new entry to hash and then delete the old one
+	    # unless the coordinates of the original cluster are the same
+	    unless($new_hp_cluster eq $orig) {
+		$$input_hp_hash{$new_hp_cluster} = $$input_hp_hash{$orig};
+		delete $$input_hp_hash{$orig};
+	    }
+	    
 	} else {
 	    unless(exists($failsafe{$orig})) {
 		push(@output,$orig);
@@ -2382,8 +2419,8 @@ sub get_final_clusters {
     return @output;
 }
 
-sub hp_output {  ## modified as of 0.2.1
-    my ($hp_hash,$genome,$bamfile,$n_mapped_reads,$minhpfrac,$minstrandfrac) = @_;  ## passed by reference.  hash, scalar, scalar, scalar, scalar, scalar
+sub hp_output {  ## modified as of 0.2.1 and then again 0.3.0
+    my ($hp_hash,$genome,$bamfile,$n_mapped_reads,$minhpfrac,$minstrandfrac,$maxmiRHPPairs,$maxmiRUnpaired) = @_;  ## passed by reference.  hash, scalar, scalar, scalar, scalar, scalar, scalar,sclara
     my $outfile;
     my %output = ();
     my $locus;  ## the padded locus -- keys from the hp_hash
@@ -2464,6 +2501,8 @@ sub hp_output {  ## modified as of 0.2.1
     
     my $earlier_fail;  ## 0.2.1
     
+    my $n_of_pairs; ## 0.3.0
+    
     ## for progress bar
     my $n_to_process = scalar ( keys %$hp_hash);
     my $five_percent = int ($n_to_process / 20);
@@ -2486,6 +2525,12 @@ sub hp_output {  ## modified as of 0.2.1
 	    # parse the data
 	    @l_data_fields = split ("\t", $locus_data);
 	    $brax = $l_data_fields[0];
+	    # get the total number of paired nts in this structure
+	    $n_of_pairs = 0;  ## reset each time
+	    while ($brax =~ /\(/g) {
+		++$n_of_pairs;
+	    }
+	    
 	    @brax_coords = split ("-",$l_data_fields[1]);
 	    # sort so that the lower coordinate is always in the [0]
 	    @brax_coords = sort {$a <=> $b} @brax_coords;
@@ -2652,6 +2697,7 @@ sub hp_output {  ## modified as of 0.2.1
 		    push (@candidates,$map_coord);
 		}
 	    }
+
 	    # tracking
 	    if(@candidates) {
 		my $n_cands = scalar @candidates;
@@ -2677,7 +2723,15 @@ sub hp_output {  ## modified as of 0.2.1
 		${$output{$sam_query}}[8] = 0;
 		${$output{$sam_query}}[9] = 0;
 	    }
-	    # check whether candidates span a loop and if not whether they have four or fewer un-paired residues (ignoring the last two nts)
+
+	    # check whether the hairpin itself qualifies in terms of maxmiRHPPairs.... if it fails that, dump the @candidates array
+	    unless($n_of_pairs <= $$maxmiRHPPairs) {
+		@candidates = ();
+		${$output{$sam_query}}[0] = 0;
+	    }
+	    
+	    
+            # check whether candidates span a loop and if not whether they have maxmiRHPUnpaired or fewer un-paired residues (ignoring the last two nts)
 	    if(@candidates) {
 		foreach $map_coord (@candidates) {
 		    $candidate_brax = '';
@@ -2718,7 +2772,7 @@ sub hp_output {  ## modified as of 0.2.1
 		    while($candidate_brax =~ /\)/g) {
 			++$n_right_paired_cand;
 		    }
-		    if($n_unpaired_cand > 4) {
+		    if($n_unpaired_cand > $$maxmiRUnpaired) {
 			$fail = 1;
 		    } else {
 			++${$output{$sam_query}}[3];
@@ -2741,7 +2795,7 @@ sub hp_output {  ## modified as of 0.2.1
 		    
 		    
 		    
-		    # first check whether the star sequence has four or fewer mismatches, omitting the last two nts
+		    # first check whether the star sequence has maxmiRUnpaired or fewer mismatches, omitting the last two nts
 		    unless($fail) {
 			@star_limits = split ("-", $star_coord);
 			$star_brax = '';
@@ -2777,7 +2831,7 @@ sub hp_output {  ## modified as of 0.2.1
 			while($star_brax =~ /\)/g) {
 			    ++$n_right_paired_star;
 			}
-			if($n_unpaired_star > 4) {
+			if($n_unpaired_star > $$maxmiRUnpaired) {
 			    $fail = 1;
 			} else {
 			    ++${$output{$sam_query}}[5];
@@ -3045,10 +3099,21 @@ sub hp_output {  ## modified as of 0.2.1
 	    }
 	    
 	    # recode data in "output" hash and append to the $locus_data entry
-	    # Precision
 	    $earlier_fail = 0;  ## reset
+	    # <= maxmiRPairs ?
+	    if(${$output{$sam_query}}[0] >= 1) {
+		$locus_data .= "\tPASS";
+	    } else {
+		$locus_data .= "\tFAIL";
+		$earlier_fail = 1;
+	    }
+
+
+            # Precision
 	    if(${$output{$sam_query}}[2] >= 1) {
 		$locus_data .= "\tPASS";
+	    } elsif ($earlier_fail) {
+		$locus_data .= "\tND";
 	    } else {
 		$locus_data .= "\tFAIL";
 		$earlier_fail = 1;
@@ -3498,9 +3563,6 @@ sub quant {
 	    $output{$locus} .= "\t$internal{$i}";
 	}
 
-	##TEST
-	##print STDERR "$output{$locus}\n";
-	##END TEST
     }
     
     # Generate the ordered set of Benjamini-Hochberg values (i/m) * FDR
@@ -3517,8 +3579,6 @@ sub quant {
     my $ok = 1;
     my $column_entry;
     
-    ## TEST
-    #print STDERR "\n\nPhasing Results\n";
     
     for($i = 0; $i < (scalar @phase_sorted_loci); ++$i) {
 	my $locus = $phase_sorted_loci[$i];
@@ -3535,9 +3595,7 @@ sub quant {
 	    $column_entry = "$phase_offsets{$locus}" . ":" . sprintf("%.3e",$phase_p_values{$locus}) . ":" . "NS-FDR-" . "$$phaseFDR";
 	}
 	$phase_results{$locus} = $column_entry;
-	## TEST
-	#print STDERR "$i\t$locus\tBH:$bh_vals[$i]\t$column_entry\n";
-	##
+
     }
 
     my @old = ();
@@ -3739,9 +3797,11 @@ sub mod_quant_hp {
     my @new_fields = ();
     my $new_entry;
     my %output = ();
+    my @hp_hash_fields = ();
+    
     while(($locus,$entry) = each %$quant_hash) {
 	@fields = split ("\t", $entry);
-	@new_fields = @fields[3..((scalar @fields) - 1)];
+	@new_fields = @fields[3..10];
 	if(exists($$hp_hash{$locus})) {
 	    # polarity of the hairpin supersedes that calcuated by the reads alone
 	    if($$hp_hash{$locus} =~ /Watson/) {
@@ -3758,15 +3818,48 @@ sub mod_quant_hp {
 	    } else {
 		unshift(@new_fields,"HP");
 	    }
+
+	    ## add all of the hairpin information
+	    @hp_hash_fields = split ("\t", $$hp_hash{$locus});
+	    push(@new_fields, $hp_hash_fields[4]);  ## Pairs
+	    push(@new_fields, sprintf("%.4f",$hp_hash_fields[5]));  ## frac_paired, rounded to 4 decimal places
+	    push(@new_fields, $hp_hash_fields[6]);  ## stem_length
+	    push(@new_fields, $hp_hash_fields[7]);  ## loop_length
+	    push(@new_fields, sprintf("%.4f",$hp_hash_fields[8]));  ## dGperStem, rounded to 4 decimal places
+	    push(@new_fields, sprintf("%.4f",$hp_hash_fields[9]));  ## frac_hp, rounded to 4 decimal places
+	    push(@new_fields, $hp_hash_fields[10]);  ## hp_size_result
+	    push(@new_fields, $hp_hash_fields[11]);  ## precision_result
+	    push(@new_fields, $hp_hash_fields[12]);  ## duplex_result
+	    push(@new_fields, $hp_hash_fields[13]);  ## star_result
+
+	    
 	} else {
 	    # not an HP, leave the original strand alone, and enter "." for the HP designation
 	    unshift(@new_fields,$fields[2]);
 	    unshift(@new_fields,"\.");
+	    
+	    # and enter NAs for all of the other HP information
+	    push(@new_fields, "NA");
+	    push(@new_fields, "NA");
+	    push(@new_fields, "NA");
+	    push(@new_fields, "NA");
+	    push(@new_fields, "NA");
+	    push(@new_fields, "NA");
+	    push(@new_fields, "NA");
+	    push(@new_fields, "NA");
+	    push(@new_fields, "NA");
+	    push(@new_fields, "NA");
+	    
 	}
 	
 	# add the name and the locus
 	unshift(@new_fields,$fields[1]);
 	unshift(@new_fields,$locus);
+	
+	# add the rest of the original information (the read counts)
+	for(my $ii = 11; $ii < (scalar @fields); ++$ii) {
+	    push(@new_fields, $fields[$ii]);
+	}
 	
 	# add the new entry
 	$new_entry = join("\t", @new_fields);
@@ -3786,7 +3879,7 @@ sub convert_2_mpmm {
     while(($locus,$input_string) = each %$in_hash) {
 	@new_fields = ();  ## reset each time though
 	@old_fields = split ("\t", $input_string);
-	# 0: locus, 1: name, 2: HP, 3: strand, 4: frac_wat, 5: total, 6: uniques 7: rep-total, 8: dicercall, 9: phasing_offset, 10: phase p-val, 11; phase_FDRcall,  12: short, 13: long, 14 to end, dicer
+
 	for($i = 0; $i <= 4; ++$i) {
 	    push(@new_fields,$old_fields[$i]);
 	}
@@ -3801,11 +3894,23 @@ sub convert_2_mpmm {
 	push(@new_fields,$old_fields[9]);
 	push(@new_fields,$old_fields[10]);
 	push(@new_fields,$old_fields[11]);
+	# hp information
+	push(@new_fields,$old_fields[12]);
+	push(@new_fields,$old_fields[13]);
+	push(@new_fields,$old_fields[14]);
+	push(@new_fields,$old_fields[15]);
+	push(@new_fields,$old_fields[16]);
+	push(@new_fields,$old_fields[17]);
+	push(@new_fields,$old_fields[18]);
+	push(@new_fields,$old_fields[19]);
+	push(@new_fields,$old_fields[20]);
+	push(@new_fields,$old_fields[21]);
+	
 	# short and long
-	push(@new_fields, sprintf("%.3f",(($old_fields[12] / $$reads) * 1000000)));
-	push(@new_fields, sprintf("%.3f",(($old_fields[13] / $$reads) * 1000000)));
+	push(@new_fields, sprintf("%.3f",(($old_fields[22] / $$reads) * 1000000)));
+	push(@new_fields, sprintf("%.3f",(($old_fields[23] / $$reads) * 1000000)));
 	# the rest
-	for($i = 14; $i < (scalar @old_fields); ++$i) {
+	for($i = 24; $i < (scalar @old_fields); ++$i) {
 	    push(@new_fields, sprintf("%.3f",(($old_fields[$i] / $$reads) * 1000000)));
 	}
 	my $result = join("\t",@new_fields);
@@ -3827,11 +3932,11 @@ sub write_bed_nohp {
     my $j;
     my $text_to_return;
     # non-dicer always gray
-    print STDERR "\tColor-Scheme in bed file $bedfile : \n";
+
     $text_to_return .= "\tColor-Scheme in bed file $bedfile : \n";
     my %colors = ();
     $colors{'N'} = "169,169,169";  ## dark gray
-    print STDERR "\tNon-Dicer Clusters: Dark Gray RGB: 169,169,169\n";
+
     $text_to_return .= "\tNon-Dicer Clusters: Dark Gray RGB: 169,169,169\n";
     
     my $n_colors_to_get = $$dicermax - $$dicermin + 1;
@@ -3841,7 +3946,7 @@ sub write_bed_nohp {
     for ($i = $$dicermin; $i <= $$dicermax; ++$i) {
 	++$x;
 	$colors{$i} = $rgb_hash{$x};
-	print STDERR "\t$i Clusters: RGB: $rgb_hash{$x}\n";
+
 	$text_to_return .= "\t$i Clusters: RGB: $rgb_hash{$x}\n";
     }
 
@@ -3867,19 +3972,19 @@ sub write_bed_nohp {
 	# score (ignored -- just zero)
 	print BED "0\t";
 	
-	# strand, which is $fcfields[3]
-	print BED "$fcfields[3]\t";
+	# strand, which is NOW, as of version 0.3.0, $fcfields[4]
+	print BED "$fcfields[4]\t";
 	
 	# thickStart and thickEnd, which are always the same as bedstart and bedstop
 	print BED "$bedstart\t$bedstop\t";
 	
-	# Determine the dominant size of the cluster from $fcfields[8] and write correct color
-	if($fcfields[8] eq "N") {
+	# Determine the dominant size of the cluster from $fcfields[9] and write correct color ... array element 9 as of version 0.3.0
+	if($fcfields[9] eq "N") {
 	    print BED "$colors{'N'}\t";
-	} elsif ($fcfields[8] =~ /^(\d+)$/) {
+	} elsif ($fcfields[9] =~ /^(\d+)$/) {
 	    print BED "$colors{$1}\t";
 	} else {
-	    die "FATAL in sub-routine \"write_bed_nohp\" : Could not find the cluster size from entry $fcfields[8]\n";
+	    die "FATAL in sub-routine \"write_bed_nohp\" : Could not find the cluster size from entry $fcfields[9]\n";
 	}
 	
 	# in no-hp mode, block count is always 1
@@ -3910,10 +4015,10 @@ sub write_bed_with_hp {
     my $j;
     my $text_to_return;
     # non-dicer always gray
-    print STDERR "\n\tColor-Scheme in bed file $bedfile : \n";
+
     $text_to_return .= "\n\tColor-Scheme in bed file $bedfile : \n";
     $colors{'N'} = "169,169,169";  ## dark gray
-    print STDERR "\tNon-Dicer Clusters: Dark Gray RGB: 169,169,169\n";
+
     $text_to_return .= "\tNon-Dicer Clusters: Dark Gray RGB: 169,169,169\n";
 
     my $n_colors_to_get = $$dicermax - $$dicermin + 1;
@@ -3923,7 +4028,7 @@ sub write_bed_with_hp {
     for ($i = $$dicermin; $i <= $$dicermax; ++$i) {
 	++$x;
 	$colors{$i} = $rgb_hash{$x};
-	print STDERR "\t$i Clusters: RGB: $rgb_hash{$x}\n";
+
 	$text_to_return .= "\t$i Clusters: RGB: $rgb_hash{$x}\n";
     }
 
@@ -3945,10 +4050,10 @@ sub write_bed_with_hp {
 	
 	#name
 	print BED "$$names{$f_clus}";
-	# Check $fcfields[2]  -- if it is 'HP' or 'MIRNA', then
-	if($fcfields[2] eq "HP") {
+	# Check $fcfields[3]  -- if it is 'HP' or 'MIRNA', then ... as of version 0.3.0, array element 3 is the HP call (used to be 2)
+	if($fcfields[3] eq "HP") {
 	    print BED "_HP\t";
-	} elsif ($fcfields[2] eq "MIRNA") {
+	} elsif ($fcfields[3] eq "MIRNA") {
 	    print BED "_MIRNA\t";
 	} else {
 	    print BED "\t";
@@ -3957,23 +4062,23 @@ sub write_bed_with_hp {
 	# score (ignored -- just zero)
 	print BED "0\t";
 	
-	# strand, which is $fcfields[3]
-	print BED "$fcfields[3]\t";
+	# strand, which is $fcfields[4]  .. array element 4 as of version 0.3.0
+	print BED "$fcfields[4]\t";
 	
 	# thickStart and thickEnd, which are always the same as bedstart and bedstop
 	print BED "$bedstart\t$bedstop\t";
 	
-	# Determine the dominant size of the cluster from $fcfields[8] and write correct color
-	if($fcfields[8] eq "N") {
+	# Determine the dominant size of the cluster from $fcfields[9] and write correct color .. array element 9 as of version 0.3.0
+	if($fcfields[9] eq "N") {
 	    print BED "$colors{'N'}\t";
-	} elsif ($fcfields[8] =~ /^(\d+)$/) {
+	} elsif ($fcfields[9] =~ /^(\d+)$/) {
 	    print BED "$colors{$1}\t";
 	} else {
 	    die "FATAL in sub-routine \"write_bed_nohp\" : Could not find the cluster size from entry $fcfields[8]\n";
 	}
 	
-	if(($fcfields[2] eq "HP") or
-	   ($fcfields[2] eq "MIRNA")) {
+	if(($fcfields[3] eq "HP") or
+	   ($fcfields[3] eq "MIRNA")) {
 	    
 	    # block count will be two, representing the two arms of the hp
 	    print BED "2\t";
@@ -4033,7 +4138,7 @@ sub get_names_simple {
 
 
 sub final_summary_nohp {
-    my ($clus,$phasesize)  = @_;
+    my ($clus)  = @_;
     my %hash = ();
     my @fields = ();
     my $size;
@@ -4041,19 +4146,19 @@ sub final_summary_nohp {
 	@fields = split ("\t", $$clus{$line});
 	
 	# dicer call
-	if($fields[8] eq "N") {
-	    ++$hash{$fields[8]};
+	if($fields[9] eq "N") {  ## array element 9 as of version 0.3.0
+	    ++$hash{$fields[9]};
 	} else {
-	    if($fields[8] =~ /^(\d+)$/) {
+	    if($fields[9] =~ /^(\d+)$/) {
 		$size = $1;
 	    } else {
-		die "FATAL in sub-routine final_summary_hp : failed to parse dicer size category of $fields[8]\n";
+		die "FATAL in sub-routine final_summary_hp : failed to parse dicer size category of $fields[9]\n";
 	    }
 	    ++$hash{$size};
 	}
 	
 	# phased?
-	if($fields[11] =~ /OK/) {
+	if($fields[12] =~ /OK/) { ## array element 12 as of version 0.3.0
 	    ++$hash{'phased'};
 	}
     }
@@ -4061,7 +4166,7 @@ sub final_summary_nohp {
 }
 
 sub final_summary {
-    my ($clus,$phasesize)  = @_;
+    my ($clus)  = @_;
     my %hash = ();
     my @fields = ();
     my $hp_call;
@@ -4070,20 +4175,20 @@ sub final_summary {
 	@fields = split ("\t", $$clus{$line});
 	
 	# dicer call
-	if($fields[8] eq "N") {
-	    $dcall = $fields[8];
+	if($fields[9] eq "N") { ## array element 9 as of version 0.3.0
+	    $dcall = $fields[9];
 	} else {
-	    if($fields[8] =~ /^(\d+)$/) {
+	    if($fields[9] =~ /^(\d+)$/) {
 		$dcall = $1;
 	    } else {
-		die "FATAL in sub-routine final_summary_hp : failed to parse dicer size category of $fields[8]\n";
+		die "FATAL in sub-routine final_summary_hp : failed to parse dicer size category of $fields[9]\n";
 	    }
 	}
 	
 	# HP call
-	if(($fields[2] eq "MIRNA") or
-	   ($fields[2] eq "HP")) {
-	    $hp_call = "$fields[2]";
+	if(($fields[3] eq "MIRNA") or  ## array element 3 as of version 0.3.0
+	   ($fields[3] eq "HP")) {
+	    $hp_call = "$fields[3]";
 	} else {
 	    $hp_call = "X";
 	}
@@ -4091,7 +4196,7 @@ sub final_summary {
 	++$hash{$dcall}{$hp_call};
 	
 	# phased?
-	if($fields[11] =~ /OK/) {
+	if($fields[12] =~ /OK/) {  ## array element 12 as of version 0.3.0
 	    ++$hash{'phased'};
 	}
     }
@@ -4192,8 +4297,6 @@ sub write_files {
     # open table files for each and print their headers
     open(MIR_TABLE, ">$$outdir/miRNA_summary\.txt");
     print MIR_TABLE "\#Locus\tName\tmiRNA\tmiRNA_mappings\tmiRNA-star\tmiRNA-star_mappings\tTotal_mappings\n";
-    open(HP_TABLE, ">$$outdir/hpRNA_summary\.txt");
-    print HP_TABLE "\#Locus\tName\tPrecision\tDuplex\tStar\n";
 
     my @fields = ();
     my $entry;
@@ -4218,14 +4321,15 @@ sub write_files {
     foreach $locus (@$final_clusters) {
 	if(exists($$hp_clusters{$locus})) {
 	    $name = $$names{$locus};
+	    
 	    @fields = split ("\t", $$hp_clusters{$locus});
-	    if($fields[10] eq "MIRNA") {
+	    if($fields[14] eq "MIRNA") {
 		++$n_miRNAs;
 		open(OUT, ">$$outdir/MIRNA_details/$name\.txt");
-		print OUT "$name $fields[11]\n";
+		print OUT "$name $fields[15]\n";
 		close OUT;
 		
-		@file_lines = split ("\n", $fields[11]);
+		@file_lines = split ("\n", $fields[15]);
 		@mirs = ();
 		@mir_counts = ();
 		@stars = ();
@@ -4264,21 +4368,19 @@ sub write_files {
 		}
 		print MIR_TABLE "$total\n";
 		
-	    } elsif ($fields[10] eq "HP") {
+	    } elsif ($fields[14] eq "HP") {
 		++$n_hpRNAs;
 		open(OUT, ">$$outdir/HP_details/$name\.txt");
-		print OUT "$name $fields[11]\n";
+		print OUT "$name $fields[15]\n";
 		close OUT;
-		print HP_TABLE "$locus\t$name\t$fields[7]\t$fields[8]\t$fields[9]\n";
 	    } else {
-		die "FATAL in sub-routine write_files: failed to understand following entry as MIRNA or HP  found $fields[10] instead:\n$$hp_clusters{$locus}\n";
+		die "FATAL in sub-routine write_files: failed to understand following entry as MIRNA or HP  found $fields[14] instead:\n$$hp_clusters{$locus}\n";
 	    }
 	}
     }
     
     # close the tables
     close MIR_TABLE;
-    close HP_TABLE;
     
     # delete everything if there were no miRNAs and hpRNAs
     if(($n_miRNAs + $n_hpRNAs) == 0) {
@@ -4290,7 +4392,7 @@ sub write_files {
 }
 
 sub parse_inv {
-    my($inv_file,$minntspaired,$minfracpaired) = @_;  ## passed by reference, all scalars
+    my($inv_file,$minntspaired,$minfracpaired,$maxdGperStem,$maxLoopLength) = @_;  ## passed by reference, all scalars
     my @output = ();
     my $outline;
     my $chr;
@@ -4326,13 +4428,27 @@ sub parse_inv {
     my $top_bases;
     my $bottom_bases;
     
+    my $stem_length;
+    my $loop_length;
+    my $dG;
+    my $dGperStem;
+    
+    my $left_brax;
+    my $right_brax;
+    my $left_seq;
+    my $right_seq;
+    
+    my $eval_string;
+    
     open(INV, "$$inv_file");
     while (<INV>) {
 	chomp;
 	if($_ =~ /\S/) {
 	    push (@single, $_);
-	    
+
 	    if((scalar @single) == 4) {
+		
+		
 		
 		# analyze
 		if($single[0] =~ /^(\S+):/) {
@@ -4356,6 +4472,17 @@ sub parse_inv {
 		    $right_string = $2;  ## top strand, reading 3' to 5' i.e. descending
 		    $right_start = $3;
 		}
+		
+		# first check that loop criteria are met for this hairpin.  If not, save time by ceasing any further analysis
+		$stem_length = 0.5 * (($left_stop - $left_start + 1) + ($right_stop - $right_start + 1));
+		$loop_length = $right_start - $left_stop - 1;
+		
+		unless(($loop_length <= $$maxLoopLength) and
+		       ($loop_length < $stem_length)) {
+		    @single = ();
+		    next;
+		}
+		
 		
 		# sanity check:  einverted seems to have a rare bug
 		$top_bases = 0;
@@ -4443,8 +4570,10 @@ sub parse_inv {
 		$c_brax = '';
 		$c_pairs = 0;
 		$strand = "Crick";
+		
 		for($i = $right_stop; $i >= $right_start; --$i) {
 		    $is_pair = is_it_paired(\$right_keyed{$i},\$strand);
+		    
 		    if($is_pair) {
 			$c_brax .= "\(";
 			++$c_pairs;
@@ -4453,7 +4582,8 @@ sub parse_inv {
 		    }
 		}
 		for($i = ($right_start - 1); $i > $left_stop; --$i) {
-			$c_brax .= "\.";
+		    
+		    $c_brax .= "\.";
 		}
 		for($i = $left_stop; $i >= $left_start; --$i) {
 		    $is_pair = is_it_paired(\$left_keyed{$i},\$strand);
@@ -4468,28 +4598,73 @@ sub parse_inv {
 		# Watson first
 		$outline = ''; ## reset
 		$strand = "Watson";
-		$w_frac_paired = $w_pairs / (0.5 * (($left_stop - $left_start + 1) + ($right_stop - $right_start + 1)));
-		if(($w_frac_paired >= $$minfracpaired) and
-		   ($w_pairs >= $$minntspaired) and
-		   (($right_start - $left_stop + 1) < (0.5 * (($left_stop- $left_start +1) + ($right_stop - $right_start + 1))))) {
-		    $outline = "$w_brax\t$left_start" . "-" . "$right_stop\t$left_start" . "-" . "$left_stop" . "," . "$right_start" . "-" . "$right_stop\t$strand\t$chr";
-		    
-		    push(@output, $outline);
-		}
 		
+		$w_frac_paired = $w_pairs / $stem_length;
+		if(($w_frac_paired >= $$minfracpaired) and
+		   ($w_pairs >= $$minntspaired)) {
+		    
+		    ## evaluate the stem dG using RNAeval
+		    $left_brax = substr($w_brax,0,($left_stop - $left_start + 1));
+		    $right_brax = substr($w_brax,($right_start - $left_start),($right_stop - $right_start + 1));
+		    ## left seq for w strand is left_string
+		    $left_seq = $left_string;
+		    $left_seq =~ s/-//g;  ## remove gap symbols!
+		    $right_seq = reverse $right_string;  ##  The right string is 3'-5'
+		    $right_seq =~ s/-//g;  
+		    
+		    $eval_string = "$left_seq" . "\&" . "$right_seq" . "\n" . "$left_brax" . "\&" . "$right_brax";
+		    
+		    $dG = dG_from_RNAeval($eval_string);
+		    
+		    unless($dG eq "FAIL") {
+			$dGperStem = $dG / $stem_length;
+			if($dGperStem <= $$maxdGperStem) {
+			    
+			    $outline = "$w_brax\t$left_start" . "-" . "$right_stop\t$left_start" . "-" . "$left_stop" . "," . "$right_start" . "-" . "$right_stop\t$strand";
+			    $outline .= "\t$w_pairs\t$w_frac_paired\t$stem_length\t$loop_length\t$dGperStem\t$chr";
+			    
+			    push(@output, $outline);
+			}
+		    }
+		}
 		# now Crick
 		$outline = '';
 		$strand = "Crick";
-		$c_frac_paired = $c_pairs / (0.5 * (($left_stop - $left_start + 1) + ($right_stop - $right_start + 1)));
+		
+		
+		
+		$c_frac_paired = $c_pairs / $stem_length;
 		if(($c_frac_paired >= $$minfracpaired) and
-		   ($c_pairs >= $$minntspaired) and
-		   (($right_start - $left_stop + 1) < (0.5 * (($left_stop- $left_start +1) + ($right_stop - $right_start + 1))))) {
-		    $outline = "$c_brax\t$right_stop" . "-" . "$left_start\t$right_stop" . "-" . "$right_start" . "," . "$left_stop" . "-" . "$left_start\t$strand\t$chr";
+		   ($c_pairs >= $$minntspaired)) {
+		    
+		    ## evaluate the stem dG using RNAeval
+		    $left_brax = substr($c_brax,0,($right_stop - $right_start + 1));
+		    $right_brax = substr($c_brax,($right_stop - $left_stop),($left_stop - $left_start + 1));
+		    # left_seq is the complement of the right_string
+		    $left_seq = $right_string;
+		    $left_seq =~ tr/aucg/uagc/;
+		    $left_seq =~ s/-//g;
+		    # right_seq is the reverse complement of the left_string
+		    $right_seq = reverse $left_string;
+		    $right_seq =~ tr/aucg/uagc/;
+		    $right_seq =~ s/-//g;
+		    
+		    $eval_string = "$left_seq" . "\&" . "$right_seq" . "\n" . "$left_brax" . "\&" . "$right_brax";
 
-		    push(@output, $outline);
+		    $dG = dG_from_RNAeval($eval_string);
+		    unless($dG eq "FAIL") {
+			$dGperStem = $dG / $stem_length;
+			if($dGperStem <= $$maxdGperStem) {
+			    $outline = "$c_brax\t$right_stop" . "-" . "$left_start\t$right_stop" . "-" . "$right_start" . "," . "$left_stop" . "-" . "$left_start\t$strand";
+			    $outline .= "\t$c_pairs\t$c_frac_paired\t$stem_length\t$loop_length\t$dGperStem\t$chr";
+
+			    push(@output, $outline);
+			}
+		    }
 		}
 		@single = ();
 	    }
+	    #@single = ();
 	}
     }
     close INV;
@@ -4504,8 +4679,8 @@ sub is_it_paired {
     my $actual_two = $fields[2];
     
     if($$strand eq "Crick") {
-	$actual_one =~ s/augc/uacg/g;
-	$actual_two =~ s/uacg/augc/g;
+	$actual_one =~ tr/augc/uacg/;
+	$actual_two =~ tr/uacg/augc/;
     }
     
     if($actual_one eq "a") {
@@ -4551,7 +4726,7 @@ sub merge_inv {
 	foreach $ir_entry (@$irs) {
 	    @ir_fields = split ("\t", $ir_entry);
 	    ## only continue if the two are on the same chromosome
-	    if($ir_fields[4] eq $c_chr) {
+	    if($ir_fields[-1] eq $c_chr) {
 		@ir_subfields = split (",", $ir_fields[2]);
 		@ir_lefts = split ("-", $ir_subfields[0]);
 		@ir_rights = split ("-", $ir_subfields[1]);
@@ -4613,9 +4788,967 @@ sub get_corrected_strand_frac {
     return $corrected_frac;
 }
     
+sub flag_overlap {
+    my($in_hash,$file) = @_; ## passed by reference .. hash and scalar
+    my %out_hash = ();
+    my @ss_loci = keys %$in_hash;
+    my $s_locus;
+    my $s_chr;
+    my $s_start;
+    my $s_stop;
+    my @flag_data = ();
+    my $f_string;
+    my @f_fields = ();
+    my $f_locus;
+    my $f_chr;
+    my $f_start;
+    my $f_stop;
+    my $overlap;
     
+    my $n_s_overlapped = 0;
+    my $n_f_overlapped = 0;
+ 
+    my %f_over = ();
 
-__END__
+    my @hash_fields = ();
+    my @new_hash_fields = ();
+    my $hash_value;
+    my $x;
+    my $new_string;
+    
+    if(-r $$file) {
+	open(FLAG,"$$file");
+	@flag_data = <FLAG>;
+	close FLAG;
+	foreach $s_locus (@ss_loci) {
+	    if($s_locus =~ /^(\S+):(\d+)-(\d+)/) {
+		$s_chr = $1;
+		$s_start = $2;
+		$s_stop = $3;
+	    } else {
+		die "FATAL in sub-routine flag_overlap: failed to parse small RNA locus name $s_locus\n";
+	    }
+	    $overlap = '';
+	    foreach $f_string (@flag_data) {
+		chomp $f_string;
+		@f_fields = split ("\t", $f_string);
+		if($f_fields[0] =~ /^(\S+):(\d+)-(\d+)/) {
+		    $f_chr = $1;
+		    $f_start = $2;
+		    $f_stop = $3;
+		} else {
+		    die "FATAL in sub-routine flag_overlap: failed to parse flag locus name $f_fields[0]\n";
+		}
+		if($f_chr ne $s_chr) {
+		    next;
+		} elsif (($s_start > $f_stop) or ($f_start > $s_stop)) {
+		    next;
+		} else {
+		    $f_over{$f_fields[0]} = 1;
+		    if($overlap) {
+			$overlap .= ",$f_fields[1]";
+		    } else {
+			$overlap = "$f_fields[1]";
+		    }
+		}
+	    }
+	    @hash_fields = split ("\t", $$in_hash{$s_locus});
+	    @new_hash_fields = ();
+	    $x = 0;
+	    foreach $hash_value (@hash_fields) {
+		++$x;
+		push(@new_hash_fields, $hash_value);
+		if($x == 2) {
+		    if($overlap) {
+			++$n_s_overlapped;
+			push(@new_hash_fields, $overlap);
+		    } else {
+			push(@new_hash_fields, "\.");
+		    }
+		}
+	    }
+	    $new_string = join("\t", @new_hash_fields);
+	    $out_hash{$s_locus} = $new_string;
+	}
+	$n_f_overlapped = scalar (keys %f_over);
+	
+	# Report to user
+	print STDERR "\t\tA total of $n_s_overlapped small RNA loci overlapped with one or more flag_file locus from file $$file\n";
+	print STDERR "\t\tA total of $n_f_overlapped loci from flag file $$file overlapped with one or more small RNA locus\n";
+    } else {
+	# just add a dot to the output hash for all of them
+	foreach $s_locus (@ss_loci) {
+	    $overlap = "\.";
+	    @hash_fields = split ("\t", $$in_hash{$s_locus});
+	    @new_hash_fields = ();
+	    $x = 0;
+	    foreach $hash_value (@hash_fields) {
+		++$x;
+		push(@new_hash_fields, $hash_value);
+		if($x == 2) {
+		    push(@new_hash_fields, $overlap);
+		}
+	    }
+	    $new_string = join("\t", @new_hash_fields);
+	    $out_hash{$s_locus} = $new_string;
+	}
+    }
+    return %out_hash;
+}
+
+sub final_hp { ## First added 0.3.0
+    my($in_hash,$genome,$bamfile,$reads,$minstrandfrac,$maxmiRHPPairs,$maxmiRUnpaired) = @_;  ## by reference .. first one hash, all others scalar
+    
+    my $orig_locus;
+    my $hp_locus;
+    my $hp_entry;
+    my @hp_fields = ();
+    my @hp_arms = ();
+    my @fivep = ();
+    my @threep = ();
+    my $left_start;
+    my $left_stop;
+    my $right_start;
+    my $right_stop;
+    my $strand;
+    my $chr;
+    
+    my @alignments = ();
+    my @samfields = ();
+    my $readstrand;
+    
+    my $total_reads;
+    my $right_strand_reads;
+    
+    my $read_length;
+    my $read_stop;
+    
+    my %left_dyad = ();
+    my %right_dyad = ();
+    my $readname;
+    
+    my $strandfrac;
+    
+    my %output_hash = ();
+    my $result_string = ();
+    
+    while(($orig_locus, $hp_entry) = each %$in_hash) {
+	@hp_fields = split ("\t", $hp_entry);
+	@hp_arms = split (",", $hp_fields[2]);
+	@fivep = split ("-", $hp_arms[0]);
+	@threep = split ("-", $hp_arms[1]);
+	
+	## get chr
+	if($orig_locus =~ /^(\S+):/) {
+	    $chr = $1;
+	} else {
+	    die "Could not parse chromosome name from entry $orig_locus in sub-routine final_hp\n";
+	}
+	
+	if($fivep[0] < $fivep[1]) { ## sense 
+	    $strand = "+";
+	    $left_start = $fivep[0];
+	    $left_stop = $fivep[1];
+	    $right_start = $threep[0];
+	    $right_stop = $threep[1];
+	} else {
+	    ## antisense
+	    $strand = "-";
+	    $left_start = $threep[1];
+	    $left_stop = $threep[0];
+	    $right_start = $fivep[1];
+	    $right_stop = $fivep[0];
+	}
+	
+	# query for samtools view
+	$hp_locus = "$chr" . ":" . "$left_start" . "-" . "$right_stop";
+	
+	# store alignments in an array while you go through them the first time
+	# If it passes the first tests, the array is used again during the miRNA annotation process
+	
+	@alignments = ();  ## reset each time through
+	$total_reads = 0;  ## reset each time through
+	$right_strand_reads = 0; ## reset each time through
+	%left_dyad = ();
+	%right_dyad = ();
+	open(SAM, "samtools view $$bamfile $hp_locus \|");
+	while (<SAM>) {
+	    chomp;
+	    push(@alignments, $_);  ## store for later use
+	    
+	    ## ignore headers
+	    if($_ =~ /^@/) {
+		next;
+	    }
+	    
+	    @samfields = split ("\t", $_);
+	    
+            ## ignore unmapped reads
+	    if($samfields[1] & 4) {
+		next;
+	    }
+	    
+	    ## increment total reads
+	    ++$total_reads;
+	    
+	    ## determine strand of read
+	    if($samfields[1] & 16) {
+		$readstrand = "-";
+	    } else {
+		$readstrand = "+";
+	    }
+	    
+	    ## increment if it is the right strand (will amend later for dyads)
+	    if($readstrand eq $strand) {
+		++$right_strand_reads;
+	    }
+	    
+	    ## determine 1-based stop position of this read
+	    $read_length = parse_cigar($samfields[5]);
+	    $read_stop = $samfields[3] + $read_length - 1;
+	    
+	    ## if overlaps with left arm, record in left dyad hash
+	    if(($samfields[3] >= $left_start) and
+	       ($read_stop <= $left_stop)) {
+		$left_dyad{$samfields[0]} = $readstrand;
+	    }
+	    
+	    ## if overlaps with right arm, record in right dyad hash
+	    if(($samfields[3] >= $right_start) and
+	       ($read_stop <= $right_stop)) {
+		$right_dyad{$samfields[0]} = $readstrand;
+	    }
+	}
+	close SAM;
+	
+	## adjust for any dyads.  For each dyad, remove one count from the **total** but NOT from the right_strand_reads
+	## in other words, dyad mappings to the opposite strand are treated as if they didn't exist, but those to the same strand are counted as right
+	
+	while(($readname) = each %left_dyad) {
+	    if(exists($right_dyad{$readname})) {
+		if($left_dyad{$readname} ne $right_dyad{$readname}) { ## e.g., on opposite strands
+		    --$total_reads;
+		}
+	    }
+	}
+	
+	## calculate the strand frac
+	## protect against undefined errors
+	if($total_reads > 0) {
+	    $strandfrac = $right_strand_reads / $total_reads;
+	} else {
+	    $strandfrac = 0;
+	}
+	
+	## test if the strandfrac meets the minimum
+	## If so, this locus is either an hpRNA or miRNA
+	## If not, this is not a hairpin-associated locus, no entry to the output hash, and the original cluster coordinates will be retained instead
+	
+	if($strandfrac >= $$minstrandfrac) {
+	    
+	    ## miRNA vs. hpRNA analysis
+	    $result_string = analyze_for_mir(\$hp_entry, \$$genome, \$$reads, \$$maxmiRHPPairs, \$$maxmiRUnpaired, \@alignments, \$strand, \$hp_locus);
+	    
+	    ## add to output hash
+	    $output_hash{$orig_locus} = $result_string;
+	}
+    }
+    
+    ## return the output hash
+    return %output_hash;
+}
+
+sub analyze_for_mir {
+    my($hp_entry,$genome,$reads,$maxmiRHPPairs,$maxmiRUnpaired,$alignments,$strand,$hp_locus) = @_; ## by reference, all scalars except the alignments, which is an array
+    
+    ## parse the hp_entry
+    my @l_data_fields = split ("\t", $$hp_entry);
+    my $brax = $l_data_fields[0];
+    
+    # get the total number of paired nts in this structure
+    my $n_of_pairs = 0;  ## reset each time
+    while ($brax =~ /\(/g) {
+	++$n_of_pairs;
+    }
+    
+    my @brax_coords = split ("-",$l_data_fields[1]);
+    # sort so that the lower coordinate is always in the [0]
+    @brax_coords = sort {$a <=> $b} @brax_coords;
+    
+    ## retrieve the genomic sequence of interest
+    my $subseq;
+    open(FAIDX, "samtools faidx $$genome $$hp_locus |");
+    while (<FAIDX>) {
+	chomp;
+	if($_ =~ /^>/) {
+	    next;
+	}
+	$_ =~ s/\s//g;
+	# ensure upper case
+	my $fa_line = uc ($_);
+	$subseq .= $fa_line;
+    }
+    close FAIDX;
+    
+    $subseq =~ s/T/U/g;
+    my $displayseq;
+    if($$strand eq "-") {
+	$displayseq = reverse $subseq;
+	$displayseq =~ tr/ACUG/UGAC/;
+    } else {
+	$displayseq = $subseq;
+    }
+    
+    # code the hp sequence and the brackets into hashes, keyed by coordinates, for easy retrieval
+    my @hp_letters = split ('', $displayseq);
+    my %hp_seq_hash = ();
+    my $j = 0;
+    my $i;
+    my $loc_start;
+    my $loc_stop;
+    if($$hp_locus =~ /^\S+:(\d+)-(\d+)$/) {
+	$loc_start = $1;
+	$loc_stop = $2;
+    } else {
+	die "FATAL in sub-routine analyze_for_mir : failed to parse locus name $$hp_locus\n";
+    }
+    if($$strand eq "+") {
+	for($i = $loc_start; $i <= $loc_stop; ++$i) {
+	    $hp_seq_hash{$i} = $hp_letters[$j];
+	    ++$j;
+	}
+    } elsif ($$strand eq "-") {
+	for($i = $loc_stop; $i >= $loc_start; --$i) {
+	    $hp_seq_hash{$i} = $hp_letters[$j];
+	    ++$j;
+	}
+    }
+    
+    my @brax_chars = split ('', $brax);
+    my %brax_hash = ();
+    $j = 0;
+    if($$strand eq "+") {
+	for($i = $brax_coords[0]; $i <= $brax_coords[1]; ++$i) {
+	    $brax_hash{$i} = $brax_chars[$j];
+	    ++$j;
+	}
+    } elsif ($$strand eq "-") {
+	for($i = $brax_coords[1]; $i >= $brax_coords[0]; --$i) {
+	    $brax_hash{$i} = $brax_chars[$j];
+	    ++$j;
+	}
+    }
+    
+    # get all mappings that have any overlap with the interval, and track in a data structure
+    #  that keeps 'em sorted by left-most position and distinguishes sense from antisense
+    
+    my %sense = ();  ## NOTE, sense and antisense are relative the hairpin direction, not (necessarily) the genome
+    my %antisense = ();
+    my @sense_names = ();
+    my @antisense_names = ();
+    my $total_mappings = 0;
+    my %miRNA = (); 
+    my %miRNA_star = ();
+    
+    my @samfields = ();
+    my $read_length;
+    my $read_stop;
+
+    my $readstrand;
+    my $mapping_polarity;
+    my $map_coord;
+    my $key;
+    foreach my $samline (@$alignments) {
+	chomp $samline;
+	# ignore headers
+	if($samline =~ /^@/) {
+	    next;
+	}
+	@samfields = split ("\t", $samline);
+	
+	#ignore unmapped reads
+	if($samfields[1] & 4) {
+	    next;
+	}
+	$read_length = parse_cigar ($samfields[5]);
+	$read_stop = $read_length + $samfields[3] - 1;
+	
+	# for purposes of hairpin output and MIRNA search, consider only those mappings that both start and stop within the locus
+	if(($read_stop > $loc_stop) or
+	   ($samfields[3] < $loc_start)) {
+	    next;
+	}
+	++$total_mappings;
+	
+	# get readstrand (relative to genome)
+	if($samfields[1] & 16) {
+	    $readstrand = "-";
+	} else {
+	    $readstrand = "+";
+	}
+	
+        # decide whether the read is sense or antisense wrt to the hairpin direction
+	if($readstrand eq "-") {
+	    # mapping is antisense relative to genome
+	    if($$strand eq "+") {
+		# mapping is antisense relative to hairpin
+		$mapping_polarity = "antisense";
+	    } elsif ($$strand eq "-") {
+		# mapping is sense relative to hairpin
+		$mapping_polarity = "sense";
+	    }
+	} else {
+	    # mapping is sense relative to genome
+	    if($$strand eq "+") {
+		# mapping is sense relative to hairpin
+		$mapping_polarity = "sense";
+	    } elsif($$strand eq "-") {
+		$mapping_polarity = "antisense";
+	    }
+	}
+    
+	
+	# the naming convention depends solely upon whether the hairpin is Watson or Crick.
+	# All mappings for a Watson hairpin are start-stop, while all mappings for a Crick hairpin are
+	# keyed as stop-start.  Doesn't matter whether the mapping itself is sense or antisense wrt to the hairpin
+	
+	if($$strand eq "+") {
+	    $map_coord = "$samfields[3]" . "-" . "$read_stop";
+	    $key = $samfields[3];
+	} elsif ($$strand eq "-") {
+	    $map_coord = "$read_stop" . "-" . "$samfields[3]";
+	    $key = $read_stop;
+	}
+	
+	if($mapping_polarity eq "sense") {
+	    unless(exists($sense{$key}{$map_coord})) {
+		push(@sense_names,$map_coord);
+	    }
+	    ++$sense{$key}{$map_coord};
+	} elsif ($mapping_polarity eq "antisense") {
+	    unless(exists($antisense{$key}{$map_coord})) {
+		push(@antisense_names, $map_coord);
+	    }
+	    ++$antisense{$key}{$map_coord};
+	}
+    }
+    
+    # Begin assessment of whether the hairpin can be annotated as a miRNA
+    my @candidates = ();
+    # First, gather all sense mappings that account for 20% or more of ALL mappings at the locus
+    foreach $map_coord (@sense_names) {
+	$key = $map_coord;
+	$key =~ s/-\d+$//g;
+	if(($sense{$key}{$map_coord} / $total_mappings) > 0.2) {
+	    push (@candidates,$map_coord);
+	}
+    }
+    
+    my $prec_result = 0;
+    my $hp_size_result = 0;
+    my $duplex_result = 0;
+    my $star_result = 0;
+    if(@candidates) {
+	++$prec_result;
+    }
+    
+    unless($n_of_pairs > $$maxmiRHPPairs) {
+	++$hp_size_result;
+    }
+    
+    ## analyzing duplex structure
+    
+    my $candidate_brax;
+    my $n_unpaired_cand;
+    my $n_left_paired_cand;
+    my $n_right_paired_cand;
+    my @mc_limits;
+    
+    my $candidate_brax_chopped;
+    
+    my $star_coord;
+    
+    my @star_limits = ();
+    my $star_brax;
+    my $n_unpaired_star;
+    my $n_left_paired_star;
+    my $n_right_paired_star;
+    
+    my $star_brax_chopped;
+    
+    my $cand_fail;
+    
+    if(@candidates) {
+	foreach $map_coord (@candidates) {
+	    $cand_fail = 0;
+	    $candidate_brax = '';
+	    $n_unpaired_cand = 0;
+	    $n_left_paired_cand = 0;
+	    $n_right_paired_cand = 0;
+	    @mc_limits = split ("-", $map_coord);
+	    if($mc_limits[0] < $mc_limits[1]) {
+		for($i = $mc_limits[0]; $i <= $mc_limits[1]; ++$i) {
+		    if(exists($brax_hash{$i})) {
+			$candidate_brax .= $brax_hash{$i};
+		    } else {
+			# if the candidate is partially within the padded region, consider all parts of the padded region unpaired
+			$candidate_brax .= "\.";
+		    }
+		}
+	    } elsif ($mc_limits[0] > $mc_limits[1]) {
+		for($i = $mc_limits[0]; $i >= $mc_limits[1]; --$i) {
+		    if(exists($brax_hash{$i})) {
+			$candidate_brax .= "$brax_hash{$i}";
+		    } else {
+			$candidate_brax .= "\.";
+		    }
+		}
+	    }
+	    
+	    $candidate_brax_chopped = substr($candidate_brax,0,((length $candidate_brax) - 2));
+	    while($candidate_brax_chopped =~ /\./g) { ## mismatches at the last two nts are ignored -- they are not part of the miR/miR* duplex
+		++$n_unpaired_cand;
+	    }
+	    
+	    
+	    while($candidate_brax =~ /\(/g) {
+		++$n_left_paired_cand;
+	    }
+	    while($candidate_brax =~ /\)/g) {
+		++$n_right_paired_cand;
+	    }
+	    if($n_unpaired_cand > $$maxmiRUnpaired) {
+		$cand_fail = 1;
+	    }
+	    
+	    if(($n_left_paired_cand > 0 ) and
+	       ($n_right_paired_cand > 0)) {
+		$cand_fail = 1;
+	    }
+	    
+	    # find the map_coordinates for the star sequence
+	    $star_coord = get_star_coord(\$map_coord,\%brax_hash,\$candidate_brax);
+	    if($star_coord eq "fail") {
+		$cand_fail = 1;
+	    } else {
+		@star_limits = split ("-", $star_coord);
+		$star_brax = '';
+		$n_unpaired_star = 0;
+		$n_left_paired_star = 0;
+		$n_right_paired_star = 0;
+		
+		if($star_limits[0] < $star_limits[1]) {
+		    for($i = $star_limits[0]; $i <= $star_limits[1]; ++$i) {
+			if(exists($brax_hash{$i})) {
+			    $star_brax .= $brax_hash{$i};
+			} else {
+			    # if the candidate is partially within the padded region, consider all parts of the padded region unpaired
+			    $star_brax .= "\.";
+			}
+		    }
+		} elsif ($star_limits[0] > $star_limits[1]) {
+		    for($i = $star_limits[0]; $i >= $star_limits[1]; --$i) {
+			if(exists($brax_hash{$i})) {
+			    $star_brax .= "$brax_hash{$i}";
+			} else {
+			    $star_brax .= "\.";
+			}
+		    }
+		}
+		$star_brax_chopped = substr($star_brax,0,((length $star_brax) - 2));
+		while($star_brax_chopped =~ /\./g) { ## mismatches at the last two nts are ignored -- they are not part of the miR/miR* duplex
+		    ++$n_unpaired_star;
+		}
+		while($star_brax =~ /\(/g) {
+		    ++$n_left_paired_star;
+		}
+		while($star_brax =~ /\)/g) {
+		    ++$n_right_paired_star;
+		}
+		if($n_unpaired_star > $$maxmiRUnpaired) {
+		    $cand_fail = 1;
+		}
+		if(($n_left_paired_star > 0 ) and
+		   ($n_right_paired_star > 0)) {
+		    $cand_fail = 1;
+		}
+		
+		## if $cand_fail is still 0 at this point, then this candidate passes the duplex test
+		unless($cand_fail) {
+		    ++$duplex_result;
+		}
+	    }
+	    
+	    ## unless the candidate already failed, check for existence of star sequence
+	    unless($cand_fail) {
+		if(exists($sense{$star_limits[0]}{$star_coord})) {
+		    if( (($sense{$star_limits[0]}{$star_coord} + $sense{$mc_limits[0]}{$map_coord}) / $total_mappings ) <= 0.25) {
+			$cand_fail = 1;
+		    }
+		} else {
+		    $cand_fail = 1;
+		}
+	    }
+	    
+	    ## unless the candidate already failed, check for redundancy
+	    unless($cand_fail) {
+		if((exists($miRNA{$map_coord})) or
+		   (exists($miRNA{$star_coord})) or
+		   (exists($miRNA_star{$map_coord})) or
+		   (exists($miRNA_star{$star_coord}))) {
+		    $cand_fail = 1;;
+		} 
+	    }
+	    unless($cand_fail) {
+		# you've got a winner.  Check abundances to decide which one should really be the miRNA, and which should be the star
+		++$star_result;
+		if($sense{$mc_limits[0]}{$map_coord} >= $sense{$star_limits[0]}{$star_coord}) {
+		    $miRNA{$map_coord} = $star_coord;
+		    $miRNA_star{$star_coord} = $map_coord;
+		} else {
+		    $miRNA{$star_coord} = $map_coord;
+		    $miRNA_star{$map_coord} = $star_coord;
+		}
+	    }
+	}
+    }
+    
+    ## 
+    my $hp_call;
+    if($star_result >= 1) {
+	$hp_call = "MIRNA";
+    } else {
+	$hp_call = "HP";
+    }
+    
+    # begin output
+    my $output_string = '';
+    my $mmmr;
+    $output_string .= "$$hp_locus $$strand\n";
+    $output_string .= "$displayseq\n";
+    if($$strand eq "+") {
+	for($i = $loc_start; $i <= $loc_stop; ++$i) {
+	    if(exists($brax_hash{$i})) {
+		$output_string .= "$brax_hash{$i}";
+	    } else {
+		$output_string .= " ";
+	    }
+	}
+	$output_string .= "\n";
+	for($i = $loc_start; $i <= $loc_stop; ++$i) {
+	    if(exists($sense{$i})) {
+		foreach $map_coord (@sense_names) {
+		    if(exists($sense{$i}{$map_coord})) {
+			for($j = $loc_start; $j < $i; ++$j) {
+			    if(exists($miRNA{$map_coord})) {
+				$output_string .= "m";
+			    } elsif(exists($miRNA_star{$map_coord})) {
+				$output_string .= "\*";
+			    } else {
+				$output_string .= "\.";
+			    }
+			}
+			if($map_coord =~ /(\d+)-(\d+)/) {
+			    # get length here as well
+			    $read_length = $2 - $1 + 1;
+			    for($j = $1; $j <= $2; ++$j) {
+				$output_string .= "$hp_seq_hash{$j}";
+			    }
+			} else {
+			    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+			}
+			for($j = ($2 + 1); $j <= $loc_stop; ++$j) {
+			    if(exists($miRNA{$map_coord})) {
+				$output_string .= "m";
+			    } elsif(exists($miRNA_star{$map_coord})) {
+				$output_string .= "\*";
+			    } else {
+				$output_string .= "\.";
+			    }
+			}
+			
+			$output_string .= " ";
+			# print length and abundance, and if appropriate, designation as a miRNA or miRNA-star
+			$output_string .= "l=$read_length ";
+			$output_string .= "m=$sense{$i}{$map_coord}";
+			if($$reads) {
+			    $mmmr = sprintf("%.4f", (($sense{$i}{$map_coord} / $$reads) * 1000000));
+			    $output_string .=  " mmmr=$mmmr";
+			}
+			if(exists($miRNA{$map_coord})) {
+			    $output_string .= " miRNA\n";
+			} elsif (exists($miRNA_star{$map_coord})) {
+			    $output_string .= " miRNA-star\n";
+			} else {
+			    $output_string .= "\n";
+			}
+		    }
+		}
+	    }
+	}
+	
+	# now check for any antisense-mapped reads
+	for($i = $loc_start; $i <= $loc_stop; ++$i) {
+	    if(exists($antisense{$i})) {
+		foreach $map_coord (@antisense_names) {
+		    if(exists($antisense{$i}{$map_coord})) {
+			for($j = $loc_start; $j < $i; ++$j) {
+			    $output_string .= "<";
+			}
+			if($map_coord =~ /(\d+)-(\d+)/) {
+			    # get length here as well
+			    $read_length = $2 - $1 + 1;
+			    for($j = $1; $j <= $2; ++$j) {
+				my $letter = $hp_seq_hash{$j};
+				$letter =~ tr/ACUG/UGAC/;
+				$output_string .= "$letter";
+			    }
+			} else {
+			    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+			}
+			for($j = ($2 + 1); $j <= $loc_stop; ++$j) {
+			    $output_string .= "<";
+			}
+			
+			$output_string .= " ";
+			# print length and abundance
+			$output_string .= "l=$read_length ";
+			$output_string .= "m=$antisense{$i}{$map_coord}";
+			if($$reads) {
+			    $mmmr = sprintf("%.4f", (($antisense{$i}{$map_coord} / $$reads) * 1000000));
+			    $output_string .= " mmmr=$mmmr\n";
+			} else {
+			    $output_string .= "\n";
+			}
+		    }
+		}
+	    }
+	}
+    } elsif ($$strand eq "-") {
+	for($i = $loc_stop; $i >= $loc_start; --$i) {
+	    if(exists($brax_hash{$i})) {
+		$output_string .= "$brax_hash{$i}";
+	    } else {
+		$output_string .= " ";
+	    }
+	}
+	$output_string .= "\n";
+	for($i = $loc_stop; $i >= $loc_start; --$i) {
+	    if(exists($sense{$i})) {
+		foreach $map_coord (@sense_names) {
+		    if(exists($sense{$i}{$map_coord})) {
+			for($j = $loc_stop; $j > $i; --$j) {
+			    if(exists($miRNA{$map_coord})) {
+				$output_string .= "m";
+			    } elsif(exists($miRNA_star{$map_coord})) {
+				$output_string .= "\*";
+			    } else {
+				$output_string .= "\.";
+			    }
+			}
+			if($map_coord =~ /(\d+)-(\d+)/) {
+			    # get length here as well
+			    $read_length = $1 - $2 + 1;
+			    for($j = $1; $j >= $2; --$j) {
+				$output_string .= "$hp_seq_hash{$j}";
+			    }
+			} else {
+			    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+			}
+			for($j = ($2 - 1); $j >= $loc_start; --$j) {
+			    if(exists($miRNA{$map_coord})) {
+				$output_string .= "m";
+			    } elsif(exists($miRNA_star{$map_coord})) {
+				$output_string .= "\*";
+			    } else {
+				$output_string .= "\.";
+			    }
+			}
+			
+			$output_string .= " ";
+			# print length and abundance, and if appropriate, designation as a miRNA or miRNA-star
+			$output_string .= "l=$read_length ";
+			$output_string .= "m=$sense{$i}{$map_coord}";
+			if($$reads) {
+			    $mmmr = sprintf("%.4f", (($sense{$i}{$map_coord} / $$reads) * 1000000));
+			    $output_string .= " mmmr=$mmmr";
+			}
+			if(exists($miRNA{$map_coord})) {
+			    $output_string .= " miRNA\n";
+			} elsif (exists($miRNA_star{$map_coord})) {
+			    $output_string .= " miRNA-star\n";
+			} else {
+			    $output_string .= "\n";
+			}
+		    }
+		}
+	    }
+	}
+	
+	# now check for any antisense-mapped reads
+	for($i = $loc_stop; $i >= $loc_start; --$i) {
+	    if(exists($antisense{$i})) {
+		foreach $map_coord (@antisense_names) {
+		    if(exists($antisense{$i}{$map_coord})) {
+			for($j = $loc_stop; $j > $i; --$j) {
+			    $output_string .= "<";
+			}
+			if($map_coord =~ /(\d+)-(\d+)/) {
+			    # get length here as well
+			    $read_length = $1 - $2 + 1;
+			    for($j = $1; $j >= $2; --$j) {
+				my $letter = $hp_seq_hash{$j};
+				$letter =~ tr/ACUG/UGAC/;
+				$output_string .= "$letter";
+			    }
+			} else {
+			    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+			}
+			for($j = ($2 - 1); $j >= $loc_start; --$j) {
+			    $output_string .= "<";
+			}
+			
+			$output_string .= " ";
+			# print length and abundance
+			$output_string .= "l=$read_length ";
+			$output_string .= "m=$antisense{$i}{$map_coord}";
+			if($$reads) {
+			    $mmmr = sprintf("%.4f", (($antisense{$i}{$map_coord} / $$reads) * 1000000));
+			    $output_string .= " mmmr=$mmmr\n";
+			} else {
+			    $output_string .= "\n";
+			}
+		    }
+		}
+	    }
+	}
+    }
+    
+    ## append fields to the input information
+    my $result = $$hp_entry;
+    ## hp_length, precision, duplex, and star
+    $result .= "\t$hp_size_result\t$prec_result\t$duplex_result\t$star_result";
+    
+    ## add the hp_call, either "MIRNA" or "HP"
+    $result .= "\t$hp_call";
+    
+    # check the output string, and suppress it if it is too big (> 400nts long or > 400 distinct small RNAs)
+    # make an exception for MIRNAs, for which we always print all of the alignments.
+    # this should reduce the memory footprint
+    
+    my @olines = split ("\n", $output_string);
+	    
+    unless($hp_call eq "MIRNA") {
+	if((($loc_stop - $loc_start + 1) > 400) or
+	   ((scalar @olines) > 403)) {  ## 3 lines are header, brackets, and sequence
+	    $output_string = "$olines[0]\n$olines[1]\n$olines[2]\n xxx Alignments Not Shown - too complex xxx\n";
+	}
+    }
+    
+    ## add the alignment
+    $result .= "\t$output_string";
+    
+    ## phew
+    return $result;
+}
+
+sub dG_from_RNAeval {
+    my($eval_string) = @_;
+    my $dG;
+    
+    open(RNAEVAL, "echo \"$eval_string\" | RNAeval |");
+    my @eval_line = <RNAEVAL>;
+    close RNAEVAL;
+    
+    if($eval_line[-1] =~ /\s+\((.*\d+.*)\)/) {
+	$dG = $1;
+	$dG =~ s/\s//g;
+    } else {
+	$dG = "FAIL";
+    }
+    return $dG;
+}
+
+sub summarize {
+    my($quant,$nohp,$dicermin,$dicermax,$logfile) = @_;  ## hash, scalar
+    my %loci = ();
+    my %abun = ();
+    my $n_phased = 0;
+    my $i;
+    
+    if($$nohp) {
+	$abun{'ND'}{'N'} = 0;
+	$loci{'ND'}{'N'} = 0;
+	for($i = $$dicermin; $i <= $$dicermax; ++$i) {
+	    $abun{'ND'}{$i} = 0;
+	    $loci{'ND'}{$i} = 0;
+	}
+    } else {
+	$abun{'MIRNA'}{'N'} = 0;
+	$abun{'HP'}{'N'} = 0;
+	$abun{'.'}{'N'} = 0;
+	$loci{'MIRNA'}{'N'} = 0;
+	$loci{'HP'}{'N'} = 0;
+	$loci{'.'}{'N'} = 0;
+	for($i = $$dicermin; $i <= $$dicermax; ++$i) {
+	    $abun{'MIRNA'}{$i} = 0;
+	    $abun{'HP'}{$i} = 0;
+	    $abun{'.'}{$i} = 0;
+	    $loci{'MIRNA'}{$i} = 0;
+	    $loci{'HP'}{$i} = 0;
+	    $loci{'.'}{$i} = 0;
+	}
+    }
+    
+    my @fields = ();
+    my $locus;
+    my $entry;
+
+    while(($locus, $entry) = each %$quant) {
+	@fields = split ("\t", $entry);
+	
+	
+	# $fields[9] is the Dicer Call
+	# $fields[8] is the rep.total
+	# $fields[3] is the HP call
+	++$loci{$fields[3]}{$fields[9]};
+	$abun{$fields[3]}{$fields[9]} += $fields[8];
+	# $fields[12] is the phase call
+	if($fields[12] =~ /OK/) {
+	    ++$n_phased;
+	}
+    }
+    
+    # report
+    log_it($$logfile,"\nSummary\n");
+
+    if($$nohp) {
+	log_it($$logfile,"DicerCall\tLoci\tAbundance\n");
+	log_it($$logfile, "N\t$loci{'ND'}{'N'}\t$abun{'ND'}{'N'}\n");
+	for($i = $$dicermin; $i <= $$dicermax; ++$i) {
+	    log_it($$logfile,"$i\t$loci{'ND'}{$i}\t$abun{'ND'}{$i}\n");
+	}
+    } else {
+	log_it($$logfile,"DicerCall\tNON-HP_Loci\tHP_Loci\tMIRNA_Loci\tNON-HP_Abundance\tHP_Abundance\tMIRNA_Abundance\n");
+	log_it($$logfile,"N\t$loci{'.'}{'N'}\t$loci{'HP'}{'N'}\t$loci{'MIRNA'}{'N'}\t$abun{'.'}{'N'}\t$abun{'HP'}{'N'}\t$abun{'MIRNA'}{'N'}\n");
+	for($i = $$dicermin; $i <= $$dicermax; ++$i) {
+	    log_it($$logfile,"$i\t$loci{'.'}{$i}\t$loci{'HP'}{$i}\t$loci{'MIRNA'}{$i}\t$abun{'.'}{$i}\t$abun{'HP'}{$i}\t$abun{'MIRNA'}{$i}\n");
+	}
+    }
+    log_it($$logfile,"\n");
+    log_it($$logfile,"Number of signifcantly phased loci: $n_phased\n");
+}
+
+sub log_it {
+    my($file,$string) = @_;
+    open(LOG, ">>$file");
+    print LOG "$string";
+    print STDERR "$string";
+    close LOG;
+}
+
+	    
+__END__	
 =head1 LICENSE
 
 ShortStack.pl
@@ -4645,27 +5778,11 @@ If you use ShortStack in your work, please cite
 
 Axtell MJ. (2012) ShortStack: Comprehensive annotation and quantification of small RNA genes.  In prep.
 
-A manuscript describing the ShortStack package has been written and submitted as of late June 2012, so check Pubmed first or look for an update!
+As of this version release, a manuscript describing ShortStack is being revised.  It might be published by the time you are reading this, so please check Pubmed before  citing!
 
-=head1 VERSIONS
+=head1 VERSION
 
-0.2.3 : October 18, 2012.  Fixed bug in formatting of BED files .. blockStarts (in column 12) are now correctly reported in zero-based coordinates.
-
-0.2.2 : September 23, 2012.  Minor changes to HP and MIRNA calling during countmode to increase the consistency of calls between de novo and count mode runs.
-
-0.2.1 : September 14, 2012.  Speed improvements during the merging of einverted-derived hairpins with RNALfold-derived hairpins.
-
-0.2.0 : August 29, 2012.  Major update.  Annotation of non-miRNA hairpin RNAS (hpRNAs) is much improved, with many fewer "borderline" cases.  Multiple internal modificaitons changed the method for dealing with these loci.  In addition, as of this version, ShortStack takes in a file of inverted repeats in the form of a .inv file produced by einverted (from the EMBOSS package).  Using inverted repeats complements the usage of RNALfold to find hairpins.  In particular, the use of einverted-derived inverted repeat annotations enables the correct annotation of very large hairpin-derived small RNA genes, such as Arabidopsis thaliana IR71.
-
-0.1.4 : June 28, 2012.   Prep_bam.pl helper script updated to deal with .sam lines corresponding to unmapped reads without breaking.  This also enables "one-step" mapping and .bam file preparation using bowtie (see 'Quick Start' section below).  ShortStack.pl also updated to prevent breaking upon encountering .sam lines corresponding to unmapped reads.  Coloring of .bed files now dynamically adjusts to make a nice 'rainbow' (from red through green to blue) regardless of the size of the dicer range.  Finally, an additional filter was added to prevent excessive splitting of initial de-novo clusters into hairpin-associated clusters ... initial clusters are now prevented from splitting if they would spawn more than --maxsplit child hairpins (default, 3).  This prevents inappropriate splitting of very large clusters that might harbor a number of sub-optimal hairpins.
-
-0.1.3 : June 12 2012.  Critical bug fix:  Fixed issue in analysis of RNALfold-derived secondary structures that was causing a substantial rate of acceptable hairpin structures to be incorrectly rejected .. thus under-reporting hairpin-and MIRNA-derived loci.  Additionally, removed the option --maxtofoldwindow ; all loci are now folded and analyzed unless running in nohp mode.  Other smaller fixes and changes including fixing the column names on the "Hairpin-MIRNA_summary.txt" file ... previously, the "Name" and "Locus" columns lacked headers.
-
-0.1.2 : May 17, 2012.  Changes to simplify downstream analysis of the Results.txt file, and to phasing analysis.  Details: A) changed format of 'DicerCall' column in result to remove the colon-delimted fractions .. now it simply reports size or 'N'  B) Changed format of phasing analysis results to split the phase offset, p-value, and false-discovery rate call into three separate columns.  C) added option of --phasesize none to suppress analysis of phasing at all clusters.
-
-0.1.1 : May 4, 2012.  Added helper script "miR_homologs.pl" to package.  No change to ShortStack.pl code itself except version change.
-
-0.1.0 : Initial release. April 29, 2012
+0.3.0 :: Released November 20, 2012
 
 =head1 AUTHOR
 
@@ -4675,7 +5792,7 @@ Michael J. Axtell, Penn State University, mja18@psu.edu
 
 install samtools from <http://samtools.sourceforge.net/> and ensure that samtools is in your PATH
 
-install the ViennaRNA package VERSION 1.7.X or 1.8.X <http://www.tbi.univie.ac.at/~ivo/RNA/> and ensure that RNALfold is in your PATH.  NOTE: VERSION 2.X OF THE VIENNA RNA PACAKAGE IS INCOMPATIBLE WITH ShortStack, due to a option specification change in RNALfold upon the 1.x to 2.x transition.  Future versions of ShortStack may update this, but for now, MAKE SURE you have a VERSION 1.7.X or 1.8.X installation (e.g. 1.8.5).
+install the ViennaRNA package (either 1.8.x or 2.x).  See <http://www.tbi.univie.ac.at/~ronny/RNA/vrna2.html> and ensure that RNALfold and RNAeval are in your PATH
 
 ensure the script is executable                                                                  
                                                                                                  
@@ -4703,7 +5820,7 @@ Shortstack.pl [options] [in.bam] [genome.fasta]
 
 3. Ensure the chromosome names of the reference genome are short and sweet, containing no whitespace or metacharacters (see below)
 
-4. Align your reads to the reference genome, output the results in sam/bam format, and pipe through 'Prep_bam.pl' to generate a properly formatted, sorted, and indexed .bam alignment.  Note the total number of mapped reads.  Suggested aligner is bowtie 1 (0.12.8) but any method that outputs in sam/bam format is fine.  If you use bowtie, the following command can be used for one-step mapping, formatting, sorting, and indexing (assuming of course you've installed bowtie and built the bowtie index for your reference genome):
+4. Align your reads to the reference genome, output the results in sam/bam format, and pipe through 'Prep_bam.pl' to generate a properly formatted, sorted, and indexed .bam alignment.  Note the total number of mapped reads.  Suggested aligner is bowtie 1 (0.12.8) but any method that outputs in sam/bam format is fine.  If you use bowtie version 1, the following command can be used for one-step mapping, formatting, sorting, and indexing (assuming of course you've installed bowtie and built the bowtie index for your reference genome):
 
 bowtie [bowtie_options] -S [bowtie_genome_index] [trimmed_reads] | Prep_bam.pl --genome [genome.fasta] --prefix [file_name_prefix]
 
@@ -4717,31 +5834,21 @@ Some Arabidopsis test data can be found at http://axtelldata.bio.psu.edu/data/Sh
 
 1.  Athaliana_genome.tgz : The "TAIR10" Arabidopsis thaliana (ecotype-Col-0) genome assembly including the plastid and mitochrondria, and its .fai index.  Retrieved from Phytozome.  This is the assembly to which the .bam files in this directory were mapped.
 
-2.  col_leaf_ok.bam[.bai] : Sorted and indexed small RNA-seq alignments in BAM format.  Derived from wild-type rosette leaves -- Liu et al. (2012) Plant Physiology PMID: 22474216.  This alignment contains 26,523,213 mapped reads, 14,351,052 of which were "uniquely" mapped (just one alignment), and a total of 104,980,568 alignments.  The small RNA sizes range from 15-27nts.  To create this alignment, the raw .csfasta and .QV.qual files were combined to make a colorspace-fastq formatted file, adapters were trimmed along with the corresponding quality values (including the hybrid 3' color and Q value), and mapped using bowtie 0.12.7.  The bowtie settings were -C -v 1 --best --strata -k 50 --col-keepends -S, which allow zero or one mismatch, keeping only the best scoring 'stratum', and retaining only the first 50 alignments observed, and outputting in sam format.  SAM lines corresponding to unmapped reads were filtered out.  The SAM file was then processed with Prep_bam.pl (included in ShortStack package) to add the NH:i: tags to each alignment, and to output a chromosomal-sorted alignment in the BAM format.
+2.  col_leaf.bam[.bai] : Sorted and indexed small RNA-seq alignments in BAM format.  Derived from wild-type rosette leaves -- Liu et al. (2012) Plant Physiology PMID: 22474216.  This alignment contains 26,523,213 mapped reads, 14,351,052 of which were "uniquely" mapped (just one alignment), and a total of 104,980,568 alignments.  The small RNA sizes range from 15-27nts.  To create this alignment, adapters were trimmed from the raw .csfasta (including the hybrid 3' color), and mapped using bowtie 0.12.8.  The bowtie settings were -C -f -v 1 --best --strata -k 50 --col-keepends -S, which allow zero or one mismatch, keeping only the best scoring 'stratum', and retaining only the first 50 alignments observed, and outputting in sam format.  The bowtie STDOUT was directly piped into "Prep_bam.pl" (version 0.1.1) to prepare a properly formatted, sorted, and indexed .bam alignment.
 
-3. ath_hp_mb19_SStack_Athal_167.txt : Coordinates for Arabidopsis thaliana MIRNA hairpin sequences, as determined by taking the top-scoring hit from a blastn search using miRBase 19 ath- hairpins as queries against the reference genome.  This file is useful as input for a ShortStack run in --count mode.
+3. ath_hp_mb19_SStack_Athal_167.txt : Coordinates for Arabidopsis thaliana MIRNA hairpin sequences, as determined by taking the top-scoring hit from a blastn search using miRBase 19 ath- hairpins as queries against the reference genome.  This file is useful as input for a ShortStack run in --count mode.  It is also usable as a --flag_file, in which case clusters overlapping known MIRNAs will be noted.
 
-4.  ath_mature_nr_mb19.bam[.bai] : Sorted and indexed alignments of all non-redundant mature Arabidopsis thaliana miRNAs from miRBase19 against the A. thaliana reference genome.  Mapped and processed using bowtie 0.2.18 and Prep_bam.pl with the call
-
-    bowtie -f --all -v 0 -m 20 -S Athaliana_167 ath_mature_nr_mb19.fa | Prep_bam.pl --genome Athaliana_167.fa --prefix ath_mature_nr_mb19
-
-Thus, retaining perfect matches only, no alignments reported if more than 20 were observed.  These alignments are useful for testing the miR_homologs.pl helper script.
-
-5.  Athaliana_167.inv : einverted-derived file resulting from analysis of Arabidopsis genome (file 1) with default settings except -maxrepeat 10000.
+4.  Athaliana_167.inv : einverted-derived file resulting from analysis of Arabidopsis genome (file 1) with default settings except -maxrepeat 10000.
 
 Some Tests:
 
-A) full de-novo annotation run, including inverted repeats file:
+A) full de-novo annotation run, including inverted repeats file and flag file of known Arabidopsis MIRNAs:
 
-    ShortStack.pl --inv_file Athaliana_167.inv col_leaf_ok.bam Athaliana_167.fa
+    ShortStack.pl --inv_file Athaliana_167.inv --flag_file ath_hp_mb19_SStack_Athal_167.txt col_leaf_ok.bam Athaliana_167.fa
 
-B) count mode run to quantify and annotate known miRBase MIRNA loci:
+B) count mode run to quantify small RNA expression from known Arabidopsis miRBase MIRNA loci:
 
     ShortStack.pl --count ath_hp_mb19_SStack_Athal_167.txt col_leaf_ok.bam Athaliana_167.fa
-
-C) Analyze annotated miRBase mature miRNAs for acceptable structure with miR_homologs.pl:
-
-    miR_homologs.pl ath_mature_nr_mb19.bam Athaliana_167.fa
 
 
 =head1 OPTIONS
@@ -4750,7 +5857,9 @@ C) Analyze annotated miRBase mature miRNAs for acceptable structure with miR_hom
                                       
 --reads [integer] : Number of reads (NOT mappings) in the input .bam file.  No default.  Reads are required to output quantifications in mappings per million mapped, instead of in raw rads.  If not provided, the run will be forced into "--raw" mode, because mappings per million mapped reads cannot be calculated.
 
---inv_file [string] : PATH to an einverted-produced .inv file of inverted repeats within the genome of interest.  Not required but strongly suggested for more complete annotations of hairpin-derived small RNA genes.  Default = {blank}.  Not needed for runs in "nohp" mode.  A typical eniverted run uses default parameters except "-maxrepeat 10000", in order to capture long IRs.
+--inv_file [string] : PATH to an einverted-produced .inv file of inverted repeats within the genome of interest.  Not required but strongly suggested for more complete annotations of hairpin-derived small RNA genes.  Default = {blank}.  Not needed for runs in "nohp" mode or runs in "count" mode (because "count" mode forces "nohp" mode as well).  A typical eniverted run uses default parameters except "-maxrepeat 10000", in order to capture long IRs.
+
+--flag_file [string] : PATH to a simple file of genomic loci of interest.  The ShortStack-analyzed small RNA clusters will be analyzed for overlap with the loci in the flag_file .. if there is any overlap (as little as one nt), it will be reported.  Format for this file is describe below.
 
 --mindepth [integer] : Minimum depth of mapping coverage to define an 'island'.  Default = 20.  Must be at least 2, more than 5 preferred.
 
@@ -4760,13 +5869,23 @@ C) Analyze annotated miRBase mature miRNAs for acceptable structure with miR_hom
 
 --dicermax [integer] : Largest size in the Dicer size range (or size range of interest).  Deafult = 24.  Must be between 15 and 35, and more than or equal to --dicermin
 
---maxhpsep [integer] : Maximum allowed span for a base-pair during hairpin search with RNALfold.  Default = 300.  Must be between 50 and 2000.
+--maxhpsep [integer] : Maximum allowed span for a base-pair during hairpin search with RNALfold; Also serves as the maximum size of genomic query to fold with RNALfold .. loci whose unpadded size is more than --maxhpsep will not be analyzed at all with RNALfold.  Default = 300.  Must be between 50 and 2000.
 
 --minfracpaired [float] : Minimum fraction of paired nucleotides required within a valid hairpin structure.  Default = 0.67.  Allowed values are greater than 0 and less than or equal to 1.
 
---minntspaired [integer] : Minimum absolute number of paired nucleotides required within a valid hairpin structure.  Default = 30.  Allowed values are greater than zero and less than or equal to --maxhpsep
+--minntspaired [integer] : Minimum absolute number of paired nucleotides required within a valid hairpin structure.  Default = 15.  Allowed values are greater than zero and less than or equal to --maxhpsep
 
---minfrachpdepth [float] : Minimum fraction of nearby coverage within hairpin arms to keep hairpin for later miRNA analysis.  Default = 0.67.  Allowed values between 0 and 1.  See below for details.
+--maxdGperStem [float] : Maximum deltaG / stem length allowed in a valid hairpin structure.  Stem length is 0.5 * (left_stem_length + right_stem_length).  Default = -0.5
+
+--minfrachpdepth [float] : Minimum fraction of corrected coverage within hairpin arms to keep hairpin for further analysis.  Default = 0.67.  Allowed values between 0 and 1.  See below for details.
+
+--miRType [string] : Either "plant" or "animal".  Defaults to "plant".  This option sets --maxmiRHPPairs, --maxmiRUnpaired, and --maxLoopLength to 150, 5, and 100,000 respectively for type "plant".  For type "animal", the three are instead set to 45, 6, and 15, respectively.
+
+--maxmiRHPPairs [integer] : Maximum number of base pairs in a valid MIRNA hairpin. default: set by --miRType "plant" to 150.  --miRType "animal" sets to 45 instead.  When provided, user settings will override miRType settings. 
+
+--maxmiRUnpaired [integer] : Maximum number of unpaired miRNA nts in a miRNA/miRNA* duplex. default: set by --miRType "plant" to 5.  --miRType "animal" instead sets it to 6.  When provided, user settings will override miRType settings.
+
+--maxLoopLength [integer] : maximum allowed loop length for a valid hairpin. default: set by --miRType "plant" be essentially unlimited (100,000).  --miRType "plant" sets it to 15.  When provided, user settings will override miRType settings.
 
 --minstrandfrac [float] : Minimum fraction of mappings to one or the other strand call a polarity for non-hairpin clusters.  Also the minimum fraction of "non-dyad" mappings to the sense strand within potential hairpins/miRNAs to keep the locus annotated as a hp or miRNA.  See below for details.  Default = 0.8.  Allowed values between 0.5 and 1.
 
@@ -4776,9 +5895,9 @@ C) Analyze annotated miRBase mature miRNAs for acceptable structure with miR_hom
 
 --phaseFDR [float] : False Discovery Rate for phased cluster analysis.  FDR of p-values set to this value for Benjamini-Hochberg method.  See below for details.  Default = 0.05.  Allowed values greater than 0 up to 1.
 
---count [string] : Invokes count mode, in which user-provided clusters are annotated and quantified instead of being defined de novo.  When invoked, the file provided with --count is assumed to contain a simple list of clusters.  Formatting details below.  Default : Not invoked.
+--count [string] : Invokes count mode, in which user-provided clusters are annotated and quantified instead of being defined de novo.  When invoked, the file provided with --count is assumed to contain a simple list of clusters.  Count mode also forces nohp mode.  Formatting details below.  Default : Not invoked.
 
---nohp : If "--nohp" appears on the command line, it invokes running in "no hairpin" mode.  RNA folding, hairpin annotation, and MIRNA annotation will be skipped (likely saving significant time).  Default: Not invoked.
+--nohp : If "--nohp" appears on the command line, it invokes running in "no hairpin" mode.  RNA folding, hairpin annotation, and MIRNA annotation will be skipped (likely saving significant time).  Note that --count mode forces --nohp mode as well.  Default: Not invoked.
 
 --raw : If "--raw" appears on the command line, it prevents conversion of abundances into mappings per million mapped reads, and instead all tallies in the results will simply be the raw reads.  --raw mode is forced if the user does not provide the number of reads via the --reads option.  Default: Not invoked, unless --reads is left blank.
 
@@ -4786,7 +5905,7 @@ C) Analyze annotated miRBase mature miRNAs for acceptable structure with miR_hom
 
 =head2 Input .bam file
 
-The mapped reads in the input .bam file must be sorted by chromosomal location, and indexed using the samtools index command -- specifically, ShortStack will look for the [prefix].bam.bai file in the same directory as the input [prefix].bam file.  
+The mapped reads in the input .bam file must be sorted by chromosomal location, and indexed using the samtools index command -- specifically, ShortStack will look for the [prefix].bam.bai file in the same directory as the input [prefix].bam file.  It will quit and complain if the index file is not readable.
 
 Additionally, each mapping in the .bam file must have the NH:i: tag, which indicates the total number of mappings for that read.  
 
@@ -4810,9 +5929,13 @@ If running in --count mode, the user-provided file is expected to be a simple te
 
 Importantly, the 'Results.txt' file produced by a previous ShortStack.pl run can be used directly in subsequent runs in --count mode.  This is useful when comparing identical intervals across multiple samples.
 
+=head2 --flag_file
+
+Optional.  This is a list of genomic loci to scan for overlap with one or more of the small RNA loci found/analyzed by ShortStack.  Overlap of any length is reported.  The format of the file is similar to that of the --count file:  A tab-delimited text file with coordinates in the first column, and names in the second column.  Unlike for --count files, names are required to be present in the second column for --flag_file.  Coordinates must be in the format [Chr]:[start]-[stop], where Chr is defined in the genome file AND the .bam file, and start and stop are one-based, inclusive.
+
 =head2 --inv_file 
 
-Unless you are running in "nohp" mode, providing a inv_file will enhance the accuracy of the hairpin annotations.  RNALfold-based folding of clusters will often miss very large inverted repeats that einverted can capture.  To make the .inv file, download and install the EMBOSS package ( http://emboss.sourceforge.net/ ), then run einverted against your genome of interest.  For the purposes of ShortStack analysis, the fasta file can be ignored / deleted.  The .inv file is used for ShortStack analysis.  Note that the inv_file is not required, but ShortStack will warn you if it is missing (unless you are running in 'nohp' mode).
+Unless you are running in "nohp" mode, providing a inv_file will enhance the accuracy of the hairpin annotations.  RNALfold-based folding of clusters will often miss very large inverted repeats that einverted can capture.  To make the .inv file, download and install the EMBOSS package ( http://emboss.sourceforge.net/ ), then run einverted against your genome of interest.  For the purposes of ShortStack analysis, the fasta file can be ignored / deleted.  The .inv file is used for ShortStack analysis.  Note that the inv_file is not required, but ShortStack will warn you if it is missing (unless you are running in 'nohp' or 'count' mode).
 
 =head1 SUGGESTIONS FOR ADAPTER-TRIMMING AND ALIGNMENTS
 
@@ -4838,39 +5961,65 @@ In many species, particularly plants, a great deal of small RNAs correspond to r
 
 This is a simple tab-delimited text file.  The first line begins with a "#" (comment) sign, and then lists column headers.  Each subsequent line describes the key traits of a single cluster.
 
+To import this into R, here's a tip to deal with the first line, which has the headers but begins with a "#" character.
+
+>results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
+
 Column 1: Locus : The genome-browser-friendly coordinates of the clusters.  Coordinates are one-based, inclusive (e.g. Chr1:1-100 refers to a 100 nt interval beginning with nt 1 and ending with nt 100).
 
 Column 2: Name : Name of cluster.  Unless the run was in --count mode and the input file of a priori clusters already had names, the names are arbitrarily designated as "Cluster_1", "Cluster_2", etc.
 
-Column 3: HP : Whether this cluster appears to be hairpin-derived or not.  If not, a "." is present.  If it is a hairpin, but NOT qualified as a MIRNA, "HP" is indicated.  MIRNAs are indicated by "MIRNA".  If the run was in "--nohp" mode, than all entries in the column will be "ND" (meaning 'not determined').
+Column 3: FlagOverlap : Name(s) of any loci from the flag_file that overlap with the cluster are listed.  If there are two or more, they are comma-separated.  If there were none, or no flag_file was provided, than a "." is present in this column instead.
 
-Column 4: Strand : The pre-dominant strand from which the small RNA emanate.  If ".", no strand was called.  HPs and MIRNAs always have a polarity, based on the hairpin's originating strand.  Non-HP clusters have their polarity determined by the --minstrandfrac setting.
+Column 4: HP : Whether this cluster appears to be hairpin-derived or not.  If not, a "." is present.  If it is a hairpin, but NOT qualified as a MIRNA, "HP" is indicated.  MIRNAs are indicated by "MIRNA".  If the run was in "--nohp" mode, than all entries in the column will be "ND" (meaning 'not determined').
 
-Column 5: Frac_Wat : Fraction of mappings to the Watson (e.g. +) strand of the cluster.  1 means all were from Watson Strand (e.g. +), 0 means all were from Crick (e.g. -) strand.
+Column 5: Strand : The pre-dominant strand from which the small RNA emanate.  If ".", no strand was called.  HPs and MIRNAs always have a polarity, based on the hairpin's originating strand.  Non-HP clusters have their polarity determined by the --minstrandfrac setting.
 
-Column 6: Total : Total mappings within the cluster, either in raw mappings (for --raw mode) or in mappings per million mapped.
+Column 6: Frac_Wat : Fraction of mappings to the Watson (e.g. +) strand of the cluster.  1 means all were from Watson Strand (e.g. +), 0 means all were from Crick (e.g. -) strand.
 
-Column 7: Uniquely Mapped Total : Total mappings derived from uniquely mapped reads .. e.g., those with NH:i:1.  In raw mappings (for --raw mode) or in mappings per million mapped.
+Column 7: Total : Total mappings within the cluster, either in raw mappings (for --raw mode) or in mappings per million mapped.
 
-Column 8: Rep-Total : Repeat normalized total mappings.  Instead of each mapping counting as "1", each mapping instead counts as "1/NH", where NH is the total number of mappings that read had, according to the NH:i: tag.
+Column 8: Uniquely Mapped Total : Total mappings derived from uniquely mapped reads .. e.g., those with NH:i:1.  In raw mappings (for --raw mode) or in mappings per million mapped.
 
-Column 9: DicerCall : If "N", the cluster was not annotated as dicer-derived, per options --dicermin, --dicermax, and --mindicerfrac.  Otherwise this is a number, within the --dicermin to --dicermax size range, which indicates the most abundant small RNA size within the mappings at that cluster.
+Column 9: Rep-Total : Repeat normalized total mappings.  Instead of each mapping counting as "1", each mapping instead counts as "1/NH", where NH is the total number of mappings that read had, according to the NH:i: tag.
 
-Column 10: PhaseOffset : If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the offset is the one-based genomic position with which the cluster appears to be "in-phase" (based on the 5' nt of a sense-mapped small RNA).  Phasing is always in increments identicial to the Dicer size call in column 9.
+Column 10: DicerCall : If "N", the cluster was not annotated as dicer-derived, per options --dicermin, --dicermax, and --mindicerfrac.  Otherwise this is a number, within the --dicermin to --dicermax size range, which indicates the most abundant small RNA size within the mappings at that cluster.
 
-Column 11: Phase_pval :  If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the p-value is derived from a modified hypergeometric distribution, as described below. 
+Column 11: PhaseOffset : If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the offset is the one-based genomic position with which the cluster appears to be "in-phase" (based on the 5' nt of a sense-mapped small RNA).  Phasing is always in increments identicial to the Dicer size call in column 9.
 
-Column 12: Phase_FDR_Call : If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the FDR call will begin with either "OK" or "NS" (meaning 'not significant') and then list the alpha used in the Benjamini-Hochberg procedure.  
+Column 12: Phase_pval :  If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the p-value is derived from a modified hypergeometric distribution, as described below. 
 
-Column 13: Short : The total mappings from reads with lengths less than --dicermin, either in raw reads (--raw mode), or mappings per million mapped.
+Column 13: Phase_FDR_Call : If "ND", phasing p-value was not calculated for this cluster.  Otherwise, the FDR call will begin with either "OK" or "NS" (meaning 'not significant') and then list the alpha used in the Benjamini-Hochberg procedure.  
 
-Column 14: Long : The total mappings from reads with lengths more than --dicermax, either in raw reads (--raw mode), or mappings per million mapped.
+Column 14: Pairs : Number of base-pairs in the hairpin stems.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Columns 15 - the end : The total mappings from reads with the indicated lengths.  These are the sizes within the Dicer range.
+Column 15 : FracPaired : Fraction of the stem nucleotides that are paired.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+
+Column 16 : StemLength : Defined as 0.5 * (5' arm length + 3' arm length).  If this is not a HP or MIRNA locus, "NA" is entered instead.
+
+Column 17 : LoopLength : Number of nucleotides between the 5' and 3' stems.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+
+Column 18 : dGperStem : deltaG of the stems divided by the StemLength.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+
+Column 19 : FracCovHP : Fraction of the per-nucleotide coverage present in the originally found cluster that is located in the two arms of the hairpin.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+
+Column 20 : HPSizeResult : "1" indicates the number of pairs in the hairpin was less than or equal to maxmiRHPPairs; 0 indicates the opposite.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+
+Column 21 : PrecisionResult : The number of small RNA sequences in the stem region of the hairpin that accounted for >= 20% of the mappings.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+
+Column 22 : DuplexResult : The number of possible miRNA/miRNA* duplexes in which neither partner spanned a loop and neither partner had > maxmiRUnpaired number of unpaired nucleotides in the putative duplex.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+
+Column 23 : StarResult : The number of putative miRNA*'s that were actually sequenced.  Values of 1 or more here indicate a MIRNA annoation.  If this is not a HP or MIRNA locus, "NA" is entered instead.
+
+Column 24: Short : The total mappings from reads with lengths less than --dicermin, either in raw reads (--raw mode), or mappings per million mapped.
+
+Column 25: Long : The total mappings from reads with lengths more than --dicermax, either in raw reads (--raw mode), or mappings per million mapped.
+
+Columns 26 - the end : The total mappings from reads with the indicated lengths.  These are the sizes within the Dicer range.
 
 =head2 Log.txt
 
-This is a simple log file which records the key settings and key results from the run.
+This is a simple log file which records most of the information that is also sent to STDERR during the run.
 
 =head2 ShortStack.bed
 
@@ -4881,10 +6030,6 @@ Hairpins and MIRNAs are graphically indicated: The helical arms will be shown as
 =head2 miRNA_summary.txt
 
 This is a tab-delimited text file that summarizes key features of the loci annotated as MIRNAs, including mature miRNA sequences, miRNA-star sequences, and the numbers of mappings for each and for the entire locus.
-
-=head2 hpRNA_summary.txt
-
-A teb-delimited text file summarizing the non-miRNA hpRNA loci.  Indicates "precision", "duplex", and "star".  A "PASS" for precision indicates that one or more mapped small RNAs accounted for >= 20% of the abundance at the locus.  A "PASS" for "duplex" means that the possible miRNA/miRNA* duplex structure was aberrant in some way, thus disqualifying the locus for further consideration as a miRNA locus.  A "PASS" "star" indicates that the miRNA-star was actually sequenced and the sum of the miRNA/miRNA* abudnance accounted for at least 25% of the locus total. (which would make the locus a MIRNA).  These three parameters are analyzed sequentially, so if an earlier one is "FAIL", the subsequent parameters are simply not determined, indicated by "ND".
 
 =head2 Hairpin and MIRNA detail files
 
@@ -4902,45 +6047,39 @@ Note that alignments for very complex HP loci are suppressed (only the sequence 
 
 Cluster discovery proceeds in two simple steps:
 
-1. The total depth of small RNA coverage at each occupied nucleotide in the genome is examined, and initial 'islands' of coverage are defined as continuous stretches where the read depth is greater than or equal to the threshold depth specified by option --mindepth.  Note that islands could theoretically be as small as one nucleotide, since they depend on total depth of coverage.  Many islands will often be 20-24nts in length, corresponding to a pile of a single small RNA species.
+1. The total depth of small RNA coverage at each occupied nucleotide in the genome is examined, and initial 'islands' of coverage are defined as continuous stretches where the read depth is greater than or equal to the threshold depth specified by option --mindepth.  Note that islands could theoretically be as small as one nucleotide, since they depend on total depth of coverage, not the small RNA length per se.  Many islands will often be 20-24nts in length, corresponding to a pile of a single small RNA species.
 
-2. The initial islands are then extended on both sides by the distance specified by option --pad.  Islands that overlap after extension are merged.  After all extensions and resultant mergers are performed, the final result is the initial clusters.  If the run is performed in --nohp mode, these are the final clusters.  If hairpins and MIRNAs are being examined, some of the clusters may be adjusted in position and/or split to fully capture the putative hairpin(s) (see below).
+2. The initial islands are then extended on both sides by the distance specified by option --pad.  Islands that overlap after extension are merged.  After all extensions and resultant mergers are performed, the final result is the initial clusters.  If the run is performed in --nohp mode, these are the final clusters.  If hairpins and MIRNAs are being examined, some of the clusters may be adjusted in position to fully capture the putative hairpin(s) (see below).
 
-=head2 Hairpin and MIRNA analysis in de novo mode
+=head2 Hairpin and MIRNA analysis
 
-1.  The genomic window to be subject to RNA folding is first determined.  For loci whose length is greater than or equal to 1,000nts, the window of genomic DNA corresponding to the locus itself is used.  For loci less than 1,000nts in length, a window, centered upon the middle of the locus, with a size of the lesser of 1,000nts OR 3 x unpadded_cluster_length is used. (The unpadded cluster length is the length - (2 * option --pad)). If 3 x unpadded_cluster_length is less than 250nts, a window size of 250nts is applied.
+1.  The genomic window to be subject to RNA folding is first determined.  If the unpadded locus size (unpadded locus size is defined as the locus size - ( 2 * --pad)) is > --maxhpsep, no RNA folding will take place at the locus.  Otherwise, a window with length of --maxhpsep is centered on the locus to determine the nucleotides to fold
 
-2.  Both the top and bottom genomic strands from the window are then subjected to secondary structure prediction using RNALfold (options -d 2 -noLP (--maxhpsep)), which returns a diverse set of often overlapping predicted structures.
+2.  Both the top and bottom genomic strands from the window are then subjected to secondary structure prediction using RNALfold (option -L [--maxhpsep]), which returns a diverse set of often overlapping predicted structures.
 
-3.  The structures are parsed, retaining only those that satisfy options --minfracpaired and --minntspaired.  minfracpaired refers to the fraction of nts in the 'lowest' helix that are paired, NOT to the fraction of ALL nts in the window that are paired.  Same for --minntspaired .. only the positions within the lowest helix are considered.
+3.  The structures are parsed, retaining only those that satisfy options --minfracpaired, --minntspaired, --maxLoopLength, amd --maxdGperStem.
 
-4.  If an .inv file was provided, all inverted repeats in that file are parsed, and then filtered to also satisfy options -- --minfracpaired and --minntspaired.  In addition, loop lengths are not allowed to be longer than 50% of the helix length of the putative hairpin.  Putative RNA secondary structures in dot-bracket notation are generated from the .inv alignment, not by actual RNA folding.  All G-U alignments are considered paired, in addition to the standard A-U and G-C pairings.  Both strands are used, subject to passing the --minfracpaired and --minntspaired filters.  Inverted-repeats that survive these filters are then filtered to retain only those with overlap to the original clusters, and the resulting set of eniverted-derived hairpins is merged with the RNALfold-derived set.
+4.  If an .inv file was provided, all inverted repeats in that file are parsed, and then filtered to also satisfy options --minfracpaired, --minntspaired, --maxLoopLength, amd --maxdGperStem.  In addition, loop lengths from einverted data are not allowed to be longer than 50% of the helix length of the putative hairpin.  Putative RNA secondary structures in dot-bracket notation are generated from the .inv alignment, not by actual RNA folding.  All G-U alignments are considered paired, in addition to the standard A-U and G-C pairings.  Both strands are used, subject to passing the --minfracpaired, --minntspaired, --maxLoopLength, amd --maxdGperStem criteria.  Inverted-repeats that survive these filters are then filtered to retain only those with overlap to the original clusters, and the resulting set of eniverted-derived hairpins is merged with the RNALfold-derived set.
 
 5.  Redundant hairpins are then removed.  Redundant hairpins are those whose 5' arms and 3' arms overlap.  In pairwise comparisons of redundant hairpins, the longest hairpin is retained.
 
-6.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window is often extended substantially around the cluster, there could be many putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 20nts within the original cluster coordinates.
+6.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window could have been extended around the cluster, there could be  putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 20nts within the original cluster coordinates.
 
-7. The pattern of small RNA expression relative to the remaining hairpins is then examined.  To examine the coverage pattern, the hairpin window (not the original cluster window) is first, temporarily, expanded to include an upstream flanking region equal in length to the 5' arm, and a downstream flanking region equal in length to the 3' arm.  The per-nucleotide depth of coverage is then determined across the extended region.  The sum of coverage on the sense strand (relative to the hairpin direction) within the two arms is divided by the total sum of coverage on both strands of the extended region.  This ratio must be >= to the fraction specififed in option --minfrachpdepth in order to pass this step.  In addition there must be at least some coverage on both arms of the hairpin to continue considering the hairpin.
+7. The pattern of small RNA expression relative to the remaining hairpins is then examined.  The per-nucleotide coverage across every base, on both strands separately, across the original locus coordinates is calculated.  If there is a single hairpin whose 5' and 3' arms contain >= [--minfrachpdepth] of the total coverage of the original locus, the hairpin is kept for futher analysis.  If more than one hairpin meets this criterion, than the one with the highest coverage fraction in the arms is retained.  Note that this step contains a correction for reads that are "dyads" .. reads that map twice to a hairpin, once in each arm, on opposite strands... this happens for perfect inverted repeat loci.  Such reads are counted towards the sense strand only for a given hairpin.
 
-8.  The per-nucleotide depth of coverage across the entire, original cluster is calculated.  The per-nucleotide coverage within the two arms of all of the child hairpins is also calculated, and summed for the entire suite of remaning candidate hairpins.  The coverage in the hairpin arms has to be at least minfrachpdepth in order to continue considering any of the hairpins.  This prevents inappropriate "splitting" of large initial clusters into a hairpin or hairpins that only account for a minor percentage of the original cluster.
+8. The pattern of small RNA expression relative to the single hairpin candidate is further scrutinized for polarity.  The fraction of all mappings in the hairpin interval must be >= [--minstrandfrac].  As in step 7, this step corrects for "dyad" reads (see above).  Hairpins that pass this step are either HP or MIRNA loci.  The coordinates of the originally determined de novo locus are discarded, and replaced with the hairpin coordinates.
 
-9.  Each potential hairpin that remains is next analyzed to see if it qualifies as a MIRNA.  MIRNA locus annotation is designed to satisfy the criteria for de novo annotation of plant MIRNAs as described in Meyers et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682.  In fact, ShortStack's criteria is a little stricter than Meyers et al., in that ShortStack has an absolute requirement for sequencing of the exact predicted miRNA* sequence for a candidate mature miRNA.  It is important to note that ShortStack's MIRNA annotation method is designed to reduce false positives at the expense of an increased rate of false negatives.  In other words, there are likely many bona fide MIRNA loci that end up being classified as Hairpins, instead of MIRNAs, because they don't quite meet the strict criteria set forth below.  
+9.  Each potential hairpin that remains is next analyzed to see if it qualifies as a MIRNA.  MIRNA locus annotation is designed to satisfy the criteria for de novo annotation of plant MIRNAs as described in Meyers et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682.  In fact, ShortStack's criteria is a little stricter than Meyers et al., in that ShortStack has an absolute requirement for sequencing of the exact predicted miRNA* sequence for a candidate mature miRNA.  It is important to note that ShortStack's MIRNA annotation method is designed to reduce false positives at the expense of an increased rate of false negatives.  In other words, there are likely many bona fide MIRNA loci that end up being classified as Hairpins, instead of MIRNAs, because they don't quite meet the strict criteria set forth below. 
+
+- Hairpin Size:  The total number of pairs in the hairpin must be <= [--maxmiRHPPairs]
 
 - Precision: There must be at least one candidate mature miRNA that comprises at least 20% of the total abundance of small RNAs mapped to the hairpin.  
 
-- Duplex:  Candidate mature miRNAs must contain no more than 4 unpaired nts (excepting the 2nts on the 3' end), and they must not span a loop (i.e., no base-pairs to themselves).  Additionally, the predicted miRNA*s of candidate mature miRNAs must contain no more than 4 unpaired nts (excepting the 2nts on the 3' end), and they must not span a loop (i.e., no base-pairs to themselves).  Predicted miRNA*'s are based on identifying the small RNA that would form a miR/miR* duplex with a canonical 2nt, 3' overhang.
+- Duplex:  Both partners in a candidate miRNA/miRNA* duplex must not span any loops (i.e. neither is allowed to have base-pairs to itself).  In addition, there must be <= [--maxmiRUnpaired] unpaired mature miRNA nts in the miRNA/miRNA* duplex, and <= [--maxmiRUnpaired] unpaired miRNA* nts in the miRNA/miRNA* duplex.
 
 - Star: The exact predicted miRNA*s of candidate miRNAs must have at least one mapped read, and the total abundance of any candidate mature miRNA/miRNA* pair must be at least 25% of the total small RNA abundance at the locus.  Finally, redundant candidate mature miRNAs are removed, as the steps above initially might classify a small RNA as both a miRNA* and mature miRNA.  In such cases, the partner with the higher abundance is called the miRNA, the other the miRNA*.
 
-10.  The strand bias of small RNA accumulation at each potential hairpin / MIRNA is then evaluated.  At least -- minstrandfrac of the abundance must be to the sense strand relative to the hairpin / MIRNA or it will be eliminated from consideration as a hairpin / MIRNA locus.  However, "dyads", formed by reads that map to both helix arms on opposite strands are ignored during this analysis of strandedness.  Perfectly base-paired hairpins will cause this mapping pattern, so this correction allows for the recovery of hairpins / MIRNAs where the helical region is extensively / completely paired.
-
-11.  Hairpin candidates that failed MIRNA analysis are then subject to increased scrutiny by increasing --minfrachpdepth to "half the distance" from the original --minfrachpdepth value to 1.  For instance, under the default --minfrachpdepth setting of 0.67, a non-MIRNA hairpin must be at least (0.5 * (1 - 0.67)) + 0.67 = 0.835.  Recall from step 7 that minfrachpdepth refers to the fraction of coverage residing on the helical region of the putative hairpin relative to the surrounding area and the loop.  Non-MIRNA haiprins that fail this increased stringency are rejected from further consideration as hairpins.
-
-12. Finally, step 8 is repeated again with the remaining set of potential MIRNAs / hairpins, again to prevent inappropriate splitting of large initial clusters into a hairpin(s)/MIRNA(s).  Survivors are then annotated as MIRNAs or HPs, as appropriate.  
-
-=head2 Hairpin analysis in --count mode
-
-In --count mode, hairpin analysis differs in that A) it does NOT fold an extended region around the unpadded input cluster and B) in case more than one valid hairpin is returned, no HP or MIRNA annotation will be reported, and C) if just a single valid HP or MIRNA is found, its length must be at least 90% of that of the full, originally input coordinates.  The upshot of this is that essentially the input cluster coordiantes have to be a single HP or MIRNA to get annotated as such in count mode -- there is no 'splitting' of larger clusters, even if there might be some valid ones embedded in there.
+Hairpin loci passing all four of these loci are annotated as MIRNAs.  Those failing one or more are reported as HP loci instead.
 
 =head2 Quantification of clusters
 
