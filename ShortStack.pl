@@ -6,17 +6,21 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.5.0";
+my $version_num = "1.0.0";
 
 
 ##### get options and validate them
 
 # usage statement and option gathering
-my $usage = usage($0,$version);
+my $usage = usage($version_num);
+
+# If user has no arguments, give help statement and quit
+unless($ARGV[0]) {
+    die "\n$usage\n";
+}
 
 # Initial option definition, inlcuding default settings
 my $outdir = '';
-my $reads = '';
 my $mindepth = 20;
 my $pad = 100;
 my $dicermin = 20;
@@ -30,7 +34,6 @@ my $mindicerfrac = 0.8;  ## lowered to 0.8 from 0.85 as of 0.4.0
 my $minUI = 0.1;  ## parameter added as of version 0.4.0 .. "minimum Uniqueness Index required to attempt RNA folding / hairpin analysis"
 my $count = '';
 my $nohp = 0;
-my $raw = '';
 my $phasesize = 21;
 my $inv_file = '';
 my $flag_file = "NULL";
@@ -40,9 +43,18 @@ my $miRType = "plant";  ## parameter added as of version 0.3.0
 my $maxdGperStem = -0.5;  ## parameter added as of version 0.3.0
 my $maxLoopLength = '';  ## parameter added as of version 0.3.0
 
+## New in 1.0.0
+my $untrimmedFA;
+my $untrimmedFQ;
+my $adapter;
+my $trimmedFA;
+my $trimmedFQ;
+my $help;
+my $version;
+my $bamfile;
+my $align_only;
 # get user options from command line
 GetOptions ('outdir=s' => \$outdir,
-	    'reads=i' => \$reads,
 	    'mindepth=i' => \$mindepth,
 	    'pad=i' => \$pad,
 	    'dicermin=i' => \$dicermin,
@@ -56,7 +68,6 @@ GetOptions ('outdir=s' => \$outdir,
 	    'minUI=f' => \$minUI,
 	    'count=s' => \$count,
 	    'nohp' => \$nohp,
-	    'raw' => \$raw,
 	    'phasesize=s' => \$phasesize,
 	    'inv_file=s' => \$inv_file,
 	    'flag_file=s' => \$flag_file,
@@ -64,91 +75,220 @@ GetOptions ('outdir=s' => \$outdir,
 	    'maxmiRUnpaired=i' => \$maxmiRUnpaired,
 	    'miRType=s' => \$miRType,
 	    'maxdGperStem=f' => \$maxdGperStem,
-	    'maxLoopLength=i' => \$maxLoopLength);
+	    'maxLoopLength=i' => \$maxLoopLength,
+	    'untrimmedFA=s' => \$untrimmedFA,
+	    'untrimmedFQ=s' => \$untrimmedFQ,
+	    'adapter=s' => \$adapter,
+	    'trimmedFA=s' => \$trimmedFA,
+	    'trimmedFQ=s' => \$trimmedFQ,
+	    'bamfile=s' => \$bamfile,
+	    'align_only' => \$align_only,
+	    'version' => \$version,
+	    'help' => \$help);
 
-# Validate the options
+# If help, print and quit
+if($help) {
+    my $long_help = full_help($version_num);
+    die "\n$long_help\n";
+}
+
+# If version, print version and quite
+if($version) {
+    die "ShortStack.pl version $version_num\n";
+}
+
 # default output directory is ShortStack_[time], where time is the number of non-leap seconds since 00:00:00 UCT Jan 1, 1970
 unless($outdir) {
     my $time = time;
     $outdir = "ShortStack" . "_$time";
 }
-
 # ensure the output directory does not already exist.  If it does, quit and complain
 # then create it or die tryin'
 if(-d $outdir) {
-    die "Fatal: Output directory $outdir already exists\n$usage\n";
+    die "FATAL: Output directory $outdir already exists\n$usage\n";
 } else {
     system "mkdir $outdir";
 }
 
 #designate a log file
-my $logfile = "$outdir" . "\/" . "Log\.txt";
+our $logfile = "$outdir" . "\/" . "Log\.txt";
+
+# log the outdir
+log_it($logfile, "ShortStack log file at $logfile\n\nBeginning initial checks");
+
+       
+# Determine the mode
+my $mode;
+# Mode 1: Trim, align, then analyze.
+# Expect either untrimmedFA or untrimmed FQ, but not both:
+if(($untrimmedFA) or ($untrimmedFQ)) {
+    # Should be mode 1. Ensure adapter specified and valid .. must be 8nts, ATCG
+    unless($adapter) {
+	log_it($logfile,"FATAL: Option --adapter must be specified in conjunction with untrimmed reads\n\n$usage\n");
+	exit;
+    }
+    unless($adapter =~ /^[ACTGactg]{8,}$/) {
+	log_it($logfile,"FATAL: Option --adapter must be a string of at least 8 ATGC characters .. case-insensitive\n\n$usage\n");
+	exit;
+    }
+    # Cant have both
+    if(($untrimmedFA) and ($untrimmedFQ)) {
+	log_it($logfile,"FATAL: Must specifiy either --untrimmedFA OR --untrimmedFQ, but not both\n\n$usage\n");
+	exit;
+    }
+    $mode = 1;
+
+    # Warn about irrelevant options
+    if($trimmedFA) {
+	log_it($logfile,"\nWARNING: in mode 1 option --trimmedFA is irrelvant. It is being ignored\n");
+    }
+    if($trimmedFQ) {
+	log_it($logfile,"\nWARNING: in mode 1 option --trimmedFQ is irrelvant. It is being ignored\n");
+    }
+    if($bamfile) {
+	log_it($logfile,"\nWARNING: in mode 1 option --bamfile is irrelvant. It is being ignored\n");
+    }
+} elsif (($trimmedFA) or ($trimmedFQ)) {
+    # Should be mode 2. 
+    # Cant have both
+    if(($trimmedFA) and ($trimmedFQ)) {
+	log_it($logfile,"FATAL: Must specify either --trimmedFA OR --trimmedFQ for mode 2, but not both\n\n$usage\n");
+	exit;
+    }
+    $mode = 2;
+
+    # Warn about irrelevant options --adapter and --bamfile
+    if($adapter) {
+	log_it($logfile,"\nWARNING: in mode 2 option --adapter is irrelevant. It is being ignored\n");
+    }
+    if($bamfile) {
+	log_it($logfile,"\nWARNING: in mode 2 option --bamfile is ireelevent. It is being ignored\n");
+    }
+} elsif ($bamfile) {
+    # mode 3. 
+    $mode = 3;
+
+    # Warn about irrelevant option --adapter
+    if($adapter) {
+	log_it($logfile,"\nWARNING: in mode 2 option --adapter is irrelevant. It is being ignored\n");
+    }
+} else {
+    log_it($logfile,"\nFATAL: Could not determine mode, aborting\n");
+    exit;
+}
+
+## Check dependencies
+
+# check for required installation of samtools and get version, or quit and complain
+my ($samtools_version,$full_samtools_test_text) = get_samtools_version();
+if($samtools_version eq "not found") {
+    log_it($logfile, "\nFATAL: samtools not found\n\n");
+    exit;
+}
+
+# check for required installation of RNALfold, get version
+my $RNALfold_check = check_RNALfold();
+unless($RNALfold_check) {
+    log_it($logfile, "\nFATAL: RNALfold not found\n\n");
+    exit;
+}
+
+# check for required installation of RNAeval, get version
+my $RNAeval_check = check_RNAeval();
+unless($RNAeval_check) {
+    log_it($logfile, "\nFATAL: RNAeval not found\n\n");
+    exit;
+}
+
+# If modes one or two, check for required bowtie version 1.x or 0.12.x and bowtie-build same
+my $bowtie_check;
+my $bowtie_build_check;
+if(($mode == 1) or ($mode == 2)) {
+    $bowtie_check = check_bowtie();
+    unless(($bowtie_check =~ /^0\.12/) or ($bowtie_check =~ /^1\./)) {
+	log_it($logfile, "\nFATAL: bowtie version 1.x or 0.12.x not found\n\n");
+	exit;
+    }
+    $bowtie_build_check = check_bowtie_build();
+    unless(($bowtie_build_check =~ /^0\.12/) or ($bowtie_build_check =~ /^1\./)) {
+	log_it($logfile, "\nFATAL: bowtie version 1.x or 0.12.x not found\n\n");
+	exit;
+    }
+}
+
+# Validate the options
 
 unless(($mindepth > 0) and
        ($mindepth < 1000000)) {
-    die "FATAL: mindepth must be more than zero and less than one million\n\n$usage\n";
-}
-
-# Warn if mindepth is greater than 8000
-if($mindepth > 8000) {
-    print STDERR "\nWARNING: Setting mindepth to be more than 8000 might cause ShortStack to become a memory hog\!\n";
-    print STDERR "\tConsider aborting and setting mindepth lower\n";
+    log_it($logfile,"FATAL: mindepth must be more than zero and less than one million\n\n$usage\n");
+    exit;
 }
 
 # ensure that option --pad is present and logical -- 0 >= x < 100,000
 unless(($pad >= 0) and ($pad <= 100000)) {
-    die "Option --pad must be a number greater than or equal to zero and less than one hundred thousand\n\n$usage\n";
+    log_it($logfile,"FATAL: Option --pad must be a number greater than or equal to zero and less than one hundred thousand\n\n$usage\n");
+    exit;
 }
 
 # ensure that option --dicermin is present and logical -- 15 >= x <= 35, and less than or equal to dicermax
 unless(($dicermin >= 15) and ($dicermin <= 35) and ($dicermin <= $dicermax)) {
-    die "Option --dicermin must be a number between 15 and 35, and less than or equal to option --dicermax\n\n$usage\n";
+    log_it($logfile, "FATAL: Option --dicermin must be a number between 15 and 35, and less than or equal to option --dicermax\n\n$usage\n");
+    exit;
 }
 
 # ensure that option --dicermax is present and logical -- 15 >= x <= 35, and more than or equal to dicermin
 unless(($dicermax >= 15) and ($dicermax <= 35) and ($dicermin <= $dicermax)) {
-    die "Option --dicermax must be a number between 15 and 35, and more than or equal to option --dicermin\n\n$usage\n";
+    log_it($logfile,"FATAL: Option --dicermax must be a number between 15 and 35, and more than or equal to option --dicermin\n\n$usage\n");
+    exit;
 }
 
 # ensure that option --maxhpsep is present and logical -- 50 >= x <= 2000
 unless(($maxhpsep >= 50) and ($maxhpsep <= 2000)) {
-    die "Option --maxhpsep must be a number between 50 and 2000\n\n$usage\n";
+    log_it($logfile, "FATAL: Option --maxhpsep must be a number between 50 and 2000\n\n$usage\n");
+    exit;
 }
 
 # ensure that option --minfracpaired is present and logical -- 0 > x <= 1
 unless(($minfracpaired > 0) and ($minfracpaired <= 1)) {
-    die "Option --minfracpaired must be a number greater than zero and less than or equal to one\n\n$usage\n";
+    log_it($logfile, "FATAL: Option --minfracpaired must be a number greater than zero and less than or equal to one\n\n$usage\n");
+    exit;
 }
 
 # ensure that option --minntspaired is present and logical -- 0 > x <= --maxhpsep
 unless(($minntspaired > 0) and ($minntspaired <= $maxhpsep)) {
-    die "Option --minntspaired must be number greater than zero and less than or equal to option --maxhpsep\n\n$usage\n";
+    log_it($logfile,"FATAL: Option --minntspaired must be number greater than zero and less than or equal to option --maxhpsep\n\n$usage\n");
+    exit;
 }
 
 # ensure that option --minfrachpdepth is present and logical -- 0 >= x <= 1
 unless(($minfrachpdepth >= 0) and ($minfrachpdepth <= 1)) {
-    die "Option --minfrachpdepth must be a number greater than or equal to zero and less than or equal to one\n\n$usage\n";
+    log_it($logfile, "FATAL: Option --minfrachpdepth must be a number greater than or equal to zero and less than or equal to one\n\n$usage\n");
+    exit;
 }
 
 # ensure that option --minstrandfrac is present and logical -- 0.5 >= x <= 1
 unless(($minstrandfrac >= 0.5) and ($minstrandfrac <= 1)) {
-    die "Option --minstrandfrac must be number greater than or equal to 0.5 and less than or equal to one\n\n$usage\n";
+    log_it($logfile, "FATAL: Option --minstrandfrac must be number greater than or equal to 0.5 and less than or equal to one\n\n$usage\n");
+    exit;
 }
 
 # ensure that option --mindicerfrac is present and logical -- 0 >= x <= 1
 unless(($mindicerfrac >= 0) and ($mindicerfrac <= 1)) {
-    die "Option -mindicerfrac must be number greater than or equal to 0 and less than or equal to one\n$usage\n";
+    log_it($logfile, "FATAL: Option -mindicerfrac must be number greater than or equal to 0 and less than or equal to one\n$usage\n");
+    exit;
 }
 
 # ensure that option --minUI is present and between 0 and 1
 unless(($minUI >= 0) and ($minUI <= 1)) {
-    die "Option --minUI must be a number between 0 and 1\n$usage\n";
+    log_it($logfile, "FATAL: Option --minUI must be a number between 0 and 1\n$usage\n");
+    exit;
 }
 
 # if the --count option was provided, make sure the indicated file can be read
 if($count) {
     unless(-r $count) {
-	die "FATAL: Option --count : File $count could not be read\n\n$usage\n";
+	log_it($logfile, "FATAL: Option --count : File $count could not be read\n\n$usage\n");
+	exit;
     }
     # As of version 0.3.0, count mode also forces nohp mode
     $nohp = 1;
@@ -158,18 +298,21 @@ if($count) {
 if($phasesize =~ /^\d+$/) {
     unless(($phasesize >= $dicermin) and
 	   ($phasesize <= $dicermax)) {
-	die "FATAL: Option --phasesize must be an integer within the --dicermin to --dicermax size range OR \'all\'\n\n$usage\n";
+	log_it($logfile, "FATAL: Option --phasesize must be an integer within the --dicermin to --dicermax size range OR \'all\'\n\n$usage\n");
+	exit;
     }
 } else {
     unless(($phasesize eq "all") or
 	   ($phasesize eq "none")) {
-	die "FATAL: Option --phasesize must be an integer within the --dicermin to --dicermax size range OR \'all\' OR \'none\'\n\n$usage\n";
+	log_it($logfile, "FATAL: Option --phasesize must be an integer within the --dicermin to --dicermax size range OR \'all\' OR \'none\'\n\n$usage\n");
+	exit;
     }
 }
 
 # parse the mirType and the associated settings
 unless(($miRType eq "plant") or ($miRType eq "animal")) {
-    die "FATAL: Option --miRType $miRType is invalid\.  Must be either \'plant\' , \'animal\', or unspecified \(unspecified defaults to \'plant\'\)\n\n$usage\n";
+    log_it($logfile, "FATAL: Option --miRType $miRType is invalid\.  Must be either \'plant\' , \'animal\', or unspecified \(unspecified defaults to \'plant\'\)\n\n$usage\n");
+    exit;
 }
 my $maxmiRHPPairs_override = 0;
 my $maxmiRUnpaired_override = 0;
@@ -202,41 +345,13 @@ if($maxLoopLength) {
     $maxLoopLength = 15;
 }
 
-
 ###############
-# check the two required, ordered files from the end of the command line array
+# check that the genome file is at the end of @ARGV
 my $genome = pop @ARGV;
 unless(-r $genome) {
-    die "genome file $genome is not readable\n\nFATAL\n$usage\n";
+    log_it($logfile, "FATAL: genome file $genome is not readable\n\nFATAL\n$usage\n");
+    exit;
 }
-
-# ensure bam file is readable
-my $bamfile = pop @ARGV;
-unless(-r $bamfile) {
-    die "bamfile $bamfile not readable\.\n$usage\n";
-}
-#############
-
-# check for required installation of samtools and get version, or quit and complain
-my ($samtools_version,$full_samtools_test_text) = get_samtools_version();
-if($samtools_version eq "not found") {
-    die "samtools not found\n$full_samtools_test_text\n\n$usage\n";
-}
-
-###########
-# Run some checks on the provided bamfile.  
-# First, look at just the first non-header line to make sure that the NH:i: tag is present
-my($nh) = check_nh($bamfile);
-unless($nh) {
-    die "FATAL: The provided \.bam file does not appear to contain the NH:i tag, indicating number of mappings for each read\. $0 $version requires the NH:i: tag\n\n$usage\n";
-}
-
-# Then, check for presence of the .bai index file
-my $expected_index = "$bamfile" . "\.bai";
-unless(-e $expected_index) {
-    die "FATAL: The provided \.bam file does not appear to have been indexed -- I could not find the expected index file $expected_index\nUse samtools to sort the data by chromosomal location, and then index the file, before using this program\n\n$usage\n";
-}
-
 
 #########
 # Check for the existence of the einverted .inv file
@@ -244,7 +359,8 @@ unless(-e $expected_index) {
 # If a string is provided but no file is readble, quit and complain
 if($inv_file) {
     unless(-r $inv_file) {
-	die "FATAL: The provided \.inv file $inv_file from user option --inv_file could not be read\n$usage\n";
+	log_it($logfile,"FATAL: The provided \.inv file $inv_file from user option --inv_file could not be read\n$usage\n");
+	exit;
     }
     # if the run is in 'nohp' mode, than this file is irrelevant, so warn the user about that
     if($nohp) {
@@ -260,87 +376,106 @@ if($inv_file) {
 # See if the user provided a flag_file, and if so, make sure it is readable
 if($flag_file ne "NULL") {
     unless(-r $flag_file) {
-	die "FATAL: The provided flag file $flag_file from user option --flag_file could not be read\n$usage\n";
+	log_it($logfile, "FATAL: The provided flag file $flag_file from user option --flag_file could not be read\n$usage\n");
+	exit;
     }
 }
 ##
 
-
-
 ##### Report to user on initialization of the run
-log_it ($logfile,"\n$0 $version\n");
+log_it ($logfile,"\n$0 $version_num\n");
 log_it ($logfile,`date`);
-log_it ($logfile,"samtools $samtools_version");
-log_it ($logfile,"Mapped small RNAs: $bamfile\n");
 log_it ($logfile,"Genome: $genome\n");
 log_it ($logfile,"Output Directory: $outdir\n");
-unless($nohp) {
-    log_it ($logfile,"einverted \.inv file of Inverted Repeats:");
-    if(-r $inv_file) {
-	log_it ($logfile," $inv_file\n");
+log_it ($logfile,"samtools $samtools_version");
+log_it ($logfile,"RNALfold $RNALfold_check\n");
+log_it ($logfile,"RNAeval $RNAeval_check\n");
+if(($mode == 1) or ($mode == 2)) {
+    log_it ($logfile,"bowtie version $bowtie_check\n");
+    log_it ($logfile,"bowtie-build version $bowtie_build_check\n");
+}
+log_it($logfile,"Pre-analysis mode: $mode ");
+if($mode == 1) {
+    log_it($logfile,": Trim reads, then align trimmed reads, \n\tUntrimmed Reads: ");
+    if($untrimmedFA) {
+	log_it($logfile,"$untrimmedFA\n");
     } else {
-	log_it ($logfile," NOT PROVIDED, hairpins from RNALfold only\n");
+	log_it($logfile,"$untrimmedFQ\n");
+    }
+    log_it($logfile, "\tAdapter: $adapter\n");
+} elsif ($mode == 2) {
+    log_it($logfile,"Align pre-trimmed reads\n\tTrimmed Reads: ");
+    if($trimmedFA) {
+	log_it($logfile,"$trimmedFA\n");
+    } else {
+	log_it($logfile,"$trimmedFQ\n");
+    }
+} elsif ($mode == 3) {
+    log_it($logfile,"Analyze pre-existing BAM alignment\n\tAlignments: $bamfile\n");
+    if($align_only) {
+	log_it($logfile,"\nWARNING: option --align_only is irrelevant if you provide a bamfile. It is being ignored and analysis is proceeding\n");
     }
 }
-log_it ($logfile,"Flag file of loci to report if overlapped: ");
-if($flag_file ne "NULL") {
-    log_it ($logfile,"$flag_file\n");
+
+if($align_only) {
+    log_it($logfile, "\nAlign-only mode: Trimmed reads will be aligned but no analysis will be performed.\n");
 } else {
-    log_it ($logfile,"Not Provided\n");
-}
-log_it ($logfile,"Number of mapped reads in $bamfile:");
-if($reads) {
-    log_it ($logfile," User Provided: $reads\n");
-} else {
-    log_it ($logfile," Not provided: Forcing run in --raw mode\n");
-    $raw = 1;
-}
-log_it ($logfile,"Clusters:");
-if($count) {
-    log_it ($logfile," Running in \"count\" mode\. User provided clusters from file $count\n");
-} else {
-    log_it ($logfile," To be calculated de novo\n");
-    log_it ($logfile,"Island threshold: $mindepth mappings\n");
-    log_it ($logfile,"Padding around initial islands: $pad nts\n");
-}
-log_it ($logfile,"Dicer size range: $dicermin to $dicermax\n");
-if($nohp) {
-    log_it ($logfile,"Running in \"nohp\" mode: Hairpins and MIRNAs will not be inferred\n");
-} else {
-    log_it ($logfile,"Minimum uniqueness index required to attempt RNA folding during hairpin preduction: $minUI\n");
-    log_it ($logfile,"Maximum allowed separation of a base pair to span during hairpin prediction: $maxhpsep\n");
-    log_it ($logfile,"Minimum fraction of paired nts allowable in a valid hairpin structure: $minfracpaired\n");
-    log_it ($logfile,"Minimum number of base pairs within a valid hairpin structure: $minntspaired\n");
-    log_it ($logfile,"Maximum deltaG per stem length for a valid hairpin structure: $maxdGperStem\n");
-    log_it ($logfile,"Minimum fraction of coverage in hairpin helix to keep hairpin: $minfrachpdepth\n");
-    log_it ($logfile,"microRNA type: $miRType\n");
-    log_it ($logfile,"\tMaximum number of base pairs in hairpin for MIRNAs: $maxmiRHPPairs");
-    if($maxmiRHPPairs_override) {
-	log_it ($logfile," Overrides normal setting for type $miRType\n");
-    } else {
-	log_it ($logfile,"\n");
+    unless($nohp) {
+	log_it ($logfile,"einverted \.inv file of Inverted Repeats:");
+	if(-r $inv_file) {
+	    log_it ($logfile," $inv_file\n");
+	} else {
+	    log_it ($logfile," NOT PROVIDED, hairpins from RNALfold only\n");
+	}
     }
-    log_it ($logfile,"\tMaximum number of unpaired miRNA nts in miR/miR\* duplex: $maxmiRUnpaired");
-    if($maxmiRUnpaired_override) {
-	log_it ($logfile," Overrides normal setting for type $miRType\n");
+    log_it ($logfile,"Flag file of loci to report if overlapped: ");
+    if($flag_file ne "NULL") {
+	log_it ($logfile,"$flag_file\n");
     } else {
-	log_it ($logfile,"\n");
+	log_it ($logfile,"Not Provided\n");
     }
-    log_it ($logfile,"\tMaximum loop size for miRNA or other hpRNA loci: $maxLoopLength");
-    if($maxLoopLength_override) {
-	log_it ($logfile," Overrides normal setting for type $miRType\n");
+    
+    log_it ($logfile,"Clusters:");
+    if($count) {
+	log_it ($logfile," Running in \"count\" mode\. User provided clusters from file $count\n");
     } else {
-	log_it ($logfile,"\n");
+	log_it ($logfile," To be calculated de novo\n");
+	log_it ($logfile,"Island threshold: $mindepth mappings\n");
+	log_it ($logfile,"Padding around initial islands: $pad nts\n");
     }
-}
-log_it ($logfile,"Minimum fraction of mappings to assign a polarity to a non-hairpin cluster: $minstrandfrac\n");
-log_it ($logfile,"Minimum fraction of mappings within the Dicer size range to annotate a locus as Dicer-derived: $mindicerfrac\n");
-log_it ($logfile,"Cluster type to analyze for phasing: $phasesize\n");
-log_it ($logfile,"Reporting units: ");
-if($raw) {
-    log_it ($logfile,"Raw mappings\n\n");
-} else {
-    log_it ($logfile,"Mappings per million mapped\n\n");
+    log_it ($logfile,"Dicer size range: $dicermin to $dicermax\n");
+    if($nohp) {
+	log_it ($logfile,"Running in \"nohp\" mode: Hairpins and MIRNAs will not be inferred\n");
+    } else {
+	log_it ($logfile,"Minimum uniqueness index required to attempt RNA folding during hairpin preduction: $minUI\n");
+	log_it ($logfile,"Maximum allowed separation of a base pair to span during hairpin prediction: $maxhpsep\n");
+	log_it ($logfile,"Minimum fraction of paired nts allowable in a valid hairpin structure: $minfracpaired\n");
+	log_it ($logfile,"Minimum number of base pairs within a valid hairpin structure: $minntspaired\n");
+	log_it ($logfile,"Maximum deltaG per stem length for a valid hairpin structure: $maxdGperStem\n");
+	log_it ($logfile,"Minimum fraction of coverage in hairpin helix to keep hairpin: $minfrachpdepth\n");
+	log_it ($logfile,"microRNA type: $miRType\n");
+	log_it ($logfile,"\tMaximum number of base pairs in hairpin for MIRNAs: $maxmiRHPPairs");
+	if($maxmiRHPPairs_override) {
+	    log_it ($logfile," Overrides normal setting for type $miRType\n");
+	} else {
+	    log_it ($logfile,"\n");
+	}
+	log_it ($logfile,"\tMaximum number of unpaired miRNA nts in miR/miR\* duplex: $maxmiRUnpaired");
+	if($maxmiRUnpaired_override) {
+	    log_it ($logfile," Overrides normal setting for type $miRType\n");
+	} else {
+	    log_it ($logfile,"\n");
+	}
+	log_it ($logfile,"\tMaximum loop size for miRNA or other hpRNA loci: $maxLoopLength");
+	if($maxLoopLength_override) {
+	    log_it ($logfile," Overrides normal setting for type $miRType\n");
+	} else {
+	    log_it ($logfile,"\n");
+	}
+    }
+    log_it ($logfile,"Minimum fraction of mappings to assign a polarity to a non-hairpin cluster: $minstrandfrac\n");
+    log_it ($logfile,"Minimum fraction of mappings within the Dicer size range to annotate a locus as Dicer-derived: $mindicerfrac\n");
+    log_it ($logfile,"Cluster type to analyze for phasing: $phasesize\n");
 }
 
 # Next, check for the presence of .fai index file corresponding to the genome.  If not found, create one with samtools
@@ -351,6 +486,56 @@ unless(-e $expected_faidx) {
     log_it ($logfile," done\n\n");
 }
 
+
+##############################################
+# pre-analysis
+
+if($mode == 1) {
+    if($untrimmedFA) {
+	$trimmedFA = trim_FA($untrimmedFA,$adapter);
+    } elsif ($untrimmedFQ) {
+	$trimmedFQ = trim_FQ($untrimmedFQ,$adapter);
+    } else {
+	log_it($logfile,"FATAL: mode 1 but neither --untrimmedFA nor --untrimmedFQ found\?\n\n");
+	exit;
+    }
+}
+
+if(($mode == 1) or ($mode == 2)) {
+    my $filetype;
+    my $to_align_file;
+    if($trimmedFA) {
+	$filetype = "a";
+	$to_align_file = $trimmedFA;
+    } elsif ($trimmedFQ) {
+	$filetype = "q";
+	$to_align_file = $trimmedFQ;
+    } else {
+	log_it($logfile,"\nFATAL: Failed to ID filetype between fastq or fasta for some reason\n\n");
+	exit;
+    }
+    $bamfile = perform_alignment($to_align_file,$genome,$filetype);
+    unless(-r $bamfile) {
+	log_it($logfile,"\nFATAL: Failed to read bamfile $bamfile after sub-routine perform_alignment\n");
+	exit;
+    }
+    log_it($logfile,`date`);
+    log_it($logfile,"Alignments completed: See file $bamfile\n");
+    if($align_only) {
+	log_it($logfile,"\nRun was in --align_only mode .. terminating.\n");
+	exit;
+    }
+}
+
+################################################
+# bam file validation
+my $n_mapped = validate_bam($bamfile,$expected_faidx);
+unless($n_mapped) {
+    log_it($logfile,"\nBAM file validation failed. Aborting run.\n");
+    exit;
+}
+
+log_it($logfile,"\nTotal aligned reads in $bamfile : $n_mapped\n\n");
 ###############################################
 
 ##### Phase One: Identify Clusters
@@ -366,9 +551,9 @@ if($count) {
 } else {
     log_it ($logfile," de novo\n");
 
-    my @first_clusters = get_islands_mpileup($bamfile,$mindepth,$expected_faidx);
+    my @islands = get_islands($bamfile,$mindepth,$expected_faidx);
     
-    @clusters = merge_clusters(\@first_clusters,\$pad,\$genome);
+    @clusters = merge_clusters(\@islands,\$pad,\$genome);
     %names = get_names_simple(\@clusters);
 }
 
@@ -395,7 +580,7 @@ my %quant_master = quant(\@clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandf
 #[3] : frac_Watson
 #[4] : total
 #[5] : unique
-#[6] : rep_total
+#[6] : uniqueness_index
 #[7] : dicer_call
 #[8] : phase_offset
 #[9] : phase_pval
@@ -414,7 +599,7 @@ my %quant_master = quant(\@clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandf
 #[4] : frac_Watson
 #[5] : total
 #[6] : unique
-#[7] : rep_total
+#[7] : uniqueness_index
 #[8] : dicer_call
 #[9] : phase_offset
 #[10] : phase_pval
@@ -528,7 +713,7 @@ if($nohp) {
 
     ## NEW NEW NEW NEW
     log_it ($logfile,"\tFinal filtering of hairpins, and annotation of miRNA and hpRNA loci\.\.\.");
-    %final_hps = final_hp(\%filtered_hps,\$genome,\$bamfile,\$reads,\$minstrandfrac,\$maxmiRHPPairs,\$maxmiRUnpaired);
+    %final_hps = final_hp(\%filtered_hps,\$genome,\$bamfile,\$minstrandfrac,\$maxmiRHPPairs,\$maxmiRUnpaired);
     log_it ($logfile," Done\n");
 	   
     ## structure like %filtered_hps, but expanded:
@@ -596,11 +781,12 @@ if($nohp) {
 
 my %quant_3 = ();
 # unless --raw was chosen, convert the raw values to mappings per million mapped
-if($raw) {
-    %quant_3 = %quant_2;
-} else {
-    %quant_3 = convert_2_mpmm(\%quant_2,\$reads);
-}
+# OBSOLETED everything is "RAW" now.
+#if($raw) {
+%quant_3 = %quant_2;
+#} else {
+#    %quant_3 = convert_2_mpmm(\%quant_2,\$reads);
+#}
 log_it ($logfile,"\n\n");
 
 ## Assess overlap with flag_file loci, if any
@@ -620,7 +806,7 @@ unless($flag_file eq "NULL") {
 #[5] : frac_Watson
 #[6] : total
 #[7] : unique
-#[8] : rep_total
+#[8] : uniqueness_index
 #[9] : dicer_call
 #[10] : phase_offset
 #[11] : phase_pval
@@ -638,23 +824,16 @@ unless($flag_file eq "NULL") {
 #[22 -- end] : dicer size mappings
 
 
-# output a .bed file
-# need difft. methods if hairpins/MIRNAs are included
+# output two gff3 files .. one for DCL and the other for NON-DCL loci.
+my ($dcl_file,$nfile) = write_gff3s(\@final_clusters,\%quant_4,\$outdir);
 
-my $bed_text_for_log;
-if($nohp) {
-    $bed_text_for_log = write_bed_nohp(\@final_clusters,\%quant_4,\$outdir,\$dicermin,\$dicermax,\%names);
-} else {
-    $bed_text_for_log = write_bed_with_hp(\@final_clusters,\%quant_4,\$outdir,\$dicermin,\$dicermax,\%names,\%final_hps);
-}
-
-# write rgb information to log
-log_it ($logfile,"\n$bed_text_for_log\n");
+# write gff3 file information to log
+log_it ($logfile,"\nGFF3 files are $dcl_file and $nfile\n");
 
 # output the master file
 my $big_table = "$outdir" . "\/" . "Results\.txt";
 open(BIG, ">$big_table");
-print BIG "\#Locus\tName\tFlagOverlap\tHP\tStrand\tFrac_Watson\tTotal\tUniques\tRep-total\tDicerCall\tPhaseOffset\tPhase_pval\t";
+print BIG "\#Locus\tName\tFlagOverlap\tHP\tStrand\tFrac_Watson\tTotal\tUniques\tUI\tDicerCall\tPhaseOffset\tPhase_pval\t";
 print BIG "Pairs\tFracPaired\tStemLength\tLoopLength\tdGperStem\tFracCovHP\tHPSizeResult\tPrecisionResult\tDuplexResult\tStarResult\tShort\tLong";
 for(my $d = $dicermin; $d <= $dicermax; ++$d) {
     print BIG "\t$d";
@@ -675,23 +854,6 @@ log_it ($logfile, `date`);
 
 
 ############### SUB ROUTINE BLOCKS
-sub check_nh {
-    my($bamfile) = @_;
-    my $result = 0;
-    open(SAM, "samtools view $bamfile |");
-    while (<SAM>) {
-	if($_ =~ /^@/) {
-	    next;
-	} else {
-	    if($_ =~ /\tNH:i:\d+/) {
-		$result = 1;
-	    }
-	    last;
-	}
-    }
-    close SAM;
-    return $result;
-}    
 	
 sub get_samtools_version {
     my $version = "not found";
@@ -709,37 +871,101 @@ sub get_samtools_version {
 }
 
 sub usage {
-    my($name,$version) = @_;
-    my $usage = "\n$name $version
-USAGE: $name \[options\] bam_file genome_file
-OPTIONS:
---outdir [string] : name for output directory that ShortStack will create\.  Defaults to \"ShortStack_\[unix-time\]\" if not provided\.
---reads [float] : number of mapped reads in bam_file\.  If not provided, ShortStack will force the analysis into \'raw\' mode, and no reads-per-million adjustments will be made\.
---inv_file [string] : path to .inv file from einverted analysis of the genome_file in question\.  If not provided, warning is issued but analysis proceeds\.
---flag_file [string] : path to file containing a list of loci to assess for overlap with small RNA loci\.  Optional\.
---mindepth [integer] : threshold for calling islands \(must be at least 2  and less than 1 million\; default: 20\)
---pad [integer] : Number of nucleotides upstream and downstrem to extend initial islands during cluster definition\; default: 100
---dicermin [integer] : smallest size of the Dicer-derived small RNAs \(must be between 15-35 and less than or equal to option --dicermax\; default: 20\)
---dicermax [integer] : largest size of the Dicer-derived small RNAs \(must be between 15-35 and more than or equal to option --dicermin\; default: 24\)
---minUI [float] : Minimum uniqueness index required to attempt RNA folding\. Uniqueness index is defined as repeat-normalized abundance / total abundance\; default: 0.1
---maxhpsep [integer] : maximum allowed separation of a base pair to span during hairpin prediction \(option -L for RNALfold\; must be between 50 and 2000\;default: 300\)
---minfracpaired [float] : minimum fraction of paired nts allowable in a hairpin structure\; default: 0.67
---minntspaired [integer] : minimum number of base-pairs in an accetable hairpin structure\; default: 15
---minfrachpdepth [float] : minimum fraction of coverage in hairpin helix to keep hairpin\; default: 0.67
---maxdGperStem [float] : maximum (deltaG/stem length) value for a valid hairpin\; stem length is 0.5 \* \(left stem + right stem\)\; default: -0.5
---maxLoopLength [integer] : maximum allowed loop length for a valid hairpin\; default: set by --miRType \'plant\' to be essentially unlimited \(100,000\)\.  --miRType \'animal\' sets it to 15\.
---miRType [string] : Either 'plant' or 'animal'.  Sets maxmiRHPPairs, maxLoopLength, and maxmiRUnpaired to values specific to either kingdom\; default: \'plant\'
---maxmiRHPPairs [integer] : Maximum number of base pairs in a MIRNA\. \; default: set by --miRType \'plant\' to 150\.  --miRType \'animal\' sets to 45 instead
---maxmiRUnpaired [integer] : Maximum number of unpaired miRNA nts in a miRNA/miRNA\* duplex\; default: set by --miRType \'plant\' to 5\.  --miRType \'animal\' instead sets it to 6
---minstrandfrac [float] : minimum fraction of mappings to assign a polarity to a non-hairpin cluster\; default: 0.8
---mindicerfrac [float] : minimum fraction of mappings within the dicer size range to annotate a locus as Dicer-derived\; default: 0.8
---count [string] : File containing a-priori defined clusters\.  Presence of --count triggers \"count\" mode, and de-novo cluster discovery is skipped\. Count mode also forces nohp mode\. Default: off
---phasesize [string or integer] : Cluster type to examine for significant phasing\.  Must be within the --dicermin to --dicermax range, or \'all\' to look at all dicer clusters, or \'none\' to skip all phasing analyses\. Default: 21
---nohp : If --nohp appears on the command line, program executes in \"no_hp\" mode, omitting hairpin and MIRNA inferences\.  Default: off
---raw : If --raw appears on the command line, program reports quantifications in raw mappings, instead of normalizing for library size to mappings per million mapped\. Default: Off
+    my($version) = @_;
+    my $usage = "\nShortStack.pl version $version
 
+USAGE: ShortStack.pl \[options\] genome.fasta
+
+MODES:
+1. Trim, align, and analyze: Requires --untrimmedFA OR --untrimmedFQ. Also requires --adapter. To stop after alignments, specify --align_only
+2. Align, and analyze: Requires --trimmedFA OR --trimmedFQ. To stop after alignments, specify --align_only
+3. Analyze: Requires --bamfile
+
+Type \'ShortStack.pl --help\' for full list of options
+
+DOCUMENTATION: type \'perldoc ShortStack.pl\'
 ";
     return $usage;
+}
+
+sub full_help {
+    my($version) = @_;
+    my $message = "\nShortStack.pl version $version
+
+USAGE: ShortStack.pl \[options\] genome.fasta
+
+MODES:
+1. Trim, align, and analyze: Requires --untrimmedFA OR --untrimmedFQ. Also requires --adapter. To stop after alignments, specify --align_only
+2. Align, and analyze: Requires --trimmedFA OR --trimmedFQ. To stop after alignments, specify --align_only
+3. Analyze: Requires --bamfile
+
+DOCUMENTATION: type \'perldoc ShortStack.pl\'
+
+OPTIONS:
+--help : Print a help message and then quit.
+
+--version : Print the version number and then quit.
+
+--outdir [string] : Name of directory to be created to receive results of the run.  Deafults to \"ShortStack_[time]\", where time is \"UNIX time\" (the number of non-leap seconds since Jan 1, 1970 UCT), if not provided
+
+--untrimmedFA [string] : Path to untrimmed small RNA-seq data in FASTA format.
+
+--untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ format.
+
+--adapter [string] : Sequence of 3' adapter to search for during adapter trimming. Must be at least 8 nts in length, and all ATGC characters. Required if either --untrimmedFA or --untrimmedFQ are specified.
+
+--trimmedFA [string] : Path to trimmed and ready to map small RNA-seq data in FASTA format.
+
+--trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq data in FASTQ format.
+
+--align_only : Exits program after completion of small RNA-seq data alignment, creating BAM file.
+
+--bamfile [string] : Path to properly formatted and sorted BAM alignment file of small RNA-seq data.
+
+--inv_file [string] : PATH to an einverted-produced .inv file of inverted repeats within the genome of interest.  Not required but strongly suggested for more complete annotations of hairpin-derived small RNA genes.  Default = {blank}.  Not needed for runs in \"nohp\" mode or runs in \"count\" mode (because \"count\" mode forces \"nohp\" mode as well).  A typical eniverted run uses default parameters except \"-maxrepeat 10000\", in order to capture long IRs.
+
+--flag_file [string] : PATH to a simple file of genomic loci of interest.  The ShortStack-analyzed small RNA clusters will be analyzed for overlap with the loci in the flag_file .. if there is any overlap (as little as one nt), it will be reported.  Format for this file is describe below.
+
+--mindepth [integer] : Minimum depth of mapping coverage to define an 'island'.  Default = 20.  Must be at least 2, more than 5 preferred.
+
+--pad [integer] : Number of nucleotides upstream and downstream to extend initial islands during cluster definition.  Default = 100
+
+--dicermin [integer] : Smallest size in the Dicer size range (or size range of interest).  Deafult = 20.  Must be between 15 and 35, and less than or equal to --dicermax
+
+--dicermax [integer] : Largest size in the Dicer size range (or size range of interest).  Deafult = 24.  Must be between 15 and 35, and more than or equal to --dicermin
+
+--minUI [float] : Minimum uniqueness index required to attempt RNA folding.  Must be a value between 0 and 1.  Zero forces all clusters to be folded; default: 0.1
+
+--maxhpsep [integer] : Maximum allowed span for a base-pair during hairpin search with RNALfold; Also serves as the maximum size of genomic query to fold with RNALfold .. loci whose unpadded size is more than --maxhpsep will not be analyzed at all with RNALfold.  Default = 300.  Must be between 50 and 2000.
+
+--minfracpaired [float] : Minimum fraction of paired nucleotides required within a valid hairpin structure.  Default = 0.67.  Allowed values are greater than 0 and less than or equal to 1.
+
+--minntspaired [integer] : Minimum absolute number of paired nucleotides required within a valid hairpin structure.  Default = 15.  Allowed values are greater than zero and less than or equal to --maxhpsep
+
+--maxdGperStem [float] : Maximum deltaG / stem length allowed in a valid hairpin structure.  Stem length is 0.5 * (left_stem_length + right_stem_length).  Default = -0.5
+
+--minfrachpdepth [float] : Minimum fraction of corrected coverage within hairpin arms to keep hairpin for further analysis.  Default = 0.67.  Allowed values between 0 and 1.  See below for details.
+
+--miRType [string] : Either \"plant\" or \"animal\".  Defaults to \"plant\".  This option sets --maxmiRHPPairs, --maxmiRUnpaired, and --maxLoopLength to 150, 5, and 100,000 respectively for type \"plant\".  For type \"animal\", the three are instead set to 45, 6, and 15, respectively.
+
+--maxmiRHPPairs [integer] : Maximum number of base pairs in a valid MIRNA hairpin. default: set by --miRType \"plant\" to 150.  --miRType \"animal\" sets to 45 instead.  When provided, user settings will override miRType settings. 
+
+--maxmiRUnpaired [integer] : Maximum number of unpaired miRNA nts in a miRNA/miRNA* duplex. default: set by --miRType \"plant\" to 5.  --miRType \"animal\" instead sets it to 6.  When provided, user settings will override miRType settings.
+
+--maxLoopLength [integer] : maximum allowed loop length for a valid hairpin. default: set by --miRType \"plant\" be essentially unlimited (100,000).  --miRType \"plant\" sets it to 15.  When provided, user settings will override miRType settings.
+
+--minstrandfrac [float] : Minimum fraction of mappings to one or the other strand call a polarity for non-hairpin clusters.  Also the minimum fraction of \"non-dyad\" mappings to the sense strand within potential hairpins/miRNAs to keep the locus annotated as a hp or miRNA.  See below for details.  Default = 0.8.  Allowed values between 0.5 and 1.
+
+--mindicerfrac [float] : Minimum fraction of mappings within Dicer size range to annotate a locus as Dicer-derived.  Default = 0.85.  Allowed values between 0 and 1.
+
+--phasesize [integer] : Examine phasing only for clusters dominated by the indicated size range.  Size must be within the bounds described by --dicermin and --dicermax.  Set to 'all' to examine p-values of each locus within the Dicer range, in its dominant size.  Set to 'none' to suppress all phasing analysis.  Default = 21.  Allowed values between --dicermin and --dicermax.
+
+--count [string] : Invokes count mode, in which user-provided clusters are annotated and quantified instead of being defined de novo.  When invoked, the file provided with --count is assumed to contain a simple list of clusters.  Count mode also forces nohp mode.  Formatting details below.  Default : Not invoked.
+
+--nohp : If \"--nohp\" appears on the command line, it invokes running in \"no hairpin\" mode.  RNA folding, hairpin annotation, and MIRNA annotation will be skipped (likely saving significant time).  Note that --count mode forces --nohp mode as well.  Default: Not invoked.
+
+";
+    return $message;
 }
 
 sub merge_clusters {
@@ -760,7 +986,8 @@ sub merge_clusters {
     # chrom sizes in column 1 from the fai file
     my $fai_file = "$$genome" . "\.fai";
     unless(-e $fai_file) {
-	die "Fatal in sub-routine get_folding_regions : expected fai file $fai_file does not exist\n";
+	log_it($logfile, "\nFatal in sub-routine get_folding_regions : expected fai file $fai_file does not exist\n");
+	exit;
     }
     my @fai_fields = ();
     open(FAI, "$fai_file");
@@ -826,7 +1053,8 @@ sub merge_clusters {
 	    }
 	    $last_chr = $this_chr;
 	} else {
-	    die "FATAL: in sub-routine \'merge_clusters\' : failed to parse initial locus $in_clus\n";
+	    log_it($logfile, "\nFATAL: in sub-routine \'merge_clusters\' : failed to parse initial locus $in_clus\n");
+	    exit;
 	}
     }
     return @output;
@@ -848,20 +1076,24 @@ sub get_clusters_a_priori {
 	if($_ =~ /\t/) {
 	    @fields = split ("\t", $_);
 	    unless($fields[0] =~ /^\S+:\d+-\d+$/) {
-		die "FATAL in sub-routine get_clusters_a_priori : cluster name $fields[0] is not understandable\n";
+		log_it($logfile, "\nFATAL in sub-routine get_clusters_a_priori : cluster name $fields[0] is not understandable\n");
+		exit;
 	    }
 	    push(@clusters,$fields[0]);
 	    if(exists($tracker{$fields[0]})) {
-		die "FATAL in sub-routine get_clusters_a_priori : cluster $fields[0] appears more than once\!  Duplicate loci must be purged prior to analysis\n";
+		log_it($logfile, "\nFATAL in sub-routine get_clusters_a_priori : cluster $fields[0] appears more than once\!  Duplicate loci must be purged prior to analysis\n");
+		exit;
 	    } else {
 		$tracker{$fields[0]} = 1;
 	    }
 	} else {
 	    unless($_ =~ /^\S+:\d+-\d+$/ ) {
-		die "FATAL in sub-routine get_clusters_a_priori : cluster name $_ is not understandable\n";
+		log_it($logfile, "\nFATAL in sub-routine get_clusters_a_priori : cluster name $_ is not understandable\n");
+		exit;
 	    }
 	    if(exists($tracker{$_})) {
-		die "FATAL in sub-routine get_clusters_a_priori : cluster $fields[0] appears more than once\!  Duplicate loci must be purged prior to analysis\n";
+		log_it($logfile, "\nFATAL in sub-routine get_clusters_a_priori : cluster $fields[0] appears more than once\!  Duplicate loci must be purged prior to analysis\n");
+		exit;
 	    } else {
 		$tracker{$_} = 1;
 	    }
@@ -888,16 +1120,19 @@ sub get_names_countmode {
 	if($_ =~ /\t/) {
 	    @fields = split ("\t", $_);
 	    unless($fields[0] =~ /^\S+:\d+-\d+$/) {
-		die "FATAL in sub-routine get_names_countmode : cluster name $fields[0] is not understandable\n";
+		log_it($logfile, "\nFATAL in sub-routine get_names_countmode : cluster name $fields[0] is not understandable\n");
+		exit;
 	    }
 	    if($fields[1]) {
 		$names{$fields[0]} = $fields[1];
 	    } else {
-		die "FATAL in sub-routine get_names_countmode : file is tab-delmited but no name entry in second column\n";
+		log_it($logfile, "\nFATAL in sub-routine get_names_countmode : file is tab-delmited but no name entry in second column\n");
+		exit;
 	    }
 	} else {
 	    unless($_ =~ /^\S+:\d+-\d+$/ ) {
-		die "FATAL in sub-routine get_names_countmode : cluster name $_ is not understandable\n";
+		log_it($logfile, "\nFATAL in sub-routine get_names_countmode : cluster name $_ is not understandable\n");
+		exit;
 	    }
 	    ++$n;
 	    $entry = "Cluster_" . "$n";
@@ -935,13 +1170,13 @@ sub get_folding_regions {
     my $n_to_get = scalar (@$info);
     my $five_percent = int (0.05 * $n_to_get);
     my $x;
-    print STDERR "\tProgress in sub-routine \"get_folding_regions\" \(dot = five percent\): ";
+    log_it($logfile,"\tProgress in sub-routine \"get_folding_regions\" \(dot = five percent\): ");
     
     foreach $locus (@$info) {
 	# progress tracking
 	++$x;
 	if($x >= $five_percent) {
-	    print STDERR ".";
+	    log_it($logfile, ".");
 	    $x = 0;
 	}
 	# parse locus name
@@ -950,7 +1185,8 @@ sub get_folding_regions {
 	    $start = $2;
 	    $stop = $3;
 	} else {
-	    die "Fatal in sub-routine get_folding_regions: could not parse locus name $locus\n";
+	    log_it($logfile, "\nFatal in sub-routine get_folding_regions: could not parse locus name $locus\n");
+	    exit;
 	}
 
 	$locus_size = $stop - $start + 1;
@@ -976,7 +1212,8 @@ sub get_folding_regions {
 	# ensure that the get_stop does not exceed the chromosome length
 	# the chromosome lengths are in the second column of the .fai file
 	unless(-e $fai_file) {
-	    die "Fatal in sub-routine get_folding_regions : expected fai file $fai_file does not exist\n";
+	    log_it($logfile, "\nFatal in sub-routine get_folding_regions : expected fai file $fai_file does not exist\n");
+	    exit;
 	}
 	open(FAI, "$fai_file");
 	$chr_length = 0;
@@ -987,7 +1224,8 @@ sub get_folding_regions {
 	}
 	close FAI;
 	unless($chr_length) {
-	    die "Fatal in sub-routine get_folding_regions : failed to get chromosome length for $chr\n";
+	    log_it($logfile, "\nFatal in sub-routine get_folding_regions : failed to get chromosome length for $chr\n");
+	    exit;
 	}
 	if($get_stop > $chr_length) {
 	    $get_stop = $chr_length;
@@ -1019,7 +1257,7 @@ sub get_folding_regions {
 	$to_fold{$locus}{'stop'} = $get_stop;
     }
     # finish progress tracking
-    print STDERR " Done\n";
+    log_it($logfile," Done\n");
     # return the hash
     return %to_fold;
 }
@@ -1052,13 +1290,13 @@ sub get_folding_regions_countmode {
     my $n_to_get = scalar (@$info);
     my $five_percent = int (0.05 * $n_to_get);
     my $x;
-    print STDERR "\tProgress in sub-routine \"get_folding_regions_countmode\" \(dot = five percent\): ";
+    log_it($logfile,"\tProgress in sub-routine \"get_folding_regions_countmode\" \(dot = five percent\): ");
     
     foreach $locus (@$info) {
 	# progress tracking
 	++$x;
 	if($x >= $five_percent) {
-	    print STDERR ".";
+	    log_it($logfile,".");
 	    $x = 0;
 	}
 	# parse locus name
@@ -1067,7 +1305,8 @@ sub get_folding_regions_countmode {
 	    $start = $2;
 	    $stop = $3;
 	} else {
-	    die "Fatal in sub-routine get_folding_regions: could not parse locus name $locus\n";
+	    log_it($logfile, "\nFatal in sub-routine get_folding_regions: could not parse locus name $locus\n");
+	    exit;
 	}
 	
 	
@@ -1096,7 +1335,7 @@ sub get_folding_regions_countmode {
 	$to_fold{$locus}{'stop'} = $stop;
     }
     # finish progress tracking
-    print STDERR " Done\n";
+    log_it($logfile," Done\n");
     # return the hash
     return %to_fold;
 }
@@ -1138,13 +1377,13 @@ sub folder {
     my $n_loci_to_fold = scalar ( keys %$to_fold);
     my $x = 0;
     my $five_percent = int(0.05 * $n_loci_to_fold);
-    print STDERR "\n\tProgress in sub-routine \"folder\" \(dot = 5 percent\): ";
+    log_it($logfile,"\n\tProgress in sub-routine \"folder\" \(dot = 5 percent\): ");
     
     while(($locus) = each %$to_fold) {
 	# progress tracking
 	++$x;
 	if($x == $five_percent) {
-	    print STDERR ".";
+	    log_it($logfile,".");
 	    $x = 0;
 	}
 	
@@ -1163,13 +1402,15 @@ sub folder {
 	    if($_ =~ /^\S+/) {
 		$brax = $&;
 	    } else {
-		die "FATAL in sub-routine \'folder\' : failed to parse brackets from RNALfold output line:\n$_\n";
+		log_it($logfile,"\nFATAL in sub-routine \'folder\' : failed to parse brackets from RNALfold output line:\n$_\n"); 
+		exit;
 	    }
 	    
 	    if($_ =~ /(\d+)\s*$/) {
 		$start = $1;
 	    } else {
-		die "FATAL in sub-routine \'folder\' : failed to parse start position from RNALfold output line $_\n";
+		log_it($logfile, "\nFATAL in sub-routine \'folder\' : failed to parse start position from RNALfold output line $_\n");
+		exit;
 	    }
 	    
 	    # new v0.1.3 .. split the RNALfold-provided structure into distinct hairpins .. this fixes a major problem in earlier versions with false negatives on hairpin discovery!
@@ -1228,13 +1469,15 @@ sub folder {
 	    if($_ =~ /^\S+/) {
 		$brax = $&;
 	    } else {
-		die "FATAL in sub-routine \'folder\' : failed to parse brackets from RNALfold output line:\n$_\n";
+		log_it($logfile,"\nFATAL in sub-routine \'folder\' : failed to parse brackets from RNALfold output line:\n$_\n");
+		exit;
 	    }
 	    
 	    if($_ =~ /(\d+)\s*$/) {
 		$start = $1;
 	    } else {
-		die "FATAL in sub-routine \'folder\' : failed to parse start position from RNALfold output line $_\n";
+		log_it($logfile,"\nFATAL in sub-routine \'folder\' : failed to parse start position from RNALfold output line $_\n");
+		exit;
 	    }
 	    
             # new v0.1.3 .. split the RNALfold-provided structure into distinct hairpins .. this fixes a major problem in earlier versions with false negatives on hairpin discovery!
@@ -1276,7 +1519,7 @@ sub folder {
 	}
 	close RNALFOLD;
     }
-    print STDERR " Done\n";
+    log_it($logfile," Done\n");
     return %output;
 }
 
@@ -1486,7 +1729,8 @@ sub hairpin_coords {
 		$start_1 = $local_offset;
 		$stop_1 = $start_1 + (length $brax) - 1;
 	    } else {
-		die "Fatal error in sub-routine hairpin_coords: failed to parse local hairpin coordinates $in_helix_coords\n";
+		log_it($logfile,"\nFatal error in sub-routine hairpin_coords: failed to parse local hairpin coordinates $in_helix_coords\n");
+		exit;
 	    }
 	    
 	    ## true coordinates depend on the polarity which was folded
@@ -1741,7 +1985,8 @@ sub remove_nonoverlapped_hps {
 	    push(@loc_range,$1);
 	    push(@loc_range,$2);
 	} else {
-	    die "Fatal in sub-routine remove_nonoverlapped_hps -- reg ex failure to larse locus name $locus\n";
+	    log_it($logfile, "\nFatal in sub-routine remove_nonoverlapped_hps -- reg ex failure to larse locus name $locus\n");
+	    exit;
 	}
 	@entries = @{$$input_hash{$locus}};
 
@@ -1836,7 +2081,7 @@ sub hp_expression {
     my $n_to_examine = scalar (keys %$input_hps);  ## this is a bit crude, as loci will have varying numbers of hairpins within them
     my $five_percent = int (0.05 * $n_to_examine);
     my $x = 0;
-    print STDERR "\n\tProgress within sub-routine \"hp_expression\" \(dots = five percent\): ";
+    log_it($logfile,"\n\tProgress within sub-routine \"hp_expression\" \(dots = five percent\): ");
     
     
     
@@ -1845,7 +2090,7 @@ sub hp_expression {
 	# progress tracking
 	++$x;
 	if($x >= $five_percent) {
-	    print STDERR ".";
+	    log_it($logfile,".");
 	    $x = 0;
 	}
 	# first, get the coverage total across the entire, original locus
@@ -1856,7 +2101,8 @@ sub hp_expression {
 	    $orig_start = $1;
 	    $orig_stop = $2;
 	} else {
-	    die "FATAL: Failed to parse cluster name $cluster in sub-routine hp_expression\n";
+	    log_it($logfile, "\nFATAL: Failed to parse cluster name $cluster in sub-routine hp_expression\n");
+	    exit;
 	}
 	for($i = $orig_start; $i <= $orig_stop; ++$i) {
 	    $original_locus_W{$i} = 0;
@@ -1866,7 +2112,7 @@ sub hp_expression {
 	## reset 
 	@alignments = ();
 	
-	open(SAM, "samtools view $$bamfile $cluster |");
+	open(SAM, "samtools view -F 0x4 $$bamfile $cluster |");
 	while (<SAM>) {
 	    push(@alignments, $_);
 	    chomp;
@@ -2047,7 +2293,7 @@ sub hp_expression {
     }
     
     # close progress tracking
-    print STDERR "  Done\n";
+    log_it($logfile,"  Done\n");
     return %output_hash;
 }
 
@@ -2137,7 +2383,8 @@ sub get_final_clusters {
 	    if($orig =~ /^(\S+):/) {
 		$chr = $1;
 	    } else {
-		die "FATAL in sub-routine \"get_hp_clusters\" : could not parse chromosome name from $orig\n";
+		log_it($logfile,"\nFATAL in sub-routine \"get_hp_clusters\" : could not parse chromosome name from $orig\n");
+		exit;
 	    }
 	    @en_fields = split ("\t", $$input_hp_hash{$orig});
 	    @hp_coords = split ("-", $en_fields[1]);
@@ -2367,13 +2614,13 @@ sub hp_output {  ## modified as of 0.2.1 and then again 0.3.0
     my $five_percent = int ($n_to_process / 20);
     my $progress = 0;
     
-    print STDERR "\tProgress in sub-routine \"hp_output\" \(dot = five percent\): ";
+    log_it($logfile,"\tProgress in sub-routine \"hp_output\" \(dot = five percent\): ");
     
     while(($locus) = each %$hp_hash) {
 	# progress tracking
 	++$progress;
 	if($progress >= $five_percent) {
-	    print STDERR "\.";
+	    log_it($logfile,"\.");
 	    $progress = 0;
 	}
 
@@ -2405,7 +2652,8 @@ sub hp_output {  ## modified as of 0.2.1 and then again 0.3.0
 		$loc_stop = $brax_coords[1];
 		$sam_query = "$chr" . ":" . "$loc_start" . "-" . "$loc_stop";
 	    } else {
-		die "FATAL: in sub-routine \"hp_output\" could not parse chr name from $locus\n";
+		log_it($logfile,"\nFATAL: in sub-routine \"hp_output\" could not parse chr name from $locus\n");
+		exit;
 	    }
 	    # call samtools faidx
 	    $subseq = '';  ## reset
@@ -2473,7 +2721,7 @@ sub hp_output {  ## modified as of 0.2.1 and then again 0.3.0
 	    %miRNA = (); 
 	    %miRNA_star = ();
 	    
-	    open(SAM, "samtools view $$bamfile $sam_query |");
+	    open(SAM, "samtools view -F 0x4 $$bamfile $sam_query |");
 	    while (<SAM>) {
 		chomp;
 		# ignore headers
@@ -2788,7 +3036,8 @@ sub hp_output {  ## modified as of 0.2.1 and then again 0.3.0
 					$output_string .= "$hp_seq_hash{$j}";
 				    }
 				} else {
-				    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+				    log_it($logfile,"\nFATAL error in sub-routine hp_outout : failed to parse map_coord $map_coord\n");
+				    exit;
 				}
 				for($j = ($2 + 1); $j <= $loc_stop; ++$j) {
 				    if(exists($miRNA{$map_coord})) {
@@ -2837,7 +3086,8 @@ sub hp_output {  ## modified as of 0.2.1 and then again 0.3.0
 					$output_string .= "$letter";
 				    }
 				} else {
-				    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+				    log_it($logfile,"\nFATAL: error in sub-routine hp_outout : failed to parse map_coord $map_coord\n");
+				    exit;
 				}
 				for($j = ($2 + 1); $j <= $loc_stop; ++$j) {
 				    $output_string .= "<";
@@ -2886,7 +3136,8 @@ sub hp_output {  ## modified as of 0.2.1 and then again 0.3.0
 					$output_string .= "$hp_seq_hash{$j}";
 				    }
 				} else {
-				    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+				    log_it($logfile,"\nFATAL: error in sub-routine hp_outout : failed to parse map_coord $map_coord\n");
+				    exit;
 				}
 				for($j = ($2 - 1); $j >= $loc_start; --$j) {
 				    if(exists($miRNA{$map_coord})) {
@@ -2935,7 +3186,8 @@ sub hp_output {  ## modified as of 0.2.1 and then again 0.3.0
 					$output_string .= "$letter";
 				    }
 				} else {
-				    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+				    log_it($logfile, "\nFATAL: error in sub-routine hp_outout : failed to parse map_coord $map_coord\n");
+				    exit;
 				}
 				for($j = ($2 - 1); $j >= $loc_start; --$j) {
 				    $output_string .= "<";
@@ -3055,7 +3307,7 @@ sub hp_output {  ## modified as of 0.2.1 and then again 0.3.0
 	    @{$$hp_hash{$locus}} = @kept_entries;
 	}
     }
-    print STDERR " Done\n";  ## closes progress
+    log_it($logfile," Done\n");  ## closes progress
     return %output;  ## irrelevant but too much of a pain to modify.
 }
 
@@ -3266,7 +3518,7 @@ sub quant {
     my $frac_crick;
     my $strand;
     my $total_norm;
-    my $repnorm_norm;
+
     my $size_norm;
     
     my %phase_hash = ();
@@ -3282,13 +3534,15 @@ sub quant {
     
     my $uniques;
     
+    my $ui;
+    
     my $x;
     
     # for progress tracking
     my $n_2_analyze = scalar @$clus_array;
     my $five_percent = int($n_2_analyze/20);
     my $n_analyzed = 0;
-    print STDERR "\tProgress in sub-routine \"quant\" \(dot = five percent\): ";
+    log_it($logfile, "\tProgress in sub-routine \"quant\" \(dot = five percent\): ");
     
     foreach my $locus (@$clus_array) {
         ## progress
@@ -3297,7 +3551,7 @@ sub quant {
 	    ## TEST
 	    ##last;
 	    ## END TEST
-	    print STDERR "\.";
+	    log_it($logfile,"\.");
 	    $n_analyzed = 0;
 	}
 	
@@ -3317,14 +3571,15 @@ sub quant {
 	    $loc_start = $1;
 	    $loc_stop = $2;
 	} else {
-	    die "FATAL in sub-routine \"quant\" : could not parse coordinates from locus $locus\n";
+	    log_it($logfile, "\nFATAL in sub-routine \"quant\" : could not parse coordinates from locus $locus\n");
+	    exit;
 	}
 	# initialize phase hash
 	for($i = $loc_start; $i <= $loc_stop; ++$i) {
 	    $phase_hash{$i} = 0;
 	}
 	
-	open(SAM, "samtools view $$bamfile $locus |");
+	open(SAM, "samtools view -F 0x4 $$bamfile $locus |");
 	while (<SAM>) {
 	    chomp;
 	    # ignore header lines, should they be present
@@ -3339,16 +3594,14 @@ sub quant {
 	    }
 	    $read_length = parse_cigar($fields[5]);
 
-	    # determine the number of total mappings for the read from the NH:i: tag.
+	    # determine the number of total mappings for the read from the XX:i tag
 	    $nh = '';
-	    for($i = ((scalar @fields) - 1); $i >= 0; --$i) {
-		if($fields[$i] =~ /^NH:i:(\d+)$/) {
-		    $nh = $1;
-		    last;
-		}
+	    if($_ =~ /\tXX:i:(\d+)/) {
+		$nh = $1;
 	    }
 	    unless($nh) {
-		die "FATAL in sub-routine \"quant\": Could not parse NH:i flag from sam line $_\n";
+		log_it($logfile,"\nFATAL in sub-routine \"quant\": Could not parse XX:i flag from sam line $_\n");
+		exit;
 	    }
 	    
 	    # tally
@@ -3471,9 +3724,13 @@ sub quant {
 	# [5] UNIQUE MAPPERS
 	$output{$locus} .= "\t$uniques";
 	
-	# [6] REP-TOTAL
-	$repnorm_norm = sprintf("%.4f",$repnorm);
-	$output{$locus} .= "\t$repnorm_norm";
+	# [6] UNIQUENESS INDEX (USED TO BE REP-TOTAL)
+	if($total) {
+	    $ui = sprintf("%.4f",($repnorm/$total));
+	} else {
+	    $ui = "NA";
+	}
+	$output{$locus} .= "\t$ui";
 	
 	# [7] DICER ... either 'N' or a number within the dicer_min to dicer_max range
 	# was calculated above
@@ -3498,7 +3755,7 @@ sub quant {
 	}
     }
 
-    print STDERR " Done\n";
+    log_it($logfile," Done\n");
     return %output;
 }
 
@@ -3670,7 +3927,8 @@ sub mod_quant_hp {
 	    } elsif ($$hp_hash{$locus} =~ /Crick/) {
 		unshift(@new_fields,"-");
 	    } else {
-		die"FATAL error in sub-routine mod_quant_hp : could find strand for HP locus $locus in entry $$hp_hash{$locus}\n";
+		log_it($logfile, "\nFATAL error in sub-routine mod_quant_hp : could find strand for HP locus $locus in entry $$hp_hash{$locus}\n");
+		exit;
 	    }
 	    
 	    # now check if its a MIRNA or not
@@ -3780,85 +4038,64 @@ sub convert_2_mpmm {
     return %output;
 }
 
-sub write_bed_nohp {
-    my($clus_array,$quant_hash,$outdir,$dicermin,$dicermax,$names) = @_; ## passed by reference
+sub write_gff3s {
+    my($clus_array,$quant_hash,$outdir) = @_; ## passed by reference
 
-    # open file
-    my $bedfile = "$$outdir" . "\/" . "ShortStack\.bed";
-    open(BED, ">$bedfile");
-    print BED "track name=ShortStack itemRgb=\"On\"\n";
+    # open files
+    my $dclfile = "$$outdir" . "\/" . "$$outdir" . "_DCL.gff3";
+    my $nfile = "$$outdir" . "\/" . "$$outdir" . "_N.gff3";
+    open(DCL, ">$dclfile");
+    open(N, ">$nfile");
 
     my $i;
     my $j;
-    my $text_to_return;
-    # non-dicer always gray
-
-    $text_to_return .= "\tColor-Scheme in bed file $bedfile : \n";
-    my %colors = ();
-    $colors{'N'} = "169,169,169";  ## dark gray
-
-    $text_to_return .= "\tNon-Dicer Clusters: Dark Gray RGB: 169,169,169\n";
-    
-    my $n_colors_to_get = $$dicermax - $$dicermin + 1;
-    my %rgb_hash = get_colors($n_colors_to_get);
-    my $x = 0;
-    
-    for ($i = $$dicermin; $i <= $$dicermax; ++$i) {
-	++$x;
-	$colors{$i} = $rgb_hash{$x};
-
-	$text_to_return .= "\t$i Clusters: RGB: $rgb_hash{$x}\n";
-    }
 
     my @fcfields = ();
     my $chrom;
-    my $bedstart;
-    my $bedstop;
+    my $start;
+    my $stop;
     my $name;
     foreach my $f_clus (@$clus_array) {
 	@fcfields = split("\t",$$quant_hash{$f_clus});
 	if($fcfields[0] =~ /^(\S+):(\d+)-(\d+)$/) {
 	    $chrom = $1;
-	    $bedstart = $2 - 1;
-	    $bedstop = $3;
+	    $start = $2;
+	    $stop = $3;
 	} else {
-	    die "FATAL: in sub-routine \"write_bed_nohp\" : Could not parse locus name $fcfields[0]\n";
+	    log_it($logfile, "\nFATAL: in sub-routine \"write_gff3s\" : Could not parse locus name $fcfields[0]\n");
+	    exit;
 	}
-	print BED "$chrom\t$bedstart\t$bedstop\t";
 	
-	# name
-	print BED "$$names{$f_clus}\t";
-	
-	# score (ignored -- just zero)
-	print BED "0\t";
-	
-	# strand, which is NOW, as of version 0.3.0, $fcfields[4]
-	print BED "$fcfields[4]\t";
-	
-	# thickStart and thickEnd, which are always the same as bedstart and bedstop
-	print BED "$bedstart\t$bedstop\t";
-	
-	# Determine the dominant size of the cluster from $fcfields[9] and write correct color ... array element 9 as of version 0.3.0
+	my $out = "$chrom\t" . "ShortStack\t";
 	if($fcfields[9] eq "N") {
-	    print BED "$colors{'N'}\t";
-	} elsif ($fcfields[9] =~ /^(\d+)$/) {
-	    print BED "$colors{$1}\t";
+	    $out .= "NOT_DCL\t";
 	} else {
-	    die "FATAL in sub-routine \"write_bed_nohp\" : Could not find the cluster size from entry $fcfields[9]\n";
+	    $out .= "DCL\t";
 	}
+	$out .= "$start\t$stop\t\.\t";
+	$out .= "$fcfields[4]\t"; ## strand
+	$out .= "\.\t";
+	$out .= "ID=$fcfields[1]\;";
+	$out .= "Name=$fcfields[1]\;";
+	$out .= "DicerCall=$fcfields[9]\;";
+	$out .= "HP=";
+	if($fcfields[3] eq ".") {
+	    $out .= "NONE\;";
+	} else {
+	    $out .= "$fcfields[3]\;";
+	}
+	$out .= "FracWatson=$fcfields[5]\;";
+	$out .= "UniquenessIndex=$fcfields[8]\n";
 	
-	# in no-hp mode, block count is always 1
-	print BED "1\t";
-	
-	# the block size is the locus size
-	my $block_size = $bedstop - $bedstart;
-	print BED "$block_size\t";
-	
-	# the start of the block is the beginning of the locus
-	print BED "0\n";
+	if($fcfields[9] eq "N") {
+	    print N "$out";
+	} else {
+	    print DCL "$out";
+	}
     }
-    close BED;
-    return($text_to_return);
+    close N;
+    close DCL;
+    return($dclfile,$nfile);
 }
 
 sub write_bed_with_hp {
@@ -3904,7 +4141,8 @@ sub write_bed_with_hp {
 	    $bedstart = $2 - 1;
 	    $bedstop = $3;
 	} else {
-	    die "FATAL: in sub-routine \"write_bed_nohp\" : Could not parse locus name $fcfields[0]\n";
+	    log_it($logfile, "\nFATAL: in sub-routine \"write_bed_nohp\" : Could not parse locus name $fcfields[0]\n");
+	    exit;
 	}
 	print BED "$chrom\t$bedstart\t$bedstop\t";
 	
@@ -3934,7 +4172,8 @@ sub write_bed_with_hp {
 	} elsif ($fcfields[9] =~ /^(\d+)$/) {
 	    print BED "$colors{$1}\t";
 	} else {
-	    die "FATAL in sub-routine \"write_bed_nohp\" : Could not find the cluster size from entry $fcfields[8]\n";
+	    log_it($logfile, "\nFATAL in sub-routine \"write_bed_nohp\" : Could not find the cluster size from entry $fcfields[8]\n");
+	    exit;
 	}
 	
 	if(($fcfields[3] eq "HP") or
@@ -3969,7 +4208,8 @@ sub write_bed_with_hp {
 		print BED ",";
 		print BED "$right_begin\n";
 	    } else {
-		die "FATAL: in sub-routine write_bed_with_hp : could not parse hairpin information with regex from $$hp_hash{$f_clus}\n";
+		log_it($logfile, "\nFATAL: in sub-routine write_bed_with_hp : could not parse hairpin information with regex from $$hp_hash{$f_clus}\n");
+		exit;
 	    }
 	} else {
 	    print BED "1\t";
@@ -4012,7 +4252,8 @@ sub final_summary_nohp {
 	    if($fields[9] =~ /^(\d+)$/) {
 		$size = $1;
 	    } else {
-		die "FATAL in sub-routine final_summary_hp : failed to parse dicer size category of $fields[9]\n";
+		log_it($logfile, "\nFATAL in sub-routine final_summary_hp : failed to parse dicer size category of $fields[9]\n");
+		exit;
 	    }
 	    ++$hash{$size};
 	}
@@ -4041,7 +4282,8 @@ sub final_summary {
 	    if($fields[9] =~ /^(\d+)$/) {
 		$dcall = $1;
 	    } else {
-		die "FATAL in sub-routine final_summary_hp : failed to parse dicer size category of $fields[9]\n";
+		log_it($logfile, "\nFATAL in sub-routine final_summary_hp : failed to parse dicer size category of $fields[9]\n");
+		exit;
 	    }
 	}
 	
@@ -4066,7 +4308,8 @@ sub final_summary {
 sub parse_cigar {
     my($cigar) = @_;
     if($cigar eq "\*") {
-	die "FATAL in sub-routine \'parse_cigar\' : The CIGAR string is missing from at least one of the mappings, so I can't caluclate read length\!\n";
+	log_it($logfile,"FATAL in sub-routine \'parse_cigar\' : The CIGAR string is missing from at least one of the mappings, so I can't caluclate read length\!\n");
+	exit;
     }
     # per the SAM specification, "Sum of lengths of the M/I/S/=/X operations shall equal the length of SEQ."
     my $read_length = 0;
@@ -4234,7 +4477,8 @@ sub write_files {
 		print OUT "$name $fields[15]\n";
 		close OUT;
 	    } else {
-		die "FATAL in sub-routine write_files: failed to understand following entry as MIRNA or HP  found $fields[14] instead:\n$$hp_clusters{$locus}\n";
+		log_it($logfile, "\nFATAL in sub-routine write_files: failed to understand following entry as MIRNA or HP  found $fields[14] instead:\n$$hp_clusters{$locus}\n");
+		exit;
 	    }
 	}
     }
@@ -4314,7 +4558,7 @@ sub parse_inv {
 		if($single[0] =~ /^(\S+):/) {
 		    $chr = $1;
 		} else {
-		    print STDERR "\n\tWARNING in sub-routine parse_inv: Failed to parse chr name from line $single[0] and skipped the entry\n\n";
+		    log_it($logfile,"\n\tWARNING in sub-routine parse_inv: Failed to parse chr name from line $single[0] and skipped the entry\n\n");
 		    @single = ();
 		    next;
 		}
@@ -4323,7 +4567,7 @@ sub parse_inv {
 		    $left_string = $2;
 		    $left_stop = $3;
 		} else {
-		    print STDERR "\n\tWARNING in sub-routine parse_inv: Failed to parse expected left arm info from line $single[1] and skipped the entry\n\n";
+		    log_it($logfile,"\n\tWARNING in sub-routine parse_inv: Failed to parse expected left arm info from line $single[1] and skipped the entry\n\n");
 		    @single = ();
 		    next;
 		}
@@ -4354,12 +4598,12 @@ sub parse_inv {
 		    ++$bottom_bases;
 		}
 		if(($top_bases != ($left_stop - $left_start + 1))) {
-		    print STDERR "\n\tWARNING in sub-routine parse_inv: Possible einverted bug -- On top strand of entry below there are $top_bases nucleotides but the coordinates $chr $left_start to $left_stop do not concur\n\t\tSkipping entry $chr $left_start to $right_stop\n\n";
+		    log_it($logfile,"\n\tWARNING in sub-routine parse_inv: Possible einverted bug -- On top strand of entry below there are $top_bases nucleotides but the coordinates $chr $left_start to $left_stop do not concur\n\t\tSkipping entry $chr $left_start to $right_stop\n\n");
 		    @single = ();
 		    next;
 		}
 		if(($bottom_bases != ($right_stop - $right_start + 1))) {
-		    print STDERR "\n\tWARNING in sub-routine parse_inv: Possible einverted bug -- On bottom strand of entry below there are $bottom_bases nucleotides but the coordinates $chr $right_start to $right_stop do not concur\n\t\tSkipping entry $chr $left_start to $right_stop\n\n";
+		    log_it($logfile,"\n\tWARNING in sub-routine parse_inv: Possible einverted bug -- On bottom strand of entry below there are $bottom_bases nucleotides but the coordinates $chr $right_start to $right_stop do not concur\n\t\tSkipping entry $chr $left_start to $right_stop\n\n");
 		    @single = ();
 		    next;
 		}
@@ -4686,7 +4930,8 @@ sub flag_overlap {
 		$s_start = $2;
 		$s_stop = $3;
 	    } else {
-		die "FATAL in sub-routine flag_overlap: failed to parse small RNA locus name $s_locus\n";
+		log_it($logfile, "\nFATAL in sub-routine flag_overlap: failed to parse small RNA locus name $s_locus\n");
+		exit;
 	    }
 	    $overlap = '';
 	    foreach $f_string (@flag_data) {
@@ -4697,7 +4942,8 @@ sub flag_overlap {
 		    $f_start = $2;
 		    $f_stop = $3;
 		} else {
-		    die "FATAL in sub-routine flag_overlap: failed to parse flag locus name $f_fields[0]\n";
+		    log_it($logfile, "\nFATAL in sub-routine flag_overlap: failed to parse flag locus name $f_fields[0]\n");
+		    exit;
 		}
 		if($f_chr ne $s_chr) {
 		    next;
@@ -4733,8 +4979,8 @@ sub flag_overlap {
 	$n_f_overlapped = scalar (keys %f_over);
 	
 	# Report to user
-	print STDERR "\t\tA total of $n_s_overlapped small RNA loci overlapped with one or more flag_file locus from file $$file\n";
-	print STDERR "\t\tA total of $n_f_overlapped loci from flag file $$file overlapped with one or more small RNA locus\n";
+	log_it($logfile,"\t\tA total of $n_s_overlapped small RNA loci overlapped with one or more flag_file locus from file $$file\n");
+	log_it($logfile,"\t\tA total of $n_f_overlapped loci from flag file $$file overlapped with one or more small RNA locus\n");
     } else {
 	# just add a dot to the output hash for all of them
 	foreach $s_locus (@ss_loci) {
@@ -4757,7 +5003,7 @@ sub flag_overlap {
 }
 
 sub final_hp { ## First added 0.3.0
-    my($in_hash,$genome,$bamfile,$reads,$minstrandfrac,$maxmiRHPPairs,$maxmiRUnpaired) = @_;  ## by reference .. first one hash, all others scalar
+    my($in_hash,$genome,$bamfile,$minstrandfrac,$maxmiRHPPairs,$maxmiRUnpaired) = @_;  ## by reference .. first one hash, all others scalar
     
     my $orig_locus;
     my $hp_locus;
@@ -4804,7 +5050,8 @@ sub final_hp { ## First added 0.3.0
 	if($orig_locus =~ /^(\S+):/) {
 	    $chr = $1;
 	} else {
-	    die "Could not parse chromosome name from entry $orig_locus in sub-routine final_hp\n";
+	    log_it($logfile, "\nFATAL: Could not parse chromosome name from entry $orig_locus in sub-routine final_hp\n");
+	    exit;
 	}
 	
 	if($fivep[0] < $fivep[1]) { ## sense 
@@ -4833,7 +5080,7 @@ sub final_hp { ## First added 0.3.0
 	$right_strand_reads = 0; ## reset each time through
 	%left_dyad = ();
 	%right_dyad = ();
-	open(SAM, "samtools view $$bamfile $hp_locus \|");
+	open(SAM, "samtools view -F 0x4 $$bamfile $hp_locus \|");
 	while (<SAM>) {
 	    chomp;
 	    push(@alignments, $_);  ## store for later use
@@ -4909,7 +5156,7 @@ sub final_hp { ## First added 0.3.0
 	if($strandfrac >= $$minstrandfrac) {
 	    
 	    ## miRNA vs. hpRNA analysis
-	    $result_string = analyze_for_mir(\$hp_entry, \$$genome, \$$reads, \$$maxmiRHPPairs, \$$maxmiRUnpaired, \@alignments, \$strand, \$hp_locus);
+	    $result_string = analyze_for_mir(\$hp_entry, \$$genome, \$$maxmiRHPPairs, \$$maxmiRUnpaired, \@alignments, \$strand, \$hp_locus);
 	    
 	    ## add to output hash
 	    $output_hash{$orig_locus} = $result_string;
@@ -4921,7 +5168,7 @@ sub final_hp { ## First added 0.3.0
 }
 
 sub analyze_for_mir {
-    my($hp_entry,$genome,$reads,$maxmiRHPPairs,$maxmiRUnpaired,$alignments,$strand,$hp_locus) = @_; ## by reference, all scalars except the alignments, which is an array
+    my($hp_entry,$genome,$maxmiRHPPairs,$maxmiRUnpaired,$alignments,$strand,$hp_locus) = @_; ## by reference, all scalars except the alignments, which is an array
     
     ## parse the hp_entry
     my @l_data_fields = split ("\t", $$hp_entry);
@@ -4972,7 +5219,8 @@ sub analyze_for_mir {
 	$loc_start = $1;
 	$loc_stop = $2;
     } else {
-	die "FATAL in sub-routine analyze_for_mir : failed to parse locus name $$hp_locus\n";
+	log_it($logfile, "\nFATAL in sub-routine analyze_for_mir : failed to parse locus name $$hp_locus\n");
+	exit;
     }
     if($$strand eq "+") {
 	for($i = $loc_start; $i <= $loc_stop; ++$i) {
@@ -5317,7 +5565,8 @@ sub analyze_for_mir {
 				$output_string .= "$hp_seq_hash{$j}";
 			    }
 			} else {
-			    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+			    log_it($logfile, "\nFATAL: error in sub-routine hp_outout : failed to parse map_coord $map_coord\n");
+			    exit;
 			}
 			for($j = ($2 + 1); $j <= $loc_stop; ++$j) {
 			    if(exists($miRNA{$map_coord})) {
@@ -5333,10 +5582,6 @@ sub analyze_for_mir {
 			# print length and abundance, and if appropriate, designation as a miRNA or miRNA-star
 			$output_string .= "l=$read_length ";
 			$output_string .= "m=$sense{$i}{$map_coord}";
-			if($$reads) {
-			    $mmmr = sprintf("%.4f", (($sense{$i}{$map_coord} / $$reads) * 1000000));
-			    $output_string .=  " mmmr=$mmmr";
-			}
 			if(exists($miRNA{$map_coord})) {
 			    $output_string .= " miRNA\n";
 			} elsif (exists($miRNA_star{$map_coord})) {
@@ -5366,7 +5611,8 @@ sub analyze_for_mir {
 				$output_string .= "$letter";
 			    }
 			} else {
-			    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+			    log_it($logfile, "\nFATAL: error in sub-routine hp_outout : failed to parse map_coord $map_coord\n");
+			    exit;
 			}
 			for($j = ($2 + 1); $j <= $loc_stop; ++$j) {
 			    $output_string .= "<";
@@ -5376,12 +5622,8 @@ sub analyze_for_mir {
 			# print length and abundance
 			$output_string .= "l=$read_length ";
 			$output_string .= "m=$antisense{$i}{$map_coord}";
-			if($$reads) {
-			    $mmmr = sprintf("%.4f", (($antisense{$i}{$map_coord} / $$reads) * 1000000));
-			    $output_string .= " mmmr=$mmmr\n";
-			} else {
-			    $output_string .= "\n";
-			}
+			$output_string .= "\n";
+			
 		    }
 		}
 	    }
@@ -5415,7 +5657,8 @@ sub analyze_for_mir {
 				$output_string .= "$hp_seq_hash{$j}";
 			    }
 			} else {
-			    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+			    log_it($logfile, "\nFATAL: error in sub-routine hp_outout : failed to parse map_coord $map_coord\n");
+			    exit;
 			}
 			for($j = ($2 - 1); $j >= $loc_start; --$j) {
 			    if(exists($miRNA{$map_coord})) {
@@ -5431,10 +5674,6 @@ sub analyze_for_mir {
 			# print length and abundance, and if appropriate, designation as a miRNA or miRNA-star
 			$output_string .= "l=$read_length ";
 			$output_string .= "m=$sense{$i}{$map_coord}";
-			if($$reads) {
-			    $mmmr = sprintf("%.4f", (($sense{$i}{$map_coord} / $$reads) * 1000000));
-			    $output_string .= " mmmr=$mmmr";
-			}
 			if(exists($miRNA{$map_coord})) {
 			    $output_string .= " miRNA\n";
 			} elsif (exists($miRNA_star{$map_coord})) {
@@ -5464,7 +5703,8 @@ sub analyze_for_mir {
 				$output_string .= "$letter";
 			    }
 			} else {
-			    die "error in sub-routine hp_outout : failed to parse map_coord $map_coord\n";
+			    log_it($logfile, "\nFATAL: error in sub-routine hp_outout : failed to parse map_coord $map_coord\n");
+			    exit;
 			}
 			for($j = ($2 - 1); $j >= $loc_start; --$j) {
 			    $output_string .= "<";
@@ -5474,12 +5714,7 @@ sub analyze_for_mir {
 			# print length and abundance
 			$output_string .= "l=$read_length ";
 			$output_string .= "m=$antisense{$i}{$map_coord}";
-			if($$reads) {
-			    $mmmr = sprintf("%.4f", (($antisense{$i}{$map_coord} / $$reads) * 1000000));
-			    $output_string .= " mmmr=$mmmr\n";
-			} else {
-			    $output_string .= "\n";
-			}
+			$output_string .= "\n";
 		    }
 		}
 	    }
@@ -5571,17 +5806,17 @@ sub summarize {
 	
 	
 	# $fields[9] is the Dicer Call
-	# $fields[8] is the rep.total
+	# $fields[6] is the total number of alignments
 	# $fields[3] is the HP call
 	++$loci{$fields[3]}{$fields[9]};
-	$abun{$fields[3]}{$fields[9]} += $fields[8];
+	$abun{$fields[3]}{$fields[9]} += $fields[6];
     }
     
     # report
     log_it($$logfile,"\nSummary\n\n");
 
     if($$nohp) {
-	log_it($$logfile,"DicerCall\tLoci\tAbundance\n");
+	log_it($$logfile,"DicerCall\tLoci\tAlignments\n");
 	log_it($$logfile, "N\t$loci{'ND'}{'N'}\t");
 	$rounded = sprintf("%.1f",$abun{'ND'}{'N'});
 	log_it($$logfile,"$rounded\n");
@@ -5591,7 +5826,7 @@ sub summarize {
 	    log_it($$logfile,"$rounded\n");
 	}
     } else {
-	log_it($$logfile,"DicerCall\tNON-HP_Loci\tHP_Loci\tMIRNA_Loci\tNON-HP_Abundance\tHP_Abundance\tMIRNA_Abundance\n");
+	log_it($$logfile,"DicerCall\tNON-HP_Loci\tHP_Loci\tMIRNA_Loci\tNON-HP_Alignments\tHP_Alignments\tMIRNA_Alignments\n");
 	log_it($$logfile,"N\t$loci{'.'}{'N'}\t$loci{'HP'}{'N'}\t$loci{'MIRNA'}{'N'}\t");
 	$rounded = sprintf("%.1f",$abun{'.'}{'N'});
 	log_it($$logfile,"$rounded\t");
@@ -5629,7 +5864,8 @@ sub get_folding_clusters {
     foreach my $locus (@$clusters) {
 	@fields = split ("\t", $$quant_hash{$locus});
 	if($fields[4] != 0) {
-	    $u_ratio = $fields[6] / $fields[4]; ## rep_total / total
+#	    $u_ratio = $fields[6] / $fields[4]; ## rep_total / total
+	    $u_ratio = $fields[6];
 	} else {
 	    $u_ratio = 0;
 	}
@@ -5657,7 +5893,7 @@ sub requant {
     my $frac_crick;
     my $strand;
     my $total_norm;
-    my $repnorm_norm;
+#    my $repnorm_norm;
     my $size_norm;
     
     my %phase_hash = ();
@@ -5679,6 +5915,8 @@ sub requant {
     my %old_clusters = ();
     my $old;
     my $final;
+    
+    my $ui;
     
     my @lastfields = ();
     my $laststring;
@@ -5716,14 +5954,15 @@ sub requant {
 		$loc_start = $1;
 		$loc_stop = $2;
 	    } else {
-		die "FATAL in sub-routine \"quant\" : could not parse coordinates from locus $locus\n";
+		log_it($logfile, "\nFATAL in sub-routine \"quant\" : could not parse coordinates from locus $locus\n");
+		exit;
 	    }
 	    # initialize phase hash
 	    for($i = $loc_start; $i <= $loc_stop; ++$i) {
 		$phase_hash{$i} = 0;
 	    }
 	    
-	    open(SAM, "samtools view $$bamfile $locus |");
+	    open(SAM, "samtools view -F 0x4 $$bamfile $locus |");
 	    while (<SAM>) {
 		chomp;
 		# ignore header lines, should they be present
@@ -5738,16 +5977,15 @@ sub requant {
 		}
 		$read_length = parse_cigar($fields[5]);
 		
-		# determine the number of total mappings for the read from the NH:i: tag.
+		# determine the number of total mappings for the read from the XX:i tag.
 		$nh = '';
-		for($i = ((scalar @fields) - 1); $i >= 0; --$i) {
-		    if($fields[$i] =~ /^NH:i:(\d+)$/) {
-			$nh = $1;
-			last;
-		    }
+		if($_ =~ /\tXX:i:(\d+)/) {
+		    $nh = $1;
 		}
+
 		unless($nh) {
-		    die "FATAL in sub-routine \"quant\": Could not parse NH:i flag from sam line $_\n";
+		    log_it($logfile, "\nFATAL in sub-routine \"quant\": Could not parse XX:i flag from sam line $_\n");
+		    exit;
 		}
 		
 		# tally
@@ -5871,8 +6109,8 @@ sub requant {
 	    $$output{$locus} .= "\t$uniques";
 	    
 	    # [6] REP-TOTAL
-	    $repnorm_norm = sprintf("%.4f",$repnorm);
-	    $$output{$locus} .= "\t$repnorm_norm";
+	    $ui = sprintf("%.4f",($repnorm/$total));
+	    $$output{$locus} .= "\t$ui";
 	    
 	    # [7] DICER ... either 'N' or a number within the dicer_min to dicer_max range
 	    # was calculated above
@@ -5907,7 +6145,7 @@ sub requant {
     }
 }
 
-sub get_islands_mpileup {
+sub get_islands {
     my($bamfile,$mindepth,$expected_faidx) = @_;
     # go chr by chr, using the .fai index file to get the chr names
     my @chrs = ();
@@ -5935,7 +6173,7 @@ sub get_islands_mpileup {
     my $mindpad;
     
     ## A progress bar based on the % of genome (in nts) analyzed, updated only at the completion of chromosomes
-    print STDERR "\n\tProgress in sub-routine get_islands_mpileup \(dots = 5 percent\; updates only at completion of a chromosome\): ";
+    log_it($logfile,"\n\tProgress in sub-routine get_islands \(dots = 5 percent\; updates only at completion of a chromosome\): ");
     my $dots_printed = 0;
     my $frac_done = 0;
     my $needed_dots = 0;
@@ -5943,16 +6181,11 @@ sub get_islands_mpileup {
 	
 	$last_start = -1;
 	$last_ok = -1;
-	if($mindepth > 8000) {
-	    $mindpad = 100 + $mindepth;
-	    open(PILE, "samtools mpileup -BQ0 -r $chr -d $mindpad $bamfile 2> mpileup_junk |");
-	} else {
-	    open(PILE, "samtools mpileup -BQ0 -r $chr $bamfile 2> mpileup_junk |");
-	}
-	while (<PILE>) {
+	open(DEPTH, "samtools depth -r $chr $bamfile |");
+	while (<DEPTH>) {
 	    chomp;
 	    @fields = split ("\t", $_);
-	    if($fields[3] >= $mindepth) {
+	    if($fields[2] >= $mindepth) {
 		if($last_ok == -1) {
 		    ## first start on the chr
 		    $last_start = $fields[1];
@@ -5969,7 +6202,7 @@ sub get_islands_mpileup {
 		}
 	    }
 	}
-	close PILE;
+	close DEPTH;
 	## close the last one, if there is one
 	unless($last_ok == -1) {
 	    $island = "$chr" . ":" . "$last_start" . "-" . "$last_ok";
@@ -5980,19 +6213,418 @@ sub get_islands_mpileup {
 	$frac_done += ($fai_hash{$chr} / $genome_sum);
 	$needed_dots = int ($frac_done / 0.05);
 	until($dots_printed == $needed_dots) {
-	    print STDERR"\.";
+	    log_it($logfile,"\.");
 	    ++$dots_printed;
 	}
 	
     }
-    system "rm -f mpileup_junk";
-    print STDERR " Done\n";
+    log_it($logfile," Done\n");
     return @islands;
     
 }
 
+sub check_RNALfold {
+    (open(RL, "RNALfold --version |")) || return 0;
+    my $version = <RL>;
+    chomp $version;
+    close RL;
+    if($version =~ /RNALfold \d/) {
+	return $version;
+    } else {
+	return 0;
+    }
+}
 
-__END__	
+sub check_RNAeval {
+    (open(RE, "RNAeval --version |")) || return 0;
+    my $version = <RE>;
+    chomp $version;
+    close RE;
+    if($version =~ /RNAeval \d/) {
+	return $version;
+    } else {
+	return 0;
+    }
+}
+
+sub check_bowtie {
+    (open(B, "bowtie --version |")) || return 0;
+    my $version = <B>;
+    chomp $version;
+    close B;
+    if($version =~ /bowtie version (\S+)/) {
+	return $1;
+    } else {
+	return 0;
+    }
+}
+
+sub check_bowtie_build {
+    (open(B, "bowtie-build --version |")) || return 0;
+    my $version = <B>;
+    chomp $version;
+    close B;
+    if($version =~ /bowtie-build version (\S+)/) {
+	return $1;
+    } else {
+	return 0;
+    }
+}   
+
+sub trim_FA {
+    my($untrimmed,$adapter) = @_;
+    log_it($logfile,"\nBeginning adapter trimming...");
+    (open(IN, "$untrimmed")) || return 0;
+    my $trimmedFA = "$untrimmed" . "_trimmed.fasta";
+    (open(OUT, ">$trimmedFA")) || return 0;
+    my $header;
+    my $trim_len;
+    my $no_insert = 0; ## includes adapter-only and no-adapter cases
+    my $too_short = 0;
+    my $amb = 0;
+    my $ok;
+    my $trim_seq;
+    while (<IN>) {
+	chomp;
+	if($_ =~ /^>/) {
+	    $header = $_;
+	} else {
+	    $trim_len = 0;
+	    while ($_ =~ /$adapter/ig) {
+		$trim_len = (pos $_) - (length $adapter);
+	    }
+	    if($trim_len == 0) {
+		++$no_insert;
+	    } elsif ($trim_len < 15) {
+		++$too_short;
+	    } else {
+		$trim_seq = substr($_,0,$trim_len);
+		if($trim_seq =~ /[^ATGCatcg]/) {
+		    ++$amb;
+		} else {
+		    ++$ok;
+		    print OUT "$header\n$trim_seq\n";
+		}
+	    }
+	}
+    }
+    close IN;
+    close OUT;
+    log_it($logfile," Done\n");
+    log_it($logfile,"\tNo insert \(includes adapter-only and no-adapter cases combined\): $no_insert\n");
+    log_it($logfile,"\tToo short \(less than 15nts\): $too_short\n");
+    log_it($logfile,"\tAmbiguous bases after trimming: $amb\n");
+    log_it($logfile,"\tOK - output: $ok\n");
+    return $trimmedFA;
+}
+
+sub trim_FQ {
+    my($untrimmed,$adapter) = @_;
+    log_it($logfile,"\nBeginning adapter trimming...");
+    (open(IN, "$untrimmed")) || return 0;
+    my $trimmedFQ = "$untrimmed" . "_trimmed.fastq";
+    (open(OUT, ">$trimmedFQ")) || return 0;
+    my $header;
+    my $trim_len;
+    my $no_insert = 0; ## includes adapter-only and no-adapter cases
+    my $too_short = 0;
+    my $amb = 0;
+    my $ok;
+    my $trim_seq;
+    my $plus;
+    my $seq;
+    my $qual;
+    my $trim_qual;
+    while (<IN>) {
+	chomp;
+	$header = $_;
+	$seq = <IN>;
+	chomp $seq;
+	$plus = <IN>;
+	chomp $plus;
+	$qual = <IN>;
+	chomp $qual;
+	
+	# crude validation
+	unless(($header =~ /^\@/) and
+	       ($plus =~ /^\+/)) {
+	    log_it($logfile,"\nFATAL: FASTQ format parse error in sub-routine trim_FQ\n");
+	    exit;
+	}
+	$trim_len = 0;
+	while ($seq =~ /$adapter/ig) {
+	    $trim_len = (pos $seq) - (length $adapter);
+	}
+	if($trim_len == 0) {
+	    ++$no_insert;
+	} elsif ($trim_len < 15) {
+	    ++$too_short;
+	} else {
+	    $trim_seq = substr($seq,0,$trim_len);
+	    if($trim_seq =~ /[^ATGCatcg]/) {
+		++$amb;
+	    } else {
+		++$ok;
+		$trim_qual = substr($qual,0,$trim_len);
+		print OUT "$header\n$trim_seq\n$plus\n$trim_qual\n";
+	    }
+	}
+    }
+
+    close IN;
+    close OUT;
+    log_it($logfile," Done\n");
+    log_it($logfile,"\tNo insert \(includes adapter-only and no-adapter cases combined\): $no_insert\n");
+    log_it($logfile,"\tToo short \(less than 15nts\): $too_short\n");
+    log_it($logfile,"\tAmbiguous bases after trimming: $amb\n");
+    log_it($logfile,"\tOK - output: $ok\n");
+    return $trimmedFQ;
+}
+
+sub perform_alignment {
+    my($infile,$genome,$type) = @_;
+    log_it($logfile,"\nBeginning alignment of reads from $infile to genome $genome ...\n");
+    log_it($logfile, "\tCheck for ebwt bowtie indices for the genome: ");
+    
+    # Search for the bowtie indices
+    my $ebwt_check = check_ebwt($genome);
+    # If absent, call bowtie-build
+    if($ebwt_check) {
+	log_it($logfile, "PRESENT\n");
+    } else {
+	log_it($logfile, "ABSENT. Attempting to build with bowtie-build... ");
+	my $bb_log = bowtie_build($genome);
+	log_it($logfile, "Done.\n\tSee $bb_log for output from bowtie-build\n");
+    }
+    
+    # build bowtie query string
+    my $bowtie = "bowtie";
+    if($type eq "a") {
+	$bowtie .= " -f";
+    } elsif ($type eq "q") {
+	$bowtie .= " -q";
+    }
+    $bowtie .= " -v 1 -a --best --strata -S $genome $infile";
+    
+    # Open the processes
+    (open(BOW, "$bowtie |")) || return 0;
+    (open(OUT, "| samtools view -S -b -u - | samtools sort - $infile")) || return 0;
+    
+    # Parsing the bowtie stream
+    my $in_header = 1;
+    my $last_read = "NULL";
+    my @read_aligns = ();
+    my @sam_fields = ();
+    my $xx;
+    my $index;
+    my $output = 0; ## includes unmapped
+    
+    # Progress bar
+    log_it($logfile,"Progress in bowtie \(dot = 1E5 reads processed\)\n");
+    my $done = 0;
+    my $one_hun_k = 0;
+    my $million = 0;
+    while(<BOW>) {
+	if($_ =~ /^\@/) {
+	    $in_header = 1;
+	    # Change sort information to "coordinate"
+	    $_ =~ s/SO:(\S+)/SO:coordinate/;
+	    # pass it along
+	    print OUT "$_";
+	} else {
+	    if($in_header) {
+		$in_header = 0;
+		# Add some other info
+		print OUT "\@PG\tID:ShortStack\n";
+		print OUT "\@CO\tTag XX from ShortStack indicates the total number of possible, equally likely alignments, of which just one randomly selected was reported\n";
+		print OUT "\@CO\tTag XA from bowtie indicates the 'stratum' of the aligned read\n";
+		print OUT "\@CO\tTag XM from bowtie indicates that the read had no reported alignments\n";
+		print OUT "\@CO\tSee the SAM spec for the other, standard tags\n";
+	    }
+	    # data lines
+	    @sam_fields = split ("\t", $_);
+	    if(($sam_fields[0] ne $last_read) and ($last_read ne "NULL")) {
+		$xx = scalar @read_aligns;
+		##randomly select one
+		$index = int(rand($xx));
+		## tack on the XX tag
+		$read_aligns[$index] =~ s/\n/\tXX:i:$xx\n/g;
+		++$output;
+		print OUT "$read_aligns[$index]";
+		## reset
+		@read_aligns = ();
+		## Progress
+		++$done;
+		if($done == 100000) {
+		    ++$one_hun_k;
+		    log_it($logfile, ".");
+		    $done = 0;
+		    if($one_hun_k == 10) {
+			++$million;
+			log_it($logfile, " $million million reads analyzed and counting\n");
+			$one_hun_k = 0;
+		    }
+		}
+	    }
+	    push(@read_aligns,$_);
+	    $last_read = $sam_fields[0];
+	}
+    }
+    # the last one
+    $xx = scalar @read_aligns;
+    ##randomly select one
+    $index = int(rand($xx));
+    ## tack on the XX tag
+    $read_aligns[$index] =~ s/\n/\tXX:i:$xx\n/g;
+    ++$output;
+    print OUT "$read_aligns[$index]";
+    
+    log_it($logfile, "\n\n");
+
+    # close streams
+    close BOW;
+    close OUT;
+    
+    # Report
+    log_it($logfile, "Total of $output sam lines output \(includes lines for non-mapped reads\).\n");
+    
+    # Verify file
+    my $expected_bam = "$infile" . ".bam";
+    unless(-r $expected_bam) {
+	log_it($logfile, "\nFATAL: Expected BAM file $expected_bam was not created after bowtie run\!\n\n");
+	exit;
+    }
+    return $expected_bam;
+}
+
+sub check_ebwt {
+    my($base) = @_;
+    my @ebwt_suffixes = qw(.1.ebwt .2.ebwt .3.ebwt .4.ebwt .rev.1.ebwt .rev.2.ebwt);
+    my $ebwt_count = 0;
+    my $ebwt_file;
+    foreach my $ebwt_suffix (@ebwt_suffixes) {
+	$ebwt_file = "$base" . "$ebwt_suffix";
+	if(-r $ebwt_file) {
+	    ++$ebwt_count;
+	}
+    }
+    if($ebwt_count == 6) {
+	return 1;
+    } elsif ($ebwt_count > 0) {
+	return 0;
+    } else {
+	return 0;
+    }
+}
+
+sub bowtie_build {
+    my($fasta) = @_;
+    my $log = "$fasta" . "_bowtie_build_log.txt";
+    system("bowtie-build $fasta $fasta 2>&1> $log");
+    return $log;
+}
+
+sub validate_bam {
+    my($bam,$fai) = @_;
+    log_it($logfile,"\nValidating bamfile $bam ...\n");
+    
+    # Is it readable?
+    log_it($logfile, "\tFile readable\? ");
+    unless(-r $bam) {
+	log_it($logfile, "FAIL -- ABORT\n");
+	return 0;
+    }
+    
+    # header checks
+    my %h_seqs = ();
+    log_it($logfile, "\tHeader present\? ");
+    (open(H, "samtools view -H $bam |")) || return 0;
+    my $h;
+    my $so;
+    while (<H>) {
+	if($_ =~ /^\@/) {
+	    unless($h) {
+		$h = 1;
+		log_it($logfile,"YES\n\tSorted by coordinate\? ");
+	    }
+	    if($_ =~ /^\@HD\t.*SO:(\S+)/) {
+		if($1 eq "coordinate") {
+		    $so = 1;
+		} else {
+		    $so = 0;
+		}
+	    }
+	    if($_ =~ /^\@SQ\t.*SN:(\S+)/) {
+		$h_seqs{$1} = 1;
+	    }
+	}
+    }
+    close H;
+    if($so) {
+	log_it($logfile, "YES\n");
+    } else {
+	log_it($logfile, "FAIL -- bamfile must be sorted by \'coordinate\' as indicated in the header SO:tag-- ABORT\n");
+	return 0;
+    }
+    
+    # does it match the genome?
+    my %fai_names = ();
+    log_it($logfile,"\tMatches genome\? ");
+    (open(FAI, "$fai")) || return 0;
+    my @fields = ();
+    while (<FAI>) {
+	@fields = split ("\t", $_);
+	$fai_names{$fields[0]} = 1;
+    }
+    close FAI;
+    my $h_seq;
+    while(($h_seq) = each %h_seqs) {
+	unless(exists($fai_names{$h_seq})) {
+	    log_it($logfile, "FAIL -- reference name $h_seq was not found in genome -- ABORT\n");
+	    return 0;
+	}
+    }
+    log_it($logfile, "PASS\n");
+    
+    # Does it have XX tags?  Just check the first line
+    log_it($logfile, "\tHas XX tags\? ");
+    (open(SAM, "samtools view $bam |")) || return 0;
+    my $check = <SAM>;
+    close SAM;
+    if($check =~ /\tXX:i:(\d+)/) {
+	log_it($logfile,"PASS\n");
+    } else {
+	log_it($logfile,"FAIL -- bam file needs to have XX tags per ShortStack spec -- ABORT\n");
+	return 0;
+    }
+    
+    ## Is it indexed? If not, index it.
+    my $bai = "$bam" . ".bai";
+    log_it($logfile, "\tIndexed file $bai readable\? ");
+    if(-r $bai) {
+	log_it($logfile, "YES\n");
+    } else {
+	log_it($logfile, "Not yet ... ");
+	system "samtools index $bam";
+	if(-r $bai) {
+	    log_it($logfile,"Now it does\n");
+	} else {
+	    log_it($logfile,"FAILED to create it with samtools index -- ABORT\n");
+	    return 0;
+	}
+    }
+    
+    ## OK. Get the total number of reads
+    (open(STAT, "samtools flagstat $bam |")) || return 0;
+    my $n_mapped = 0;
+    while (<STAT>) {
+	if($_ =~ /^(\d+) \+ \d+ mapped/) {
+	    $n_mapped = $1;
+	}
+    }
+    return $n_mapped;
+}
+    
 =head1 LICENSE
 
 ShortStack.pl
@@ -6020,55 +6652,65 @@ Annotation and quantification of small RNA genes based upon reference-aligned sm
 
 If you use ShortStack in your work, please cite 
 
-Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  RNA. doi:10.1261/rna.035279.112
+Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  RNA 19:740-751. doi:10.1261/rna.035279.112
 
 =head1 VERSION
 
-0.5.0 :: Released May 15, 2013
+1.0.0 :: Released September 19, 2013
 
 =head1 AUTHOR
 
 Michael J. Axtell, Penn State University, mja18@psu.edu
 
+=head1 DEPENDENCIES
+
+	perl
+	samtools
+	RNAeval
+	RNALfold
+	bowtie (0.12.x OR 1.x) [only if aligning reads]
+	bowtie-build (0.12.x OR 1.x) [only if aligning reads]
+
+ShortStack.pl is a perl script, so it needs perl to compile. It expects to find perl at /usr/bin/perl. If this is not where your perl is, modify line 1 of ShortStacl.pl (the hashbang) accordingly. It also requires the package Getopt::Long, which I think is standard in most Perl distributions. If this package is not installed, get it from CPAN.
+
+samtools <http://samtools.sourceforge.net/> needs to be installed in your PATH. ShortStack was developed using samtools 0.1.18. Other versions should be OK as far as I know, but let me know if not!
+
+RNAeval and RNALfold are from the ViennaRNA package. See <http://www.tbi.univie.ac.at/~ronny/RNA/vrna2.html>. Both need to be installed in your PATH.
+
+bowtie and bowtie-build must be version "1" .. either 0.12.x or 1.x.  These are required ONLY if you are aligning reads to the genome. Bowtie can be found at http://bowtie-bio.sourceforge.net/index.shtml
+
 =head1 INSTALL
 
-install samtools from <http://samtools.sourceforge.net/> and ensure that samtools is in your PATH
-
-install the ViennaRNA package (either 1.8.x or 2.x).  See <http://www.tbi.univie.ac.at/~ronny/RNA/vrna2.html> and ensure that RNALfold and RNAeval are in your PATH
-
-ensure the script is executable                                                                  
+There is no 'real' installation. After installing the dependencies (see above), you should check to make sure the ShortStack.pl is executable. It should be, but if not you can:                                                                
                                                                                                  
     chmod +x ShortStack.pl                                                         
                                                                                                  
-ensure the script is in your PATH (examples):                                                    
-                                                                                                 
-    sudo cp ShortStack.pl /usr/bin/                                                
-                                                                                                 
-OR just for one session assuming script is in your working directory:                            
-                                                                                                 
-    PATH=$PATH:.                                                                                 
-                                                                                                 
-ensure 'perl' is located in /usr/bin/ .. if not, edit line 1 of script accordingly                 
+For convenience, you can add it to your PATH .. for instance
+
+	sudo cp ShortStack.pl /usr/bin/
+
 
 =head1 USAGE
                                                                                                                              
-	Shortstack.pl [options] [in.bam] [genome.fasta] 
+	Shortstack.pl [options] [genome.fasta] 
 
-=head1 QUICK START 
+There are three modes which differ in the the types of pre-analysis that are performed. Each of the modes has a different set of REQUIRED options:
 
-1. Install ShortStack.pl and Prep_bam.pl, and required third-party tools (RNALfold, samtools) per above instructions
+Mode 1: Trim small RNA-seq reads to remove 3' adapter seqeuence, align them, and then analyze.  Required options:
 
-2. Trim your raw reads to remove adapters.  The Axtell Lab has some scripts for trimming 3' adapters from typical raw small RNA-seq data. (see http://axtell-lab-psu.weebly.com/tools.html)
+	--untrimmedFA OR --untrimmedFQ
+	
+	--adapter
 
-3. Ensure the chromosome names of the reference genome are short and sweet, containing no whitespace or metacharacters (see below)
+Mode 2: Align pre-trimmed small RNA-seq reads, and then analyze. Required options:
 
-4. Align your reads to the reference genome, output the results in sam/bam format, and pipe through 'Prep_bam.pl' to generate a properly formatted, sorted, and indexed .bam alignment.  Note the total number of mapped reads.  Suggested aligner is bowtie 1 (0.12.8) but any method that outputs in sam/bam format is fine.  If you use bowtie version 1, the following command can be used for one-step mapping, formatting, sorting, and indexing (assuming of course you've installed bowtie and built the bowtie index for your reference genome):
+	--trimmedFA OR --trimmedFQ
 
-	bowtie [bowtie_options] -S [bowtie_genome_index] [trimmed_reads] | Prep_bam.pl --genome [genome.fasta] --prefix [file_name_prefix]
+Mode 3: Analyze a pre-existing BAM alignment of small RNA-seq reads. Require option:
 
-5.  If you use another mapping method besides the one above, the final .bam formatted file must be sorted by chromosomal position, have NH:i: tags present (see SAM specification), and be indexed with the .bam.bai index file in the same directory as the .bam file.  In additional, all data lines (except those for unmapped reads, which are ignored) must have a valid CIGAR string (see SAM specification).  Non-conforming .sam or .bam files can be processed with 'Prep_bam.pl' -- see the README for Prep_bam.pl included with this package.
+	--bamfile
 
-6. For a full de-novo run with default parameters, call "Shortstack.pl [in.bam] [genome.fasta]".  See OPTIONS below for other options and run modes.
+Additionally, in modes 1 or 2, the option --align_only will terminate analysis after making the alignment file.
 
 =head1 TUTORIAL
 
@@ -6076,9 +6718,25 @@ A full tutorial with sample Arabidopsis data can be found at http://axtelldata.b
 
 =head1 OPTIONS
 
---outdir [string] : Name of directory to be created to receive results of the run.  Deafults to "ShortStack_[time]", where time is the number of non-leap seconds since Jan 1, 1970 UCT, if not provided   
-                                      
---reads [integer] : Number of reads (NOT mappings) in the input .bam file.  No default.  Reads are required to output quantifications in mappings per million mapped, instead of in raw rads.  If not provided, the run will be forced into "--raw" mode, because mappings per million mapped reads cannot be calculated.
+--help : Print a help message and then quit.
+
+--version : Print the version number and then quit.
+
+--outdir [string] : Name of directory to be created to receive results of the run.  Deafults to "ShortStack_[time]", where time is "UNIX time" (the number of non-leap seconds since Jan 1, 1970 UCT), if not provided
+
+--untrimmedFA [string] : Path to untrimmed small RNA-seq data in FASTA format.
+
+--untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ format.
+
+--adapter [string] : Sequence of 3' adapter to search for during adapter trimming. Must be at least 8 nts in length, and all ATGC characters. Required if either --untrimmedFA or --untrimmedFQ are specified.
+
+--trimmedFA [string] : Path to trimmed and ready to map small RNA-seq data in FASTA format.
+
+--trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq data in FASTQ format.
+
+--align_only : Exits program after completion of small RNA-seq data alignment, creating BAM file.
+
+--bamfile [string] : Path to properly formatted and sorted BAM alignment file of small RNA-seq data.
 
 --inv_file [string] : PATH to an einverted-produced .inv file of inverted repeats within the genome of interest.  Not required but strongly suggested for more complete annotations of hairpin-derived small RNA genes.  Default = {blank}.  Not needed for runs in "nohp" mode or runs in "count" mode (because "count" mode forces "nohp" mode as well).  A typical eniverted run uses default parameters except "-maxrepeat 10000", in order to capture long IRs.
 
@@ -6092,7 +6750,7 @@ A full tutorial with sample Arabidopsis data can be found at http://axtelldata.b
 
 --dicermax [integer] : Largest size in the Dicer size range (or size range of interest).  Deafult = 24.  Must be between 15 and 35, and more than or equal to --dicermin
 
---minUI [float] : Minimum uniqueness index required to attempt RNA folding. Uniqueness index is defined as repeat-normalized abundance / total abundance.  Must be a value between 0 and 1.  Zero forces all clusters to be folded; default: 0.1
+--minUI [float] : Minimum uniqueness index required to attempt RNA folding.  Must be a value between 0 and 1.  Zero forces all clusters to be folded; default: 0.1
 
 --maxhpsep [integer] : Maximum allowed span for a base-pair during hairpin search with RNALfold; Also serves as the maximum size of genomic query to fold with RNALfold .. loci whose unpadded size is more than --maxhpsep will not be analyzed at all with RNALfold.  Default = 300.  Must be between 50 and 2000.
 
@@ -6122,29 +6780,40 @@ A full tutorial with sample Arabidopsis data can be found at http://axtelldata.b
 
 --nohp : If "--nohp" appears on the command line, it invokes running in "no hairpin" mode.  RNA folding, hairpin annotation, and MIRNA annotation will be skipped (likely saving significant time).  Note that --count mode forces --nohp mode as well.  Default: Not invoked.
 
---raw : If "--raw" appears on the command line, it prevents conversion of abundances into mappings per million mapped reads, and instead all tallies in the results will simply be the raw reads.  --raw mode is forced if the user does not provide the number of reads via the --reads option.  Default: Not invoked, unless --reads is left blank.
 
 =head1 KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
 
-=head2 Input .bam file
-
-The mapped reads in the input .bam file must be sorted by chromosomal location, and indexed using the samtools index command -- specifically, ShortStack will look for the [prefix].bam.bai file in the same directory as the input [prefix].bam file.  It will quit and complain if the index file is not readable.
-
-Additionally, each mapping in the .bam file must have the NH:i: tag, which indicates the total number of mappings for that read.  
-
-Finally, each mapped read must have the CIGAR string set (column 6 in the SAM specification) -- ShortStack.pl determines the small RNA lengths by parsing the CIGAR string .. if any mappings (except unmapped reads, which are ignored) have "*" entered instead of a valid CIGAR string ShortStack.pl will exit and complain.
-
-Preparation of proper .bam files can be achieved with the helper script, "Prep_bam.pl", included as part of the ShortStack package.  Prep_bam.pl takes in a READ-sorted .bam, .sam, or .sam.gz file and calculates the NH:i: tags, and finally outputs a chromosomal-sorted and indexed .bam file suitable for use by ShortStack.pl.  It will also warn you if any CIGAR strings are missing.  It can also be used directly to receive and process a SAM-formated alignment stream output by bowtie.
-
-Finally, it is critical that the chromosome names referenced in the .bam file correspond exactly to those present in the genome.fasta file.
-
 =head2 Input genome.fasta file
 
-It is critical that this be the precise genome to which the reads in the input .bam file were mapped.
+It is critical that this be the precise genome to which the reads in the input .bam file were mapped. If it isn't, validation of the BAM alignment file will fail and the run will be aborted.
 
 Additionally, the chromosome names in the FASTA headers must be kept SIMPLE.  Specifically, ShortStack.pl at several points parses clusters by the regex /^(\S+):(\d+)-(\d+)$/ or some variant thereof, where the first pattern is the chromosome name.  Therefore, the chromosome names must match (\S+) .. e.g. a single string of one or more non-white-space characters, with no metacharacters.  So, ">Chr1" in your reference genome is good, but ">Chr1 | XM00023 | this is a bunch of annotation blah blah blah" is bad.  This same concern applies to the input .bam file, so your chromosome names should be shortened BEFORE mapping your reads, so that they are short and they are exactly reflected in the .bam file.
 
 If not already present, a .fai index file for the genome will be created using samtools faidx at the beginning of the run.
+
+=head2 Small RNA-seq reads in FASTA or FASTQ format
+
+FASTA or FASTQ data should be devoid of comment lines and conform to FASTA or FASTQ specs. In addition, ShortStack.pl assumes that each read will occupy a single line in the file. There is no support for paired-end reads.
+
+=head2 Input .bam file
+
+It is highly recommended that you create the BAM alignment file with ShortStack.pl itself to ensure compatibility. Unfortunately, BAM files created using versions of ShortStack.pl prior to 1.0.0 (and the now-obsoleted 'Prep_bam.pl' script) will NOT be compatibile with ShortStack v 1.0.0 and higher. Sorry. There are good reasons for this, as the previously recommended alignment methods were sub-optimal.
+
+If you do make your own BAM alignments, outside of ShortStack.pl, they must pass the following validation steps that are performed by ShortStack:
+
+1. The header must be present
+
+2. The sort order of the file must be 'coordinate', as indicated by the SO: tag in the header
+
+3. All of the chromosome names found in the header MUST also be found in the genome.fasta file
+
+4. The data lines must contain the custom XX:i:(\d+) tag, where \d+ is an integer representing the total number of valid alignment positions for that read.
+
+The BAM file should be indexed and have the corresonding .bam.bai index file in the same path as the bamfile. However, this is not required to pass validation .. if the index is not found, it will be created during the run.
+
+Each mapped read must have the CIGAR string set (column 6 in the SAM specification) -- ShortStack.pl determines the small RNA lengths by parsing the CIGAR string .. if any mappings (except unmapped reads, which are ignored) have "*" entered instead of a valid CIGAR string ShortStack.pl will exit and complain.
+
+Finally, a key assumption that ShortStack.pl makes about the BAM alignment is that each original small RNA-seq read is represented by just one alignment line. For reads that had more than one valid alignment position, just one should be randomly selected, and the total number of valid alignment positions noted in the XX tag. Users of ShortStack versions prior to 1.0.0 please note that this is quite different from the earlier methods.
 
 =head2 --count file
 
@@ -6161,24 +6830,6 @@ Optional.  This is a list of genomic loci to scan for overlap with one or more o
 =head2 --inv_file 
 
 Unless you are running in "nohp" mode, providing a inv_file will enhance the accuracy of the hairpin annotations.  RNALfold-based folding of clusters will often miss very large inverted repeats that einverted can capture.  To make the .inv file, download and install the EMBOSS package ( http://emboss.sourceforge.net/ ), then run einverted against your genome of interest.  For the purposes of ShortStack analysis, the fasta file can be ignored / deleted.  The .inv file is used for ShortStack analysis.  Note that the inv_file is not required, but ShortStack will warn you if it is missing (unless you are running in 'nohp' or 'count' mode).
-
-=head1 SUGGESTIONS FOR ADAPTER-TRIMMING AND ALIGNMENTS
-
-The results from ShortStack.pl are strongly affected by how the reads were processed and aligned.  Alignment parameters in particular need to be carefully documented, especially with regard to how multi-mapped small RNA reads are treated.  For instance, if your alignment protocol demanded a unique match to the genome, and suppressed results for multi-mapped reads, that will strongly influence cluster discovery as well as render the comparisons of 'total' and 'rep-total' and 'unique-mappers' in the results meaningless.  There (probably?) is no single 'best' method (although I have some suggestions below), but it is clear that, for comparison of results from different samples, all pre-ShortStack processing steps should be explicit and identical between the samples.
-
-Trimming of adapters, while seemingly mundane and simple, also will have profound effects on ShortStack results.  For instance, if reads were computationally filtered before alignment to only retain those in the Dicer size range, than all clusters will be annotated by ShortStack.pl as being dominated by Dicer-sized small RNAs.  However, because the data were selectively used, this may lead to false results.
-
-=head2 Suggestions for Adapter Trimming
-
-In general, I suggest retaining the broadest possible size range of adapter-trimmed reads.  In our group, we are typically retaining 15-35nt reads for mapping at present.  Inputting all reads for alignment will allow ShortStack to confidently discern clusters dominated by reads in the Dicer size range, from clusters that are not (which will often be degradation fragments from abundant RNA species).  Of course, the range of small RNA sizes will also be dictated by the library construction method used, but my suggestion is that a broad size range is preferable in order to allow confident discrimination of Dicer-derived clusters from non-Dicer-derived clusters.
-
-=head2 Suggestions for Pre-Filtering
-
-In short, I suggest avoiding any pre-filtering of the small RNAs prior to alignment.  Pre-filtering is often used to remove reads mapped to rRNAs, tRNAs, and other abundant RNA species that frequently generate a lot of small RNAs that are not thought to be Dicer-derived.  Because ShortStack discriminates clusters based on the sizes, clusters formed by non-Dicer processes will be readily apparent.  In addition, there is evidence that some tRNA and snoRNA-derived fragments might be biologically meaningful, instead of just random degradation ... so throwing out those data altogether does not seem like the best idea.
-
-=head2 Suggestions for Multi-mapped Reads
-
-In many species, particularly plants, a great deal of small RNAs correspond to repetitive genomic sequences, so in general it seems imprudent to discard multi-mapped reads.  Because ShortStack.pl will report the total alignments within a cluster, the total alignments from uniquely-mapped small RNAs, and the repeat-normalized total alignments, the 'repetitiveness' of each cluster should be readily apparent.  So in general I advocate for alignment parameters that retain multi-mapped reads in all possible positions (e.g. all mappings for the given read).  However, there is a practical limit where storing huge numbers of alignments for a single read becomes prohibitive in terms of file size.  We generally cap the number of allowed mappings for any one read to 50 .. e.g., report only the 1st 50 alignments for a single read.  (In bowtie 1, this would be -k 50).
 
 =head1 OUTPUT
 
@@ -6200,13 +6851,13 @@ Column 4: HP : Whether this cluster appears to be hairpin-derived or not.  If no
 
 Column 5: Strand : The pre-dominant strand from which the small RNA emanate.  If ".", no strand was called.  HPs and MIRNAs always have a polarity, based on the hairpin's originating strand.  Non-HP clusters have their polarity determined by the --minstrandfrac setting.
 
-Column 6: Frac_Wat : Fraction of mappings to the Watson (e.g. +) strand of the cluster.  1 means all were from Watson Strand (e.g. +), 0 means all were from Crick (e.g. -) strand.
+Column 6: Frac_Wat : Fraction of aligned reads to the Watson (e.g. +) strand of the cluster.  1 means all were from Watson Strand (e.g. +), 0 means all were from Crick (e.g. -) strand.
 
-Column 7: Total : Total mappings within the cluster, either in raw mappings (for --raw mode) or in mappings per million mapped.
+Column 7: Total : Total aligned reads within the cluster.
 
-Column 8: Uniquely Mapped Total : Total mappings derived from uniquely mapped reads .. e.g., those with NH:i:1.  In raw mappings (for --raw mode) or in mappings per million mapped.
+Column 8: Uniques : Total aligned reads derived from uniquely mapped reads .. e.g., those with XX:i:1.
 
-Column 9: Rep-Total : Repeat normalized total mappings.  Instead of each mapping counting as "1", each mapping instead counts as "1/NH", where NH is the total number of mappings that read had, according to the NH:i: tag.
+Column 9: UI : Uniqueness index. This is a value >0 and <=1. To determine the UI, the ambiguity normalized counts within the locus are summed and divided by the total number of alignments. For a given read, the ambiguity-normalized value is defined as 1 / d, where d is the integer in the XX:i:[d] tag representint the total number of possible locations for that read. Thus, loci with a low UI have a large proportion of reads that are ambiguous in their origins.
 
 Column 10: DicerCall : If "N", the cluster was not annotated as dicer-derived, per options --dicermin, --dicermax, and --mindicerfrac.  Otherwise this is a number, within the --dicermin to --dicermax size range, which indicates the most abundant small RNA size within the mappings at that cluster.
 
@@ -6242,13 +6893,11 @@ Columns 25 - the end : The total mappings from reads with the indicated lengths.
 
 =head2 Log.txt
 
-This is a simple log file which records most of the information that is also sent to STDERR during the run.
+This is a simple log file which records the information that is also sent to STDERR during the run.
 
-=head2 ShortStack.bed
+=head2 gff3 files
 
-This is a .bed file for viewing the clusters on a genome browser.  It follows the .bed specification given at the UCSC broswer site <http://genome.ucsc.edu/FAQ/FAQformat.html>.  Clusters are color-coded based on the dominant size.  Non-Dicer clusters are always dark gray.  Dicer-clusters are RGB-rainbow colored from red (shortest) to green (middle) to blue (longest).  Note that the bed coordinate system is zero-based, and the 'stop' coordinate is the first nt NOT in the interval.  So, a 100 nt interval beginning at base 1 and ending at base 100 would have a start of 0 and a stop of 100 in the bed file.
-
-Hairpins and MIRNAs are graphically indicated: The helical arms will be shown as thick boxes, and the rest of the cluster will be thin lines.
+Two gff3-formatted files are created, one for the 'DCL' loci (those with a DicerCall that is NOT N), and the 'N' loci (those with a DicerCall of 'N').
 
 =head2 miRNA_summary.txt
 
@@ -6260,23 +6909,33 @@ Unless the run was done in --nohp mode, each annotated hairpin-derived and MIRNA
 
 Reads mapped to the sense strand (sense relative to the hairpin, not necessarily relative to the genome) have "."s as placeholders and are shown in the 5'-->3' orientation.  Reads mapped to the antisense strand (antisense relative to the hairpin, not necessarily relative to the genome) have "<"s as placeholders, and are written in the 3' --> 5' orientation.  Annotated mature miRNAs have "m"s as placeholders, and annotated miRNA*'s have "*"s as placeholders.
 
-After each read, the read length (l) and the number of mappings (m) is shown.  Unless the program was run in --raw mode, the normalized mappings per million mapped reads (mmmr) is also shown.
+After each read, the read length (l) and the number of mappings (m) is shown.
 
 Note that alignments for very complex HP loci are suppressed (only the sequence and structure will be displayed in the detail file, along with a note indicating the alignment was suppressed).  This has a major impact on reducing the memory footprint of ShortStack.  In addition, since the alignments are meant for visual inspection, very complex alignments aren't really parseable by eye anyway.  Complex loci are defined as those where the hairpin is longer than 400nts AND/OR has more than 400 distinct small RNA sequences.  All MIRNA loci have the alignments presented, regardless of whether it is complex or not.
 
 =head1 KEY METHODS
 
+=head2 Adapter trimming
+
+Adapter trimming by ShortStack searches for the right-most occurence of the string given in the option --adapter. If found, the adapter is chopped off. Reads where no adapter is found are discarded, as are those shorter than 15 nts after trimming. Finally, any reads that contain non-ATGC characters after trimming are also discarded. Adapter-matching is performed by a simple regex and allows for no mismatches. If the input file is in FASTQ format, the quality values are trimmed as well.
+
+=head2 Alignments
+
+Alignments are performed with the bowtie settings -v 1 -a --best --strata -S, and then parsed by ShortStack to retain just ONE randomly selected valid alignment per read. After this selection, and the addition of the XX tag (indicating the total number of possible positions for the read), the data are then piped through samtools view and samtools sort to create a sorted BAM formatted file. The header is also modified to note ShortStack processing. Note that unmapped reads are also retained in the alignment, with the SAM Flag set as 0x4 to indicate that.
+
+One valid question is why force bowtie to report all valid alignments, and then parse to select just one, instead of explicitly telling bowtie to report just one alignment (e.g. k 1)? The reason is that bowtie's selection of reported positions in those cases is clearly NOT random. So even though ShortStack's method incurs a performance penalty during alignment, it will guarantee a more accurate alignment.
+
 =head2 de novo Cluster Discovery
 
 Cluster discovery proceeds in two simple steps:
 
-1. The total depth of small RNA coverage at each occupied nucleotide in the genome is examined, and initial 'islands' of coverage are defined as continuous stretches where the read depth is greater than or equal to the threshold depth specified by option --mindepth.  Note that islands could theoretically be as small as one nucleotide, since they depend on total depth of coverage, not the small RNA length per se.  Many islands will often be 20-24nts in length, corresponding to a pile of a single small RNA species.
+1. The total depth of small RNA coverage at each occupied nucleotide in the genome is examined, and initial 'islands' of coverage are defined as continuous stretches where the read depth is greater than or equal to the threshold depth specified by option --mindepth.  Note that islands could theoretically be as small as one nucleotide, since they depend on total depth of coverage, not the small RNA length per se.  Many islands may often be 20-24nts in length, corresponding to a pile of a single small RNA species.
 
 2. The initial islands are then temporarily extended on both sides by the distance specified by option --pad.  Islands that overlap after extension are merged.  The "dangling pads" at the ends of the merged clusters are then removed.  After all extensions, resultant mergers, and end trimmings are performed, the final result is the initial clusters.  If the run is performed in --nohp mode, these are the final clusters.  If hairpins and MIRNAs are being examined, some of the clusters may be adjusted in position to fully capture the putative hairpin(s) (see below).
 
 =head2 Hairpin and MIRNA analysis
 
-1. Clusters are first filtered to determine eligbility for secondary structure analysis.  Only clusters whose uniqueness index* is >= [--minUI] are eligible.  In addition, clusters with a DicerCall of "N" are excluded from folding analysis.  (Uniqueness index is the ratio of repeat-normalized abundance / total mappings at the locus.  Values approaching zero indicate a cluster dominated by multimapped reads.  Values approaching 1 indicate most mapped reads at a locus are uniquely placed).
+1. Clusters are first filtered to determine eligbility for secondary structure analysis.  Only clusters whose uniqueness index* is >= [--minUI] are eligible.  In addition, clusters with a DicerCall of "N" are excluded from folding analysis.
 
 2.  The genomic window to be subject to RNA folding is first determined.  If the locus size is > --maxhpsep, no RNA folding will take place at the locus.  Otherwise, a window with length of --maxhpsep is centered on the locus to determine the nucleotides to fold
 
@@ -6294,7 +6953,7 @@ Cluster discovery proceeds in two simple steps:
 
 9. The pattern of small RNA expression relative to the single hairpin candidate is further scrutinized for polarity.  The fraction of all mappings in the hairpin interval must be >= [--minstrandfrac].  As in step 8, this step corrects for "dyad" reads (see above).  Hairpins that pass this step are either HP or MIRNA loci.  The coordinates of the originally determined de novo locus are discarded, and replaced with the hairpin coordinates.
 
-10.  Each potential hairpin that remains is next analyzed to see if it qualifies as a MIRNA.  MIRNA locus annotation is designed to satisfy the criteria for de novo annotation of plant MIRNAs as described in Meyers et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682.  In fact, ShortStack's criteria is a little stricter than Meyers et al., in that ShortStack has an absolute requirement for sequencing of the exact predicted miRNA* sequence for a candidate mature miRNA.  It is important to note that ShortStack's MIRNA annotation method is designed to reduce false positives at the expense of an increased rate of false negatives.  In other words, there are likely many bona fide MIRNA loci that end up being classified as Hairpins, instead of MIRNAs, because they don't quite meet the strict criteria set forth below. 
+10.  Each potential hairpin that remains is next analyzed to see if it qualifies as a MIRNA.  MIRNA locus annotation is designed to satisfy the criteria for de novo annotation of plant MIRNAs as described in Meyers et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682.  In fact, ShortStack's criteria is a little stricter than Meyers et al., in that ShortStack has an absolute requirement for sequencing of the exact predicted miRNA* sequence for a candidate mature miRNA.  It is important to note that ShortStack's MIRNA annotation method is designed to reduce false positives at the expense of an increased rate of false negatives.  In other words, there are likely many bona fide MIRNA loci not annotated as such because they don't quite meet the strict criteria set forth below. 
 
 - Hairpin Size:  The total number of pairs in the hairpin must be <= [--maxmiRHPPairs]
 
@@ -6335,4 +6994,5 @@ Phasing analysis proceeds as follows:
 Note: P-values are not corrected for multiple-testing.  Consider adjustment of p-values to control for multiple testing (e.g. Bonferroni, Benjamini-Hochberg FDR, etc) if you want a defensible set of phased loci from a genome-wide analysis.
 
 =cut
+
 
