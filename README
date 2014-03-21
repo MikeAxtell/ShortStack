@@ -1,7 +1,7 @@
 LICENSE
     ShortStack.pl
 
-    Copyright (C) 2012 Michael J. Axtell
+    Copyright (C) 2012-2013 Michael J. Axtell
 
     This program is free software: you can redistribute it and/or modify it
     under the terms of the GNU General Public License as published by the
@@ -23,7 +23,7 @@ SYNOPSIS
 CITATION
     If you use ShortStack in your work, please cite
 
-    Axtell MJ. (2012) ShortStack: Comprehensive annotation and
+    Axtell MJ. (2013) ShortStack: Comprehensive annotation and
     quantification of small RNA genes. In prep.
 
     As of this version release, a manuscript describing ShortStack is being
@@ -31,7 +31,7 @@ CITATION
     please check Pubmed before citing!
 
 VERSION
-    0.4.0 :: Released December 27, 2012
+    0.4.1 :: Released January 8, 2013
 
 AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
@@ -236,7 +236,7 @@ OPTIONS
     for details. Default = 0.8. Allowed values between 0.5 and 1.
 
     --mindicerfrac [float] : Minimum fraction of mappings within Dicer size
-    range to annotate a locus as Dicer-derived. Default = 0.85. Allowed
+    range to annotate a locus as Dicer-derived. Default = 0.8. Allowed
     values between 0 and 1.
 
     --phasesize [integer] : Examine phasing only for clusters dominated by

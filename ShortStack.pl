@@ -6,8 +6,8 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.4.0";
-## December 27, 2012
+my $version = "0.4.1";
+## January 8, 2013
 ####
 
 ##### get options and validate them
@@ -3257,13 +3257,51 @@ sub get_star_coord {
 	@b_pos = sort {$b <=> $a} @b_pos;
     }
     my $c;
+    
+    my $lkeymax;
+    my $lkeymin;
+    my $rkeymax;
+    my $rkeymin;
+
     foreach my $b (@b_pos) {
 	if($$brax_hash{$b} eq "\(") {
 	    push(@left,$b);
 	} elsif($$brax_hash{$b} eq "\)") {
 	    $c = pop @left;
 	    $leftpairs{$c} = $b;
+
+            if($lkeymax) {
+                if($c > $lkeymax) {
+                    $lkeymax = $c;
+                }
+            } else {
+                $lkeymax = $c;
+            }
+            if($lkeymin) {
+                if($c < $lkeymin) {
+                    $lkeymin = $c;
+                }
+            } else {
+                $lkeymin = $c;
+            }
+
 	    $rightpairs{$b} = $c;
+	    
+	    if($rkeymax) {
+                if($b > $rkeymax) {
+                    $rkeymax = $b;
+                }
+            } else {
+                $rkeymax = $b;
+            }
+            if($rkeymin) {
+                if($b < $rkeymin) {
+                    $rkeymin = $b;
+                }
+            } else {
+                $rkeymin = $b;
+            }
+	    
 	}
     }
     
@@ -3281,6 +3319,10 @@ sub get_star_coord {
 	    until(exists($leftpairs{$i})) {
 		--$i;
 		++$j;
+		if($i < ($lkeymin - 1)) {
+                    return "fail";
+                    last;
+                }
 	    }
 	    $star_start = $leftpairs{$i} - $j;
 	    
@@ -3289,6 +3331,10 @@ sub get_star_coord {
 	    until(exists($leftpairs{$i})) {
 		++$i;
 		++$j;
+		if($i > ($lkeymax + 1)) {
+                    return "fail";
+                    last;
+                }
 	    }
 	    $star_stop = $leftpairs{$i} + 2 + $j;
 	    
@@ -3298,6 +3344,10 @@ sub get_star_coord {
 	    until(exists($leftpairs{$i})) {
 		++$i;
 		++$j;
+		if($i > ($lkeymax + 1)) {
+                    return "fail";
+                    last;
+                }
 	    }
 	    $star_start = $leftpairs{$i} + $j;
 	    
@@ -3306,6 +3356,10 @@ sub get_star_coord {
 	    until(exists($leftpairs{$i})) {
 		--$i;
 		++$j;
+		if($i < ($lkeymin - 1)) {
+                    return "fail";
+                    last;
+                }
 	    }
 	    $star_stop = $leftpairs{$i} - 2 - $j;
 	}
@@ -3317,6 +3371,10 @@ sub get_star_coord {
 	    until(exists($rightpairs{$i})) {
 		--$i;
 		++$j;
+		if($i < ($rkeymin - 1)) {
+                    return "fail";
+                    last;
+                }
 	    }
 	    $star_start = $rightpairs{$i} - $j;
 	    
@@ -3325,6 +3383,10 @@ sub get_star_coord {
 	    until(exists($rightpairs{$i})) {
 		++$i;
 		++$j;
+		if($i > ($rkeymax + 1)) {
+                    return "fail";
+                    last;
+                }
 	    }
 	    $star_stop = $rightpairs{$i} + 2 + $j;
 	} elsif ($strand eq "-") {
@@ -3333,6 +3395,10 @@ sub get_star_coord {
 	    until(exists($rightpairs{$i})) {
 		++$i;
 		++$j;
+		if($i > ($rkeymax + 1)) {
+                    return "fail";
+                    last;
+                }
 	    }
 	    $star_start = $rightpairs{$i} + $j;
 	    
@@ -3341,6 +3407,10 @@ sub get_star_coord {
 	    until(exists($rightpairs{$i})) {
 		--$i;
 		++$j;
+		if($i < ($rkeymin - 1)) {
+                    return "fail";
+                    last;
+                }
 	    }
 	    $star_stop = $rightpairs{$i} - 2 - $j;
 	}
@@ -6016,7 +6086,7 @@ __END__
 
 ShortStack.pl
 
-Copyright (C) 2012 Michael J. Axtell                                                             
+Copyright (C) 2012-2013 Michael J. Axtell                                                             
                                                                                                  
 This program is free software: you can redistribute it and/or modify                             
 it under the terms of the GNU General Public License as published by                             
@@ -6039,13 +6109,13 @@ Annotation and quantification of small RNA genes based upon reference-aligned sm
 
 If you use ShortStack in your work, please cite 
 
-Axtell MJ. (2012) ShortStack: Comprehensive annotation and quantification of small RNA genes.  In prep.
+Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  In prep.
 
 As of this version release, a manuscript describing ShortStack is being revised.  It might be published by the time you are reading this, so please check Pubmed before  citing!
 
 =head1 VERSION
 
-0.4.0 :: Released December 27, 2012
+0.4.1 :: Released January 8, 2013
 
 =head1 AUTHOR
 
@@ -6154,7 +6224,7 @@ B) count mode run to quantify small RNA expression from known Arabidopsis miRBas
 
 --minstrandfrac [float] : Minimum fraction of mappings to one or the other strand call a polarity for non-hairpin clusters.  Also the minimum fraction of "non-dyad" mappings to the sense strand within potential hairpins/miRNAs to keep the locus annotated as a hp or miRNA.  See below for details.  Default = 0.8.  Allowed values between 0.5 and 1.
 
---mindicerfrac [float] : Minimum fraction of mappings within Dicer size range to annotate a locus as Dicer-derived.  Default = 0.85.  Allowed values between 0 and 1.
+--mindicerfrac [float] : Minimum fraction of mappings within Dicer size range to annotate a locus as Dicer-derived.  Default = 0.8.  Allowed values between 0 and 1.
 
 --phasesize [integer] : Examine phasing only for clusters dominated by the indicated size range.  Size must be within the bounds described by --dicermin and --dicermax.  Set to 'all' to examine p-values of each locus within the Dicer range, in its dominant size.  Set to 'none' to suppress all phasing analysis.  Default = 21.  Allowed values between --dicermin and --dicermax.
 
@@ -6375,5 +6445,6 @@ Phasing analysis proceeds as follows:
 Note: P-values are not corrected for multiple-testing.  Consider adjustment of p-values to control for multiple testing (e.g. Bonferroni, Benjamini-Hochberg FDR, etc) if you want a defensible set of phased loci from a genome-wide analysis.
 
 =cut
+
 
 
