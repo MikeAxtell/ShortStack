@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "1.0.1";
+my $version_num = "1.1.0";  ## October 1, 2013
 
 
 ##### get options and validate them
@@ -53,6 +53,11 @@ my $help;
 my $version;
 my $bamfile;
 my $align_only;
+
+## New in 1.1.0
+my $read_group;
+
+
 # get user options from command line
 GetOptions ('outdir=s' => \$outdir,
 	    'mindepth=i' => \$mindepth,
@@ -83,6 +88,7 @@ GetOptions ('outdir=s' => \$outdir,
 	    'trimmedFQ=s' => \$trimmedFQ,
 	    'bamfile=s' => \$bamfile,
 	    'align_only' => \$align_only,
+	    'read_group=s' => \$read_group,
 	    'version' => \$version,
 	    'help' => \$help);
 
@@ -127,8 +133,10 @@ if(($untrimmedFA) or ($untrimmedFQ)) {
 	log_it($logfile,"FATAL: Option --adapter must be specified in conjunction with untrimmed reads\n\n$usage\n");
 	exit;
     }
-    unless($adapter =~ /^[ACTGactg]{8,}$/) {
-	log_it($logfile,"FATAL: Option --adapter must be a string of at least 8 ATGC characters .. case-insensitive\n\n$usage\n");
+    ## Adapters can now be comma-delimited
+    my $adapter_check = check_adapter($adapter);
+    unless($adapter_check) {
+	log_it($logfile,"FATAL: Option --adapter must be a string of at least 8 ATGC characters .. case-insensitive or comma delimited set of such\n\n$usage\n");
 	exit;
     }
     # Cant have both
@@ -420,6 +428,12 @@ if($mode == 1) {
 if($align_only) {
     log_it($logfile, "\nAlign-only mode: Trimmed reads will be aligned but no analysis will be performed.\n");
 } else {
+    log_it($logfile, "Read Group: ");
+    if($read_group) {
+	log_it($logfile, "$read_group\n");
+    } else {
+	log_it($logfile, "None .. all reads will be analyzed.\n");
+    }
     unless($nohp) {
 	log_it ($logfile,"einverted \.inv file of Inverted Repeats:");
 	if(-r $inv_file) {
@@ -483,44 +497,63 @@ my $expected_faidx = "$genome" . "\.fai";
 unless(-e $expected_faidx) {
     log_it ($logfile,"Expected genome index $expected_faidx for genome file $genome not found\.  Creating it using samtools faidx");
     system "samtools faidx $genome";
-    log_it ($logfile," done\n\n");
+log_it ($logfile," done\n\n");
 }
 
 
 ##############################################
 # pre-analysis
+my @trimmed_FAs = ();
+my @trimmed_FQs = ();
 
 if($mode == 1) {
     if($untrimmedFA) {
-	$trimmedFA = trim_FA($untrimmedFA,$adapter);
+	@trimmed_FAs = trim_FA($untrimmedFA,$adapter);
     } elsif ($untrimmedFQ) {
-	$trimmedFQ = trim_FQ($untrimmedFQ,$adapter);
+	@trimmed_FQs = trim_FQ($untrimmedFQ,$adapter);
     } else {
 	log_it($logfile,"FATAL: mode 1 but neither --untrimmedFA nor --untrimmedFQ found\?\n\n");
 	exit;
+    }
+} elsif ($mode == 2) {
+    if($trimmedFA) {
+	@trimmed_FAs = split (",",$trimmedFA);
+    } elsif ($trimmedFQ) {
+	@trimmed_FQs = split (",",$trimmedFQ);
     }
 }
 
 if(($mode == 1) or ($mode == 2)) {
     my $filetype;
     my $to_align_file;
-    if($trimmedFA) {
+    my @to_align_files = ();
+    if(@trimmed_FAs) {
 	$filetype = "a";
-	$to_align_file = $trimmedFA;
-    } elsif ($trimmedFQ) {
+	@to_align_files = @trimmed_FAs;
+    } elsif (@trimmed_FQs) {
 	$filetype = "q";
-	$to_align_file = $trimmedFQ;
+	@to_align_files = @trimmed_FQs;
     } else {
 	log_it($logfile,"\nFATAL: Failed to ID filetype between fastq or fasta for some reason\n\n");
 	exit;
     }
-    $bamfile = perform_alignment($to_align_file,$genome,$filetype);
-    unless(-r $bamfile) {
-	log_it($logfile,"\nFATAL: Failed to read bamfile $bamfile after sub-routine perform_alignment\n");
-	exit;
+    my @bamfiles = ();
+    foreach $to_align_file (@to_align_files) {
+	$bamfile = perform_alignment($to_align_file,$genome,$filetype);
+	unless(-r $bamfile) {
+	    log_it($logfile,"\nFATAL: Failed to read bamfile $bamfile after sub-routine perform_alignment\n");
+	    exit;
+	}
+	log_it($logfile,`date`);
+	log_it($logfile,"Alignment of $to_align_file completed: See file $bamfile\n");
+	push(@bamfiles, $bamfile);
     }
-    log_it($logfile,`date`);
-    log_it($logfile,"Alignments completed: See file $bamfile\n");
+    
+    # If more than one, merge em
+    if((scalar @bamfiles) > 1) {
+	$bamfile = merge_em(\@bamfiles,\$outdir);
+    }
+    
     if($align_only) {
 	log_it($logfile,"\nRun was in --align_only mode .. terminating.\n");
 	exit;
@@ -529,13 +562,25 @@ if(($mode == 1) or ($mode == 2)) {
 
 ################################################
 # bam file validation
-my $n_mapped = validate_bam($bamfile,$expected_faidx);
-unless($n_mapped) {
+my %rgs = validate_bam($bamfile,$expected_faidx);
+unless(%rgs) {
     log_it($logfile,"\nBAM file validation failed. Aborting run.\n");
     exit;
 }
 
-log_it($logfile,"\nTotal aligned reads in $bamfile : $n_mapped\n\n");
+################################################
+# If user wanted to only analyze a specific read-group, ensure it is in the bamfile
+# Clear hash if it had a null place-holder
+if(exists($rgs{'NULL'})) {
+    %rgs = ();
+}
+if($read_group) {
+    unless(exists($rgs{$read_group})) {
+	log_it($logfile, "\nFATAL: Read group $read_group specified with option --read_group is NOT present in the bamfile\!\n");
+	exit;
+    }
+}
+
 ###############################################
 
 ##### Phase One: Identify Clusters
@@ -551,7 +596,7 @@ if($count) {
 } else {
     log_it ($logfile," de novo\n");
 
-    my @islands = get_islands($bamfile,$mindepth,$expected_faidx);
+    my @islands = get_islands($bamfile,$mindepth,$expected_faidx,$read_group);
     
     @clusters = merge_clusters(\@islands,\$pad,\$genome);
     %names = get_names_simple(\@clusters);
@@ -571,7 +616,7 @@ if(@clusters) {
 log_it ($logfile,`date`);
 log_it ($logfile,"Phase Two: Quantify all clusters\n");
 
-my %quant_master = quant(\@clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\%names);
+my %quant_master = quant(\@clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\%names, \$read_group);
 
 # in this initial hash, the fields are
 #[0] : locus
@@ -708,12 +753,12 @@ if($nohp) {
     log_it($logfile, "Phase Five: Annotation of hpRNA and microRNA loci\n");
     
     log_it ($logfile,"\tFiltering hairpins based on expression evidence\.\.\.");
-    my %filtered_hps = hp_expression(\%true_hps_3,\$bamfile,\$minfrachpdepth);  ## radical changes 
+    my %filtered_hps = hp_expression(\%true_hps_3,\$bamfile,\$minfrachpdepth,\$read_group);  ## radical changes 
     ## Structure of hash .. key is locus, value is a single tab-delimited string.  Fields are as for %true_hps WITH ADDITION of [9] which is the frac_hp_depth
 
     ## NEW NEW NEW NEW
     log_it ($logfile,"\tFinal filtering of hairpins, and annotation of miRNA and hpRNA loci\.\.\.");
-    %final_hps = final_hp(\%filtered_hps,\$genome,\$bamfile,\$minstrandfrac,\$maxmiRHPPairs,\$maxmiRUnpaired);
+    %final_hps = final_hp(\%filtered_hps,\$genome,\$bamfile,\$minstrandfrac,\$maxmiRHPPairs,\$maxmiRUnpaired,\$read_group);
     log_it ($logfile," Done\n");
 	   
     ## structure like %filtered_hps, but expanded:
@@ -741,7 +786,7 @@ if($nohp) {
     
     ## now, we must re-quantify .. remove from the %quant_master hash entries for replaced clusters, and recalculate for the hairpin clusters with new coordinates.  Update all names too
     log_it($logfile,"\tRe-quantifying hpRNA and miRNA loci\.\.\.");
-    requant(\%quant_master,\@clusters,\@final_clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\%names);
+    requant(\%quant_master,\@clusters,\@final_clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\%names,\$read_group);
     log_it($logfile," Done\n\n");
 }
 
@@ -825,10 +870,13 @@ unless($flag_file eq "NULL") {
 
 
 # output two gff3 files .. one for DCL and the other for NON-DCL loci.
-my ($dcl_file,$nfile) = write_gff3s(\@final_clusters,\%quant_4,\$outdir);
-
+# only do this if a de novo run
+unless($count) {
+    my ($dcl_file,$nfile) = write_gff3s(\@final_clusters,\%quant_4,\$outdir);
+    
 # write gff3 file information to log
-log_it ($logfile,"\nGFF3 files are $dcl_file and $nfile\n");
+    log_it ($logfile,"\nGFF3 files are $dcl_file and $nfile\n");
+}
 
 # output the master file
 my $big_table = "$outdir" . "\/" . "Results\.txt";
@@ -848,8 +896,30 @@ close BIG;
 
 summarize(\%quant_4,\$nohp,\$dicermin,\$dicermax,\$logfile);
 
+##########################
+# If the bamfile had > 1 read group AND no read_group was specified on the command line, assume
+#  the user wants to finish up by separatlely quantify EACH of the read groups. Call ShortStack recursively, and 
+#  quietly in --count mode
 
-log_it ($logfile,"Completed\n");
+if(%rgs) {
+    if((scalar(keys %rgs)) > 1) {
+	unless($read_group) {
+	    my $rg;
+	    log_it($logfile,"\nBeginning count-mode analysis of each read-group separately.\n");
+	    my $common_options = "--dicermin $dicermin --dicermax $dicermax --phasesize $phasesize --flag_file $flag_file --minstrandfrac $minstrandfrac --mindicerfrac $mindicerfrac";
+	    while(($rg) = each %rgs) {
+		log_it($logfile,"\tWorking on read group $rg ... ");
+		my $rgoutdir = "$outdir" . "\/" . "rg_$rg";
+		system "$0 --outdir $rgoutdir --count $big_table --bamfile $bamfile --read_group $rg $common_options $genome 2> /dev/null";
+		log_it($logfile,"Done .. see $rgoutdir\n");
+	    }
+	}
+    }
+}
+
+
+
+log_it ($logfile,"\nCompleted\n");
 log_it ($logfile, `date`);
 
 
@@ -908,19 +978,21 @@ OPTIONS:
 
 --outdir [string] : Name of directory to be created to receive results of the run.  Deafults to \"ShortStack_[time]\", where time is \"UNIX time\" (the number of non-leap seconds since Jan 1, 1970 UCT), if not provided
 
---untrimmedFA [string] : Path to untrimmed small RNA-seq data in FASTA format.
+--untrimmedFA [string] : Path to untrimmed small RNA-seq data in FASTA format. Multiple datasets can be provided as a comma-delimited list.
 
---untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ format.
+--untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ format.  Multiple datasets can be provided as a comma-delimited list.
 
---adapter [string] : Sequence of 3' adapter to search for during adapter trimming. Must be at least 8 nts in length, and all ATGC characters. Required if either --untrimmedFA or --untrimmedFQ are specified.
+--adapter [string] : Sequence of 3' adapter to search for during adapter trimming. Must be at least 8 nts in length, and all ATGC characters. Required if either --untrimmedFA or --untrimmedFQ are specified. Multiple adapters (for when multiple input untrimmedFA/FQ files are specified) can be provided as a comma-delimited list.
 
---trimmedFA [string] : Path to trimmed and ready to map small RNA-seq data in FASTA format.
+--trimmedFA [string] : Path to trimmed and ready to map small RNA-seq data in FASTA format. Multiple datasets can be provided as a comma-delimited list.
 
---trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq data in FASTQ format.
+--trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq data in FASTQ format. Multiple datasets can be provided as a comma-delimited list.
 
 --align_only : Exits program after completion of small RNA-seq data alignment, creating BAM file.
 
 --bamfile [string] : Path to properly formatted and sorted BAM alignment file of small RNA-seq data.
+
+--read_group [string] : Analyze only the indicated read-group. Read-group must be specified in the bam alignment file header. Default = [not active -- all reads analyzed]
 
 --inv_file [string] : PATH to an einverted-produced .inv file of inverted repeats within the genome of interest.  Not required but strongly suggested for more complete annotations of hairpin-derived small RNA genes.  Default = {blank}.  Not needed for runs in \"nohp\" mode or runs in \"count\" mode (because \"count\" mode forces \"nohp\" mode as well).  A typical eniverted run uses default parameters except \"-maxrepeat 10000\", in order to capture long IRs.
 
@@ -2030,7 +2102,7 @@ sub range_overlap_count {
 }
 
 sub hp_expression {
-    my($input_hps,$bamfile,$min_frac) = @_; # passed by reference, hash and three scalars
+    my($input_hps,$bamfile,$min_frac,$read_group) = @_; # passed by reference, hash and four scalars
    
     my %original_locus_W = ();
     my %original_locus_C = ();
@@ -2111,8 +2183,11 @@ sub hp_expression {
 	## save all alignments 
 	## reset 
 	@alignments = ();
-	
-	open(SAM, "samtools view -F 0x4 $$bamfile $cluster |");
+	if($$read_group) {
+	    open(SAM, "samtools view -F 0x4 -r $$read_group $$bamfile $cluster |");
+	} else {
+	    open(SAM, "samtools view -F 0x4 $$bamfile $cluster |");
+	}
 	while (<SAM>) {
 	    push(@alignments, $_);
 	    chomp;
@@ -3502,7 +3577,7 @@ sub get_star_coord {
 }
     
 sub quant {
-    my($clus_array,$bamfile,$dicer_min,$dicer_max,$strand_cutoff,$dicer_cutoff,$phasesize,$names) = @_; ## passed by reference .. first one is array, hp_hash and miR_hash are hashes, others scalars
+    my($clus_array,$bamfile,$dicer_min,$dicer_max,$strand_cutoff,$dicer_cutoff,$phasesize,$names,$read_group) = @_; ## passed by reference .. first one is array, hp_hash and miR_hash are hashes, others scalars
     my %output = ();
     my %internal = ();
     my $total;
@@ -3578,8 +3653,11 @@ sub quant {
 	for($i = $loc_start; $i <= $loc_stop; ++$i) {
 	    $phase_hash{$i} = 0;
 	}
-	
-	open(SAM, "samtools view -F 0x4 $$bamfile $locus |");
+	if($$read_group) {
+	    open(SAM, "samtools view -F 0x4 -r $$read_group $$bamfile $locus |");
+	} else {
+	    open(SAM, "samtools view -F 0x4 $$bamfile $locus |");
+	}
 	while (<SAM>) {
 	    chomp;
 	    # ignore header lines, should they be present
@@ -5003,7 +5081,7 @@ sub flag_overlap {
 }
 
 sub final_hp { ## First added 0.3.0
-    my($in_hash,$genome,$bamfile,$minstrandfrac,$maxmiRHPPairs,$maxmiRUnpaired) = @_;  ## by reference .. first one hash, all others scalar
+    my($in_hash,$genome,$bamfile,$minstrandfrac,$maxmiRHPPairs,$maxmiRUnpaired,$read_group) = @_;  ## by reference .. first one hash, all others scalar
     
     my $orig_locus;
     my $hp_locus;
@@ -5080,7 +5158,11 @@ sub final_hp { ## First added 0.3.0
 	$right_strand_reads = 0; ## reset each time through
 	%left_dyad = ();
 	%right_dyad = ();
-	open(SAM, "samtools view -F 0x4 $$bamfile $hp_locus \|");
+	if($$read_group) {
+	    open(SAM, "samtools view -F 0x4 -r $$read_group $$bamfile $hp_locus \|");
+	} else {
+	    open(SAM, "samtools view -F 0x4 $$bamfile $hp_locus \|");
+	}
 	while (<SAM>) {
 	    chomp;
 	    push(@alignments, $_);  ## store for later use
@@ -5877,7 +5959,7 @@ sub get_folding_clusters {
 }
 
 sub requant {
-    my($output,$oldclus,$finalclus,$bamfile,$dicer_min,$dicer_max,$strand_cutoff,$dicer_cutoff,$phasesize,$names) = @_; ## passed by reference .. first one is array, hp_hash and miR_hash are hashes, others scalars
+    my($output,$oldclus,$finalclus,$bamfile,$dicer_min,$dicer_max,$strand_cutoff,$dicer_cutoff,$phasesize,$names,$read_group) = @_; ## passed by reference .. first one is array, hp_hash and miR_hash are hashes, others scalars
 
     my %internal = ();
     my $total;
@@ -5961,8 +6043,11 @@ sub requant {
 	    for($i = $loc_start; $i <= $loc_stop; ++$i) {
 		$phase_hash{$i} = 0;
 	    }
-	    
-	    open(SAM, "samtools view -F 0x4 $$bamfile $locus |");
+	    if($$read_group) {
+		open(SAM, "samtools view -F 0x4 -r $$read_group $$bamfile $locus |");
+	    } else {
+		open(SAM, "samtools view -F 0x4 $$bamfile $locus |");
+	    }
 	    while (<SAM>) {
 		chomp;
 		# ignore header lines, should they be present
@@ -6146,7 +6231,7 @@ sub requant {
 }
 
 sub get_islands {
-    my($bamfile,$mindepth,$expected_faidx) = @_;
+    my($bamfile,$mindepth,$expected_faidx,$read_group) = @_;
     # go chr by chr, using the .fai index file to get the chr names
     my @chrs = ();
     open(FAI, "$expected_faidx");
@@ -6181,7 +6266,11 @@ sub get_islands {
 	
 	$last_start = -1;
 	$last_ok = -1;
-	open(DEPTH, "samtools depth -r $chr $bamfile |");
+	if($read_group) {
+	    open(DEPTH, "samtools view -F 0x4 -r $read_group -b -u $bamfile $chr | samtools depth /dev/stdin |");
+	} else {
+	    open(DEPTH, "samtools view -F 0x4 -b -u $bamfile $chr | samtools depth /dev/stdin |");
+	}
 	while (<DEPTH>) {
 	    chomp;
 	    @fields = split ("\t", $_);
@@ -6273,112 +6362,168 @@ sub check_bowtie_build {
 
 sub trim_FA {
     my($untrimmed,$adapter) = @_;
-    log_it($logfile,"\nBeginning adapter trimming...");
-    (open(IN, "$untrimmed")) || return 0;
-    my $trimmedFA = "$untrimmed" . "_trimmed.fasta";
-    (open(OUT, ">$trimmedFA")) || return 0;
-    my $header;
-    my $trim_len;
-    my $no_insert = 0; ## includes adapter-only and no-adapter cases
-    my $too_short = 0;
-    my $amb = 0;
-    my $ok;
-    my $trim_seq;
-    while (<IN>) {
-	chomp;
-	if($_ =~ /^>/) {
+    
+    # Split comma-delimited paths...
+    my @untrimmed_files = split (",",$untrimmed);
+    
+    # Split comma-delimited adapters...
+    my @adapters = split (",",$adapter);
+    
+    # holder for all trimmed file names ...
+    my @trimmed_files = ();
+    
+    my $used_adapter;
+    
+    # check for number of adapters...
+    unless (((scalar @untrimmed_files) == (scalar @adapters)) or
+	    ((scalar @adapters) == 1)) {
+	log_it($logfile, "\nFATAL: The number of apdaters provided must be equal to the number of untrimmedFA files, or just one\n");
+	exit;
+    }
+    
+    foreach my $ut_file (@untrimmed_files) {
+	if(@adapters) {
+	    $used_adapter = shift @adapters;
+	}
+	log_it($logfile, "\nAdapter trimming file $ut_file with adapter $used_adapter ...");
+	(open(IN, "$ut_file")) || return 0;
+	my $trimmedFA = "$ut_file";
+	$trimmedFA =~ s/\..*$//g;  ## strip any extension
+	$trimmedFA .= "_trimmed.fasta"; ## add new extension
+	(open(OUT, ">$trimmedFA")) || return 0;
+	my $header;
+	my $trim_len;
+	my $no_insert = 0; ## includes adapter-only and no-adapter cases
+	my $too_short = 0;
+	my $amb = 0;
+	my $ok;
+	my $trim_seq;
+	while (<IN>) {
+	    chomp;
+	    if($_ =~ /^>/) {
+		$header = $_;
+	    } else {
+		$trim_len = 0;
+		while ($_ =~ /$used_adapter/ig) {
+		$trim_len = (pos $_) - (length $used_adapter);
+		}
+		if($trim_len == 0) {
+		    ++$no_insert;
+		} elsif ($trim_len < 15) {
+		    ++$too_short;
+		} else {
+		    $trim_seq = substr($_,0,$trim_len);
+		    if($trim_seq =~ /[^ATGCatcg]/) {
+			++$amb;
+		    } else {
+			++$ok;
+			print OUT "$header\n$trim_seq\n";
+		    }
+		}
+	    }
+	}
+	close IN;
+	close OUT;
+	log_it($logfile," Done\n");
+	log_it($logfile,"\tNo insert \(includes adapter-only and no-adapter cases combined\): $no_insert\n");
+	log_it($logfile,"\tToo short \(less than 15nts\): $too_short\n");
+	log_it($logfile,"\tAmbiguous bases after trimming: $amb\n");
+	log_it($logfile,"\tOK - output: $ok\n");
+	log_it($logfile,"\tResults in file $trimmedFA\n");
+	push(@trimmed_files,$trimmedFA);
+    }
+    return @trimmed_files;
+}
+
+sub trim_FQ {
+    my($untrimmed,$adapter) = @_;
+    
+    # Split comma-delimited paths...
+    my @untrimmed_files = split (",",$untrimmed);
+    
+    # Split comma-delimited adapters...
+    my @adapters = split (",",$adapter);
+    
+    # holder for all trimmed file names ...
+    my @trimmed_files = ();
+    
+    my $used_adapter;
+    
+    # check for number of adapters...
+    unless (((scalar @untrimmed_files) == (scalar @adapters)) or
+	    ((scalar @adapters) == 1)) {
+	log_it($logfile, "\nFATAL: The number of apdaters provided must be equal to the number of untrimmedFQ files, or just one\n");
+	exit;
+    }
+
+    foreach my $ut_file (@untrimmed_files) {
+	if(@adapters) {
+	    $used_adapter = shift @adapters;
+	}
+	log_it($logfile, "\nAdapter trimming file $ut_file with adapter $used_adapter ...");
+	(open(IN, "$ut_file")) || return 0;
+	my $trimmedFQ = "$ut_file";
+	$trimmedFQ =~ s/\..*$//g; ## strip extension
+	$trimmedFQ .= "_trimmed.fastq"; ## add new extension
+	(open(OUT, ">$trimmedFQ")) || return 0;
+	my $header;
+	my $trim_len;
+	my $no_insert = 0; ## includes adapter-only and no-adapter cases
+	my $too_short = 0;
+	my $amb = 0;
+	my $ok;
+	my $trim_seq;
+	my $plus;
+	my $seq;
+	my $qual;
+	my $trim_qual;
+	while (<IN>) {
+	    chomp;
 	    $header = $_;
-	} else {
+	    $seq = <IN>;
+	    chomp $seq;
+	    $plus = <IN>;
+	    chomp $plus;
+	    $qual = <IN>;
+	    chomp $qual;
+	    
+	    # crude validation
+	    unless(($header =~ /^\@/) and
+		   ($plus =~ /^\+/)) {
+		log_it($logfile,"\nFATAL: FASTQ format parse error in sub-routine trim_FQ\n");
+		exit;
+	    }
 	    $trim_len = 0;
-	    while ($_ =~ /$adapter/ig) {
-		$trim_len = (pos $_) - (length $adapter);
+	    while ($seq =~ /$used_adapter/ig) {
+		$trim_len = (pos $seq) - (length $adapter);
 	    }
 	    if($trim_len == 0) {
 		++$no_insert;
 	    } elsif ($trim_len < 15) {
 		++$too_short;
 	    } else {
-		$trim_seq = substr($_,0,$trim_len);
+		$trim_seq = substr($seq,0,$trim_len);
 		if($trim_seq =~ /[^ATGCatcg]/) {
 		    ++$amb;
 		} else {
 		    ++$ok;
-		    print OUT "$header\n$trim_seq\n";
+		    $trim_qual = substr($qual,0,$trim_len);
+		    print OUT "$header\n$trim_seq\n$plus\n$trim_qual\n";
 		}
 	    }
 	}
-    }
-    close IN;
-    close OUT;
-    log_it($logfile," Done\n");
-    log_it($logfile,"\tNo insert \(includes adapter-only and no-adapter cases combined\): $no_insert\n");
-    log_it($logfile,"\tToo short \(less than 15nts\): $too_short\n");
-    log_it($logfile,"\tAmbiguous bases after trimming: $amb\n");
-    log_it($logfile,"\tOK - output: $ok\n");
-    return $trimmedFA;
-}
-
-sub trim_FQ {
-    my($untrimmed,$adapter) = @_;
-    log_it($logfile,"\nBeginning adapter trimming...");
-    (open(IN, "$untrimmed")) || return 0;
-    my $trimmedFQ = "$untrimmed" . "_trimmed.fastq";
-    (open(OUT, ">$trimmedFQ")) || return 0;
-    my $header;
-    my $trim_len;
-    my $no_insert = 0; ## includes adapter-only and no-adapter cases
-    my $too_short = 0;
-    my $amb = 0;
-    my $ok;
-    my $trim_seq;
-    my $plus;
-    my $seq;
-    my $qual;
-    my $trim_qual;
-    while (<IN>) {
-	chomp;
-	$header = $_;
-	$seq = <IN>;
-	chomp $seq;
-	$plus = <IN>;
-	chomp $plus;
-	$qual = <IN>;
-	chomp $qual;
 	
-	# crude validation
-	unless(($header =~ /^\@/) and
-	       ($plus =~ /^\+/)) {
-	    log_it($logfile,"\nFATAL: FASTQ format parse error in sub-routine trim_FQ\n");
-	    exit;
-	}
-	$trim_len = 0;
-	while ($seq =~ /$adapter/ig) {
-	    $trim_len = (pos $seq) - (length $adapter);
-	}
-	if($trim_len == 0) {
-	    ++$no_insert;
-	} elsif ($trim_len < 15) {
-	    ++$too_short;
-	} else {
-	    $trim_seq = substr($seq,0,$trim_len);
-	    if($trim_seq =~ /[^ATGCatcg]/) {
-		++$amb;
-	    } else {
-		++$ok;
-		$trim_qual = substr($qual,0,$trim_len);
-		print OUT "$header\n$trim_seq\n$plus\n$trim_qual\n";
-	    }
-	}
+	close IN;
+	close OUT;
+	log_it($logfile," Done\n");
+	log_it($logfile,"\tNo insert \(includes adapter-only and no-adapter cases combined\): $no_insert\n");
+	log_it($logfile,"\tToo short \(less than 15nts\): $too_short\n");
+	log_it($logfile,"\tAmbiguous bases after trimming: $amb\n");
+	log_it($logfile,"\tOK - output: $ok\n");
+	log_it($logfile,"\tResults in file $trimmedFQ\n");
+	push(@trimmed_files, $trimmedFQ);
     }
-
-    close IN;
-    close OUT;
-    log_it($logfile," Done\n");
-    log_it($logfile,"\tNo insert \(includes adapter-only and no-adapter cases combined\): $no_insert\n");
-    log_it($logfile,"\tToo short \(less than 15nts\): $too_short\n");
-    log_it($logfile,"\tAmbiguous bases after trimming: $amb\n");
-    log_it($logfile,"\tOK - output: $ok\n");
-    return $trimmedFQ;
+    return @trimmed_files;
 }
 
 sub perform_alignment {
@@ -6406,9 +6551,13 @@ sub perform_alignment {
     }
     $bowtie .= " -v 1 -a --best --strata -S $genome $infile";
     
+    # define the outfile base name .. strip extensions from the infile
+    my $outfile_base = $infile;
+    $outfile_base =~ s/\..*$//g;
+    
     # Open the processes
     (open(BOW, "$bowtie |")) || return 0;
-    (open(OUT, "| samtools view -S -b -u - | samtools sort - $infile")) || return 0;
+    (open(OUT, "| samtools view -S -b -u - | samtools sort - $outfile_base")) || return 0;
     
     # Parsing the bowtie stream
     my $in_header = 1;
@@ -6489,7 +6638,7 @@ sub perform_alignment {
     log_it($logfile, "Total of $output sam lines output \(includes lines for non-mapped reads\).\n");
     
     # Verify file
-    my $expected_bam = "$infile" . ".bam";
+    my $expected_bam = "$outfile_base" . ".bam";
     unless(-r $expected_bam) {
 	log_it($logfile, "\nFATAL: Expected BAM file $expected_bam was not created after bowtie run\!\n\n");
 	exit;
@@ -6531,9 +6680,10 @@ sub validate_bam {
     # Is it readable?
     log_it($logfile, "\tFile readable\? ");
     unless(-r $bam) {
-	log_it($logfile, "FAIL -- ABORT\n");
+	log_it($logfile, "NO -- ABORT\n");
 	return 0;
     }
+    log_it($logfile, "YES\n");
     
     # header checks
     my %h_seqs = ();
@@ -6541,6 +6691,8 @@ sub validate_bam {
     (open(H, "samtools view -H $bam |")) || return 0;
     my $h;
     my $so;
+    my %rg = ();
+    my $rgname;
     while (<H>) {
 	if($_ =~ /^\@/) {
 	    unless($h) {
@@ -6556,6 +6708,14 @@ sub validate_bam {
 	    }
 	    if($_ =~ /^\@SQ\t.*SN:(\S+)/) {
 		$h_seqs{$1} = 1;
+	    }
+	    if($_ =~ /^\@RG\t.*ID:(\S+)/) {
+		$rgname = $1;
+		if($_ =~ /DS:(\S+)/) {
+		    $rg{$rgname} = $1;
+		} else {
+		    $rg{$rgname} = "None";
+		}
 	    }
 	}
     }
@@ -6586,6 +6746,18 @@ sub validate_bam {
     }
     log_it($logfile, "PASS\n");
     
+    # Are there read groups defined, and if so, what are they?
+    log_it($logfile,"\tRead Groups\? ");
+    if(%rg) {
+	log_it($logfile, "YES. And they are...\n");
+	while(($rgname) = each %rg) {
+	    log_it($logfile,"\t\t$rgname\tDescription: $rg{$rgname}\n");
+	}
+    } else {
+	log_it($logfile, "NO\n");
+	$rg{'NULL'} = 1;
+    }
+    
     # Does it have XX tags?  Just check the first line
     log_it($logfile, "\tHas XX tags\? ");
     (open(SAM, "samtools view $bam |")) || return 0;
@@ -6614,7 +6786,7 @@ sub validate_bam {
 	}
     }
     
-    ## OK. Get the total number of reads
+    ## Get the total number of reads
     (open(STAT, "samtools flagstat $bam |")) || return 0;
     my $n_mapped = 0;
     while (<STAT>) {
@@ -6622,8 +6794,81 @@ sub validate_bam {
 	    $n_mapped = $1;
 	}
     }
-    return $n_mapped;
+    log_it($logfile,"\tNumber of aligned reads: $n_mapped\n");
+
+    return %rg;
 }
+
+sub check_adapter {
+    my($input) = @_;
+    my @entries = split (",",$input);
+    foreach my $a (@entries) {
+	unless($a =~ /^[ACTGactg]{8,}$/) {
+	    return 0;
+	}
+    }
+    return 1;
+}
+
+sub merge_em {
+    my($bamfiles,$outdir) = @_;  ## passed by reference .. array, scalar
+    log_it($logfile, "\nMerging initial alignment files...\n");
+    
+    # Write a header that includes all of the read groups
+    # First copy the header of the first bamfile
+    
+    system "samtools view -H $$bamfiles[0] > ShortStack_SAM_head_temp.txt";
+    
+    # now add the read groups
+    my $out_name = "$$outdir" . ".bam";
+    my $command = "samtools merge -r -h ShortStack_SAM_head_temp.txt $out_name";
+    my $rg;
+    my $bamfile_part;
+    foreach $bamfile_part (@$bamfiles) {
+	# determine the number of reads
+	(open(STAT, "samtools flagstat $bamfile_part |")) || return 0;
+	my $n_mapped;
+	my $n_all;
+	my $n_unmapped;
+	while (<STAT>) {
+	    if($_ =~ /^(\d+) \+ (\d+) in total/) {
+		$n_all = $1 + $2;
+	    } elsif ($_ =~ /^(\d+) \+ (\d+) mapped/) {
+		$n_mapped = $1 + $2;
+	    }
+	}
+	close STAT;
+	$n_unmapped = $n_all - $n_mapped;
+	$rg = $bamfile_part;
+	$rg =~ s/\..*$//g;
+	log_it($logfile, "\tRead Group: $rg added to list .. Mapped: $n_mapped Unmapped: $n_unmapped\n");
+	# add to header
+	system "echo \"\@RG\tID:$rg\tDS:Mapped=$n_mapped\;Unmapped=$n_unmapped\" >> ShortStack_SAM_head_temp.txt";
+	# add to command
+	$command .= " $bamfile_part";
+    }
+    
+    # Call the merger
+    system "$command";
+    
+    # check success
+    unless(-r $out_name) {
+	log_it($logfile, "\nFATAL: merge of initial alignments failed\n");
+	exit;
+    }
+    
+    # clean up by deleting the component bam files and the temp header file
+    foreach $bamfile_part (@$bamfiles) {
+	system "rm -f $bamfile_part";
+    }
+    system "rm -f ShortStack_SAM_head_temp.txt";
+    
+    # log it
+    log_it($logfile,"\n\tCompleted merge of alignments. Final file is $out_name\n");
+    
+    return $out_name;
+}
+
     
 __END__
 
@@ -6658,7 +6903,7 @@ Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of sma
 
 =head1 VERSION
 
-1.0.1 :: Released September 19, 2013
+1.1.0 :: Released October 1, 2013
 
 =head1 AUTHOR
 
@@ -6679,7 +6924,7 @@ samtools <http://samtools.sourceforge.net/> needs to be installed in your PATH. 
 
 RNAeval and RNALfold are from the ViennaRNA package. See <http://www.tbi.univie.ac.at/~ronny/RNA/vrna2.html>. Both need to be installed in your PATH.
 
-bowtie and bowtie-build must be version "1" .. either 0.12.x or 1.x.  These are required ONLY if you are aligning reads to the genome. Bowtie can be found at http://bowtie-bio.sourceforge.net/index.shtml
+bowtie and bowtie-build must be version "1" .. either 0.12.x or 1.x.  These are required ONLY if you are aligning reads to the genome. Bowtie can be found at http://bowtie-bio.sourceforge.net/index.shtml. Like the other dependencies, they must be in your PATH.
 
 =head1 INSTALL
 
@@ -6726,19 +6971,21 @@ A full tutorial with sample Arabidopsis data can be found at http://axtelldata.b
 
 --outdir [string] : Name of directory to be created to receive results of the run.  Deafults to "ShortStack_[time]", where time is "UNIX time" (the number of non-leap seconds since Jan 1, 1970 UCT), if not provided
 
---untrimmedFA [string] : Path to untrimmed small RNA-seq data in FASTA format.
+--untrimmedFA [string] : Path to untrimmed small RNA-seq data in FASTA format. Multiple datasets can be provided as a comma-delimited list.
 
---untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ format.
+--untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ format.  Multiple datasets can be provided as a comma-delimited list.
 
---adapter [string] : Sequence of 3' adapter to search for during adapter trimming. Must be at least 8 nts in length, and all ATGC characters. Required if either --untrimmedFA or --untrimmedFQ are specified.
+--adapter [string] : Sequence of 3' adapter to search for during adapter trimming. Must be at least 8 nts in length, and all ATGC characters. Required if either --untrimmedFA or --untrimmedFQ are specified. Multiple adapters (for when multiple input untrimmedFA/FQ files are specified) can be provided as a comma-delimited list.
 
---trimmedFA [string] : Path to trimmed and ready to map small RNA-seq data in FASTA format.
+--trimmedFA [string] : Path to trimmed and ready to map small RNA-seq data in FASTA format. Multiple datasets can be provided as a comma-delimited list.
 
---trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq data in FASTQ format.
+--trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq data in FASTQ format. Multiple datasets can be provided as a comma-delimited list.
 
 --align_only : Exits program after completion of small RNA-seq data alignment, creating BAM file.
 
 --bamfile [string] : Path to properly formatted and sorted BAM alignment file of small RNA-seq data.
+
+--read_group [string] : Analyze only the indicated read-group. Read-group must be specified in the bam alignment file header. Default = [not active -- all reads analyzed]
 
 --inv_file [string] : PATH to an einverted-produced .inv file of inverted repeats within the genome of interest.  Not required but strongly suggested for more complete annotations of hairpin-derived small RNA genes.  Default = {blank}.  Not needed for runs in "nohp" mode or runs in "count" mode (because "count" mode forces "nohp" mode as well).  A typical eniverted run uses default parameters except "-maxrepeat 10000", in order to capture long IRs.
 
@@ -6810,6 +7057,8 @@ If you do make your own BAM alignments, outside of ShortStack.pl, they must pass
 3. All of the chromosome names found in the header MUST also be found in the genome.fasta file
 
 4. The data lines must contain the custom XX:i:(\d+) tag, where \d+ is an integer representing the total number of valid alignment positions for that read.
+
+5. If the option --read_group is being used, the specified read_group must be mentioned in the header in an @RG line.
 
 The BAM file should be indexed and have the corresonding .bam.bai index file in the same path as the bamfile. However, this is not required to pass validation .. if the index is not found, it will be created during the run.
 
@@ -6899,7 +7148,7 @@ This is a simple log file which records the information that is also sent to STD
 
 =head2 gff3 files
 
-Two gff3-formatted files are created, one for the 'DCL' loci (those with a DicerCall that is NOT N), and the 'N' loci (those with a DicerCall of 'N').
+Two gff3-formatted files are created, one for the 'DCL' loci (those with a DicerCall that is NOT N), and the 'N' loci (those with a DicerCall of 'N'). There are NOT produced in a --count mode run.
 
 =head2 miRNA_summary.txt
 
@@ -6926,6 +7175,18 @@ Adapter trimming by ShortStack searches for the right-most occurence of the stri
 Alignments are performed with the bowtie settings -v 1 -a --best --strata -S, and then parsed by ShortStack to retain just ONE randomly selected valid alignment per read. After this selection, and the addition of the XX tag (indicating the total number of possible positions for the read), the data are then piped through samtools view and samtools sort to create a sorted BAM formatted file. The header is also modified to note ShortStack processing. Note that unmapped reads are also retained in the alignment, with the SAM Flag set as 0x4 to indicate that.
 
 One valid question is why force bowtie to report all valid alignments, and then parse to select just one, instead of explicitly telling bowtie to report just one alignment (e.g. k 1)? The reason is that bowtie's selection of reported positions in those cases is clearly NOT random. So even though ShortStack's method incurs a performance penalty during alignment, it will guarantee a more accurate alignment.
+
+=head2 Multiple libraries
+
+As of version 1.1.0, ShortStack supports input of multiple FASTA or FASTQ datasets, either trimmed or untrimmed. These are passed in via the options --untrimmedFA, --untrimmedFQ, --trimmedFA, or --trimmedFQ as comma-delimited lists.  If the input is untrimmed, option --adapter also allows input of a corresponding comma-delimited list of adapters.  The untrimmed files and the adapters are assumed to be in the same order. If all untrimmed files have the same adapter, just one sequence for option --adapter is acceptable, and will be used to guide trimming for all files.
+
+When multiple small RNA-seq libraries are input, each one is first aligned separately, creating temporary .bam files. When this is complete, they are merged into a single alignment, which is given the name "outdir.bam" in the working directory, where "outdir" is the string given in option --outdir. During the merging, the read group information is stored, so all alignments can be de-convoluted back to their parent libraries if desired. The individual .bam alignments created intially are deleted.
+
+=head2 Read groups
+
+As of version 1.1.0, ShortStack incorporates the option --read_group. When specified, only the alignments from the read group specified by the option will be used for analysis. Use of this option demands that the indicated read group is specified in the header of the relevant bam alignment file.
+
+When an analysis uses a bam alignment file that contains more than one read group (based on the bam header), and the --read_group option was NOT used in the run, the analysis will conclude with a --count mode analysis of each read group separately. This is meant to be convenient for analyses in which a de-novo small RNA gene annotation is performed using a merger of multiple libraries, followed by quantification of each locus for each small RNA-seq library separately .. this should facilitate the downstream analysis of differential expression, for instance.
 
 =head2 de novo Cluster Discovery
 

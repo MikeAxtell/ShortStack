@@ -28,7 +28,7 @@ CITATION
     doi:10.1261/rna.035279.112
 
 VERSION
-    1.0.1 :: Released September 19, 2013
+    1.1.0 :: Released October 1, 2013
 
 AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
@@ -57,7 +57,8 @@ DEPENDENCIES
 
     bowtie and bowtie-build must be version "1" .. either 0.12.x or 1.x.
     These are required ONLY if you are aligning reads to the genome. Bowtie
-    can be found at http://bowtie-bio.sourceforge.net/index.shtml
+    can be found at http://bowtie-bio.sourceforge.net/index.shtml. Like the
+    other dependencies, they must be in your PATH.
 
 INSTALL
     There is no 'real' installation. After installing the dependencies (see
@@ -111,26 +112,34 @@ OPTIONS
     (the number of non-leap seconds since Jan 1, 1970 UCT), if not provided
 
     --untrimmedFA [string] : Path to untrimmed small RNA-seq data in FASTA
-    format.
+    format. Multiple datasets can be provided as a comma-delimited list.
 
     --untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ
-    format.
+    format. Multiple datasets can be provided as a comma-delimited list.
 
     --adapter [string] : Sequence of 3' adapter to search for during adapter
     trimming. Must be at least 8 nts in length, and all ATGC characters.
     Required if either --untrimmedFA or --untrimmedFQ are specified.
+    Multiple adapters (for when multiple input untrimmedFA/FQ files are
+    specified) can be provided as a comma-delimited list.
 
     --trimmedFA [string] : Path to trimmed and ready to map small RNA-seq
-    data in FASTA format.
+    data in FASTA format. Multiple datasets can be provided as a
+    comma-delimited list.
 
     --trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq
-    data in FASTQ format.
+    data in FASTQ format. Multiple datasets can be provided as a
+    comma-delimited list.
 
     --align_only : Exits program after completion of small RNA-seq data
     alignment, creating BAM file.
 
     --bamfile [string] : Path to properly formatted and sorted BAM alignment
     file of small RNA-seq data.
+
+    --read_group [string] : Analyze only the indicated read-group.
+    Read-group must be specified in the bam alignment file header. Default =
+    [not active -- all reads analyzed]
 
     --inv_file [string] : PATH to an einverted-produced .inv file of
     inverted repeats within the genome of interest. Not required but
@@ -286,6 +295,9 @@ KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
     4. The data lines must contain the custom XX:i:(\d+) tag, where \d+ is
     an integer representing the total number of valid alignment positions
     for that read.
+
+    5. If the option --read_group is being used, the specified read_group
+    must be mentioned in the header in an @RG line.
 
     The BAM file should be indexed and have the corresonding .bam.bai index
     file in the same path as the bamfile. However, this is not required to
@@ -476,7 +488,7 @@ OUTPUT
 
     Two gff3-formatted files are created, one for the 'DCL' loci (those with
     a DicerCall that is NOT N), and the 'N' loci (those with a DicerCall of
-    'N').
+    'N'). There are NOT produced in a --count mode run.
 
   miRNA_summary.txt
 
@@ -544,6 +556,45 @@ KEY METHODS
     selection of reported positions in those cases is clearly NOT random. So
     even though ShortStack's method incurs a performance penalty during
     alignment, it will guarantee a more accurate alignment.
+
+  Multiple libraries
+
+    As of version 1.1.0, ShortStack supports input of multiple FASTA or
+    FASTQ datasets, either trimmed or untrimmed. These are passed in via the
+    options --untrimmedFA, --untrimmedFQ, --trimmedFA, or --trimmedFQ as
+    comma-delimited lists. If the input is untrimmed, option --adapter also
+    allows input of a corresponding comma-delimited list of adapters. The
+    untrimmed files and the adapters are assumed to be in the same order. If
+    all untrimmed files have the same adapter, just one sequence for option
+    --adapter is acceptable, and will be used to guide trimming for all
+    files.
+
+    When multiple small RNA-seq libraries are input, each one is first
+    aligned separately, creating temporary .bam files. When this is
+    complete, they are merged into a single alignment, which is given the
+    name "outdir.bam" in the working directory, where "outdir" is the string
+    given in option --outdir. During the merging, the read group information
+    is stored, so all alignments can be de-convoluted back to their parent
+    libraries if desired. The individual .bam alignments created intially
+    are deleted.
+
+  Read groups
+
+    As of version 1.1.0, ShortStack incorporates the option --read_group.
+    When specified, only the alignments from the read group specified by the
+    option will be used for analysis. Use of this option demands that the
+    indicated read group is specified in the header of the relevant bam
+    alignment file.
+
+    When an analysis uses a bam alignment file that contains more than one
+    read group (based on the bam header), and the --read_group option was
+    NOT used in the run, the analysis will conclude with a --count mode
+    analysis of each read group separately. This is meant to be convenient
+    for analyses in which a de-novo small RNA gene annotation is performed
+    using a merger of multiple libraries, followed by quantification of each
+    locus for each small RNA-seq library separately .. this should
+    facilitate the downstream analysis of differential expression, for
+    instance.
 
   de novo Cluster Discovery
 
