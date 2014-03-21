@@ -6,9 +6,8 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.4.1";
-## January 8, 2013
-####
+my $version = "0.4.2";
+
 
 ##### get options and validate them
 
@@ -728,7 +727,7 @@ OPTIONS:
 --maxmiRUnpaired [integer] : Maximum number of unpaired miRNA nts in a miRNA/miRNA\* duplex\; default: set by --miRType \'plant\' to 5\.  --miRType \'animal\' instead sets it to 6
 --minstrandfrac [float] : minimum fraction of mappings to assign a polarity to a non-hairpin cluster\; default: 0.8
 --mindicerfrac [float] : minimum fraction of mappings within the dicer size range to annotate a locus as Dicer-derived\; default: 0.8
---count [string] : File containing a-priori defined clusters\.  Presence of --count triggers \"count\" mode, and de-novo cluster discovery is skipped\. Default: off
+--count [string] : File containing a-priori defined clusters\.  Presence of --count triggers \"count\" mode, and de-novo cluster discovery is skipped\. Count mode also forces nohp mode\. Default: off
 --phasesize [string or integer] : Cluster type to examine for significant phasing\.  Must be within the --dicermin to --dicermax range, or \'all\' to look at all dicer clusters, or \'none\' to skip all phasing analyses\. Default: 21
 --nohp : If --nohp appears on the command line, program executes in \"no_hp\" mode, omitting hairpin and MIRNA inferences\.  Default: off
 --raw : If --raw appears on the command line, program reports quantifications in raw mappings, instead of normalizing for library size to mappings per million mapped\. Default: Off
@@ -6081,7 +6080,6 @@ sub requant {
 }
 
 __END__	
-
 =head1 LICENSE
 
 ShortStack.pl
@@ -6094,7 +6092,7 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.                                                              
                                                                                                  
 This program is distributed in the hope that it will be useful,                                  
-but WITHOUT ANY WARRANTY; without even the implied warranty of                                   
+    but WITHOUT ANY WARRANTY; without even the implied warranty of                                   
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                                    
 GNU General Public License for more details.                                                     
                                                                                                  
@@ -6109,13 +6107,13 @@ Annotation and quantification of small RNA genes based upon reference-aligned sm
 
 If you use ShortStack in your work, please cite 
 
-Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  In prep.
+Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  RNA. (In press).
 
-As of this version release, a manuscript describing ShortStack is being revised.  It might be published by the time you are reading this, so please check Pubmed before  citing!
+As of this version release, a manuscript describing ShortStack is in press at the journal "RNA".  It might be published by the time you are reading this, so please check Pubmed before citing!
 
 =head1 VERSION
 
-0.4.1 :: Released January 8, 2013
+0.4.2 :: Released March 18, 2013
 
 =head1 AUTHOR
 
@@ -6143,7 +6141,7 @@ ensure 'perl' is located in /usr/bin/ .. if not, edit line 1 of script according
 
 =head1 USAGE
                                                                                                                              
-	Shortstack.pl [options] [in.bam] [genome.fasta] 
+Shortstack.pl [options] [in.bam] [genome.fasta] 
 
 =head1 QUICK START 
 
@@ -6155,34 +6153,15 @@ ensure 'perl' is located in /usr/bin/ .. if not, edit line 1 of script according
 
 4. Align your reads to the reference genome, output the results in sam/bam format, and pipe through 'Prep_bam.pl' to generate a properly formatted, sorted, and indexed .bam alignment.  Note the total number of mapped reads.  Suggested aligner is bowtie 1 (0.12.8) but any method that outputs in sam/bam format is fine.  If you use bowtie version 1, the following command can be used for one-step mapping, formatting, sorting, and indexing (assuming of course you've installed bowtie and built the bowtie index for your reference genome):
 
-	bowtie [bowtie_options] -S [bowtie_genome_index] [trimmed_reads] | Prep_bam.pl --genome [genome.fasta] --prefix [file_name_prefix]
+bowtie [bowtie_options] -S [bowtie_genome_index] [trimmed_reads] | Prep_bam.pl --genome [genome.fasta] --prefix [file_name_prefix]
 
 5.  If you use another mapping method besides the one above, the final .bam formatted file must be sorted by chromosomal position, have NH:i: tags present (see SAM specification), and be indexed with the .bam.bai index file in the same directory as the .bam file.  In additional, all data lines (except those for unmapped reads, which are ignored) must have a valid CIGAR string (see SAM specification).  Non-conforming .sam or .bam files can be processed with 'Prep_bam.pl' -- see the README for Prep_bam.pl included with this package.
 
 6. For a full de-novo run with default parameters, call "Shortstack.pl [in.bam] [genome.fasta]".  See OPTIONS below for other options and run modes.
 
-=head1 TEST
+=head1 TUTORIAL
 
-Some Arabidopsis test data can be found at http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
-
-1.  Athaliana_genome.tgz : The "TAIR10" Arabidopsis thaliana (ecotype-Col-0) genome assembly including the plastid and mitochrondria, and its .fai index.  Retrieved from Phytozome.  This is the assembly to which the .bam files in this directory were mapped.
-
-2.  col_leaf.bam[.bai] : Sorted and indexed small RNA-seq alignments in BAM format.  Derived from wild-type rosette leaves -- Liu et al. (2012) Plant Physiology PMID: 22474216.  This alignment contains 26,523,213 mapped reads, 14,351,052 of which were "uniquely" mapped (just one alignment), and a total of 104,980,568 alignments.  The small RNA sizes range from 15-27nts.  To create this alignment, adapters were trimmed from the raw .csfasta (including the hybrid 3' color), and mapped using bowtie 0.12.8.  The bowtie settings were -C -f -v 1 --best --strata -k 50 --col-keepends -S, which allow zero or one mismatch, keeping only the best scoring 'stratum', and retaining only the first 50 alignments observed, and outputting in sam format.  The bowtie STDOUT was directly piped into "Prep_bam.pl" (version 0.1.1) to prepare a properly formatted, sorted, and indexed .bam alignment.
-
-3. ath_hp_mb19_SStack_Athal_167.txt : Coordinates for Arabidopsis thaliana MIRNA hairpin sequences, as determined by taking the top-scoring hit from a blastn search using miRBase 19 ath- hairpins as queries against the reference genome.  This file is useful as input for a ShortStack run in --count mode.  It is also usable as a --flag_file, in which case clusters overlapping known MIRNAs will be noted.
-
-4.  Athaliana_167.inv : einverted-derived file resulting from analysis of Arabidopsis genome (file 1) with default settings except -maxrepeat 10000.
-
-Some Tests:
-
-A) full de-novo annotation run, including inverted repeats file and flag file of known Arabidopsis MIRNAs:
-
-	ShortStack.pl --inv_file Athaliana_167.inv --flag_file ath_hp_mb19_SStack_Athal_167.txt col_leaf_ok.bam Athaliana_167.fa
-
-B) count mode run to quantify small RNA expression from known Arabidopsis miRBase MIRNA loci:
-
-	ShortStack.pl --count ath_hp_mb19_SStack_Athal_167.txt col_leaf_ok.bam Athaliana_167.fa
-
+A full tutorial with sample Arabidopsis data can be found at http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
 
 =head1 OPTIONS
 
@@ -6224,7 +6203,7 @@ B) count mode run to quantify small RNA expression from known Arabidopsis miRBas
 
 --minstrandfrac [float] : Minimum fraction of mappings to one or the other strand call a polarity for non-hairpin clusters.  Also the minimum fraction of "non-dyad" mappings to the sense strand within potential hairpins/miRNAs to keep the locus annotated as a hp or miRNA.  See below for details.  Default = 0.8.  Allowed values between 0.5 and 1.
 
---mindicerfrac [float] : Minimum fraction of mappings within Dicer size range to annotate a locus as Dicer-derived.  Default = 0.8.  Allowed values between 0 and 1.
+--mindicerfrac [float] : Minimum fraction of mappings within Dicer size range to annotate a locus as Dicer-derived.  Default = 0.85.  Allowed values between 0 and 1.
 
 --phasesize [integer] : Examine phasing only for clusters dominated by the indicated size range.  Size must be within the bounds described by --dicermin and --dicermax.  Set to 'all' to examine p-values of each locus within the Dicer range, in its dominant size.  Set to 'none' to suppress all phasing analysis.  Default = 21.  Allowed values between --dicermin and --dicermax.
 
@@ -6298,7 +6277,7 @@ This is a simple tab-delimited text file.  The first line begins with a "#" (com
 
 To import this into R, here's a tip to deal with the first line, which has the headers but begins with a "#" character.
 
-	>results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
+    >results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
 
 Column 1: Locus : The genome-browser-friendly coordinates of the clusters.  Coordinates are one-based, inclusive (e.g. Chr1:1-100 refers to a 100 nt interval beginning with nt 1 and ending with nt 100).
 
@@ -6340,33 +6319,7 @@ Column 19 : HPSizeResult : "1" indicates the number of pairs in the hairpin was 
 
 Column 20 : PrecisionResult : The number of small RNA sequences in the stem region of the hairpin that accounted for >= 20% of the mappings.  If this is not a HP or MIRNA locus, "NA" is entered instead.
 
-Column 21 : DuplexResult : The number of possible miRNA/miRNA* duplexes in which neither partner spanned a loop and neither partner had > maxmiRUnpaired number of unpaired nucleotides in the putative duplex.  If this is not a HP or MIRNA locus, "NA" is entered instead.
-
-Column 22 : StarResult : The number of putative miRNA*'s that were actually sequenced.  Values of 1 or more here indicate a MIRNA annoation.  If this is not a HP or MIRNA locus, "NA" is entered instead.
-
-Column 23: Short : The total mappings from reads with lengths less than --dicermin, either in raw reads (--raw mode), or mappings per million mapped.
-
-Column 24: Long : The total mappings from reads with lengths more than --dicermax, either in raw reads (--raw mode), or mappings per million mapped.
-
-Columns 25 - the end : The total mappings from reads with the indicated lengths.  These are the sizes within the Dicer range.
-
-=head2 Log.txt
-
-This is a simple log file which records most of the information that is also sent to STDERR during the run.
-
-=head2 ShortStack.bed
-
-This is a .bed file for viewing the clusters on a genome browser.  It follows the .bed specification given at the UCSC broswer site <http://genome.ucsc.edu/FAQ/FAQformat.html>.  Clusters are color-coded based on the dominant size.  Non-Dicer clusters are always dark gray.  Dicer-clusters are RGB-rainbow colored from red (shortest) to green (middle) to blue (longest).  Note that the bed coordinate system is zero-based, and the 'stop' coordinate is the first nt NOT in the interval.  So, a 100 nt interval beginning at base 1 and ending at base 100 would have a start of 0 and a stop of 100 in the bed file.
-
-Hairpins and MIRNAs are graphically indicated: The helical arms will be shown as thick boxes, and the rest of the cluster will be thin lines.
-
-=head2 miRNA_summary.txt
-
-This is a tab-delimited text file that summarizes key features of the loci annotated as MIRNAs, including mature miRNA sequences, miRNA-star sequences, and the numbers of mappings for each and for the entire locus.
-
-=head2 Hairpin and MIRNA detail files
-
-Unless the run was done in --nohp mode, each annotated hairpin-derived and MIRNA locus will have its own simple text file to display the details of the locus.  These text files all show A) the Name and genomic coordinates of the locus, B) the sequence, in RNA form, C) the identified hairpin structure, in dot-bracket notation, and D) all mappings whose start and stop is within the interval being examined.
+Column 21 : DuplexResult : The number of possible miRNA/miRNA* duplexes in which neither partner spanned a loop and neither partnerill have its own simple text file to display the details of the locus.  These text files all show A) the Name and genomic coordinates of the locus, B) the sequence, in RNA form, C) the identified hairpin structure, in dot-bracket notation, and D) all mappings whose start and stop is within the interval being examined.
 
 Reads mapped to the sense strand (sense relative to the hairpin, not necessarily relative to the genome) have "."s as placeholders and are shown in the 5'-->3' orientation.  Reads mapped to the antisense strand (antisense relative to the hairpin, not necessarily relative to the genome) have "<"s as placeholders, and are written in the 3' --> 5' orientation.  Annotated mature miRNAs have "m"s as placeholders, and annotated miRNA*'s have "*"s as placeholders.
 
@@ -6400,19 +6353,7 @@ Cluster discovery proceeds in two simple steps:
 
 7.  Hairpins that don't have overlap with the original cluster are then removed.  Because the folding window could have been extended around the cluster, there could be  putative hairpins that are not within the original cluster.  To have overlap, at least one of the hairpin's helical arms must have at least 1nt within the original cluster coordinates.
 
-8. The pattern of small RNA expression relative to the remaining hairpins is then examined.  The per-nucleotide coverage across every base, on both strands separately, across the original locus coordinates is calculated.  If there is a single hairpin whose 5' and 3' arms contain >= [--minfrachpdepth] of the total coverage of the original locus, the hairpin is kept for futher analysis.  If more than one hairpin meets this criterion, than the one with the highest coverage fraction in the arms is retained.  Note that this step contains a correction for reads that are "dyads" .. reads that map twice to a hairpin, once in each arm, on opposite strands... this happens for perfect inverted repeat loci.  Such reads are counted towards the sense strand only for a given hairpin.
-
-9. The pattern of small RNA expression relative to the single hairpin candidate is further scrutinized for polarity.  The fraction of all mappings in the hairpin interval must be >= [--minstrandfrac].  As in step 8, this step corrects for "dyad" reads (see above).  Hairpins that pass this step are either HP or MIRNA loci.  The coordinates of the originally determined de novo locus are discarded, and replaced with the hairpin coordinates.
-
-10.  Each potential hairpin that remains is next analyzed to see if it qualifies as a MIRNA.  MIRNA locus annotation is designed to satisfy the criteria for de novo annotation of plant MIRNAs as described in Meyers et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682.  In fact, ShortStack's criteria is a little stricter than Meyers et al., in that ShortStack has an absolute requirement for sequencing of the exact predicted miRNA* sequence for a candidate mature miRNA.  It is important to note that ShortStack's MIRNA annotation method is designed to reduce false positives at the expense of an increased rate of false negatives.  In other words, there are likely many bona fide MIRNA loci that end up being classified as Hairpins, instead of MIRNAs, because they don't quite meet the strict criteria set forth below. 
-
-- Hairpin Size:  The total number of pairs in the hairpin must be <= [--maxmiRHPPairs]
-
-- Precision: There must be at least one candidate mature miRNA that comprises at least 20% of the total abundance of small RNAs mapped to the hairpin.  
-
-- Duplex:  Both partners in a candidate miRNA/miRNA* duplex must not span any loops (i.e. neither is allowed to have base-pairs to itself).  In addition, there must be <= [--maxmiRUnpaired] unpaired mature miRNA nts in the miRNA/miRNA* duplex, and <= [--maxmiRUnpaired] unpaired miRNA* nts in the miRNA/miRNA* duplex.
-
-- Star: The exact predicted miRNA*s of candidate miRNAs must have at least one mapped read, and the total abundance of any candidate mature miRNA/miRNA* pair must be at least 25% of the total small RNA abundance at the locus.  Finally, redundant candidate mature miRNAs are removed, as the steps above initially might classify a small RNA as both a miRNA* and mature miRNA.  In such cases, the partner with the higher abundance is called the miRNA, the other the miRNA*.
+8. The pattern of small RNA expression relative to the remaining hairpins is then examined.  The per-nucleotide coverage across every base, on both strands separately, across the original locus coordinates is calculated.  If there is a single hairpin whose 5' and 3' arms contain >= [--minfrachpdepth] of the total coverage of the original locus, the hairpin is kept for futher analysis.  If more than one hairpin meets this criterion, than the one with the highest coverage fraction in the arms is retained.  Note that this step contains a correction for reads that are "dyads" .. reads that map twice to a hairpin, once in each arm, on opposite strands... this happens for perfect inverted repeat loci.  Su ShortStack's MIRNA annotation method is designed to reduce false positives at the expense of an increased rate of false iRNA/miRNA* pair must be at least 25% of the total small RNA abundance at the locus.  Finally, redundant candidate mature miRNAs are removed, as the steps above initially might classify a small RNA as both a miRNA* and mature miRNA.  In such cases, the partner with the higher abundance is called the miRNA, the other the miRNA*.
 
 Hairpin loci passing all four of these loci are annotated as MIRNAs.  Those failing one or more are reported as HP loci instead.
 
@@ -6445,6 +6386,5 @@ Phasing analysis proceeds as follows:
 Note: P-values are not corrected for multiple-testing.  Consider adjustment of p-values to control for multiple testing (e.g. Bonferroni, Benjamini-Hochberg FDR, etc) if you want a defensible set of phased loci from a genome-wide analysis.
 
 =cut
-
 
 

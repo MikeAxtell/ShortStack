@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 use Getopt::Long;
 
-$version = "0.1.1";
+$version = "0.1.2";
 
 # Define a usage statement
 $usage = "$0 $version
@@ -279,7 +279,7 @@ __END__
 
 Prep_bam.pl
 
-Copyright (C) 2012 Michael J. Axtell                                                             
+Copyright (C) 2012-2013 Michael J. Axtell                                                             
                                                                                                  
 This program is free software: you can redistribute it and/or modify                             
 it under the terms of the GNU General Public License as published by                             
@@ -300,9 +300,19 @@ Input a sam, sam.gz, or bam file sorted by read names,
 Tally mappings per read and note with NH:i: tags,                                                                                    
 Output a .bam file sorted by chromosomal location, and a corresponding .bai index file.
 
+=head1 CITATION
+
+If you use ShortStack in your work, please cite 
+
+Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  RNA. (In press).
+
+As of this version release, a manuscript describing ShortStack is in press at the journal "RNA".  It might be published by the time you are reading this, so please check Pubmed before citing!
+
 =head1 VERSIONS
 
-0.1.1 : THIS VERSION.  June 28, 2012.  Frist released with ShortStack 0.1.4.  Fixes program so it no longer breaks when unmapped lines are encountered (now it simply ignores them).  This also allows direct piping of bowtie data directly into Prep_bam.pl
+0.1.2 : THIS VERSION.  March 18, 2013.  Updates to documentation infromation only, program itself is the same as 0.1.1.  First released with ShortStack 0.4.2.
+
+0.1.1 : June 28, 2012.  Frist released with ShortStack 0.1.4.  Fixes program so it no longer breaks when unmapped lines are encountered (now it simply ignores them).  This also allows direct piping of bowtie data directly into Prep_bam.pl
 
 0.1.0 : Initial release. April 29, 2012
 
