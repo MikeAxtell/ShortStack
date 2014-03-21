@@ -1,0 +1,88 @@
+LICENSE
+    Prep_bam.pl
+
+    Copyright (C) 2012 Michael J. Axtell
+
+    This program is free software: you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by the
+    Free Software Foundation, either version 3 of the License, or (at your
+    option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+    Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with this program. If not, see <http://www.gnu.org/licenses/>.
+
+SYNOPSIS
+    Input a sam, sam.gz, or bam file sorted by read names, Tally mappings
+    per read and note with NH:i: tags, Output a .bam file sorted by
+    chromosomal location, and a corresponding .bai index file.
+
+INSTALL
+    install samtools from <http://samtools.sourceforge.net/> and ensure that
+    samtools is in your PATH
+
+    ensure the script is executable
+
+        chmod +x Prep_bam.pl                                                         
+                                                                                                 
+    ensure the script is in your PATH (examples):
+
+        sudo cp Prep_bam.pl /usr/bin/                                                
+                                                                                                 
+    OR just for one session assuming script is in your working directory:
+
+        PATH=$PATH:.                                                                                 
+                                                                                                 
+    ensure 'perl' is located in /usr/bin/ .. if not, edit line 1 of script
+    accordingly
+
+USAGE
+    1. For .bam files : samtools view [input.bam] | $0 --prefix [prefix]
+    --genome [genome.fasta]
+
+    2. For .sam.gz files : gzip -d -c [input.sam.gz] | $0 --prefix [prefix]
+    --genome [genome.fasta]
+
+    3. For uncompressed .sam files : $0 --prefix [prefix] --genome
+    [genome.fasta] < [input.sam]
+
+OPTIONS
+    -- prefix [string] : base name for the final .bam and .bam.bai files
+    that will be created
+
+    -- genome [string] : Path to the fasta formatted genome file used for
+    the mapping
+
+NOTES
+  Input format and assumptions
+
+    It is critical that the input sam, sam.gz, or bam file be sorted by read
+    name. Additionally, it is assumed that read names are unique within the
+    file. If either of these assumptions are not true, the results of this
+    script are not reliable.
+
+  Exisiting NH:i: tags
+
+    If there are already NH:i: tags in the input data, they will be
+    discarded and over-written by the script.
+
+  CIGAR strings
+
+    The presence of proper CIGAR strings on all mappings is checked, and a
+    warning is issued if any are missing. The CIGAR string is used by
+    ShortStack.pl to determine the length of the mapped small RNA, so if any
+    are missing, the alignment cannot be analyzed by ShortStack.pl. If that
+    happens, consider using another aligner, or change your alignment
+    protocol, so that proper CIGAR strings are present in column 6 of the
+    SAM format (see SAM specification for details).
+
+VERSIONS
+    0.1.0 : Initial release. April 29, 2012
+
+AUTHOR
+    Michael J. Axtell, Penn State University, mja18@psu.edu
+

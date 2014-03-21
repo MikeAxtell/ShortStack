@@ -1,0 +1,728 @@
+LICENSE
+    ShortStack.pl
+
+    Copyright (C) 2012 Michael J. Axtell
+
+    This program is free software: you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by the
+    Free Software Foundation, either version 3 of the License, or (at your
+    option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+    Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with this program. If not, see <http://www.gnu.org/licenses/>.
+
+SYNOPSIS
+    Annotation and quantification of small RNA genes based upon
+    reference-aligned small RNA sequences
+
+CITATION
+    If you use ShortStack in your work, please cite
+
+    Axtell MJ. (2012) ShortStack: Comprehensive annotation and
+    quantification of small RNA genes. In prep.
+
+    A manuscript describing ShortStack will be submitted sometime in the
+    Spring/Summer of 2012, so check Pubmed first or look for an update!
+
+VERSIONS
+    0.1.0 : This version. Initial release. April 29, 2012
+
+AUTHOR
+    Michael J. Axtell, Penn State University, mja18@psu.edu
+
+INSTALL
+    install samtools from <http://samtools.sourceforge.net/> and ensure that
+    samtools is in your PATH
+
+    install the ViennaRNA package <http://www.tbi.univie.ac.at/~ivo/RNA/>
+    and ensure that RNALfold is in your PATH
+
+    ensure the script is executable
+
+        chmod +x ShortStack.pl                                                         
+                                                                                                 
+    ensure the script is in your PATH (examples):
+
+        sudo cp ShortStack.pl /usr/bin/                                                
+                                                                                                 
+    OR just for one session assuming script is in your working directory:
+
+        PATH=$PATH:.                                                                                 
+                                                                                                 
+    ensure 'perl' is located in /usr/bin/ .. if not, edit line 1 of script
+    accordingly
+
+USAGE
+    Shortstack.pl [options] [in.bam] [genome.fasta]
+
+QUICK START
+    1. Install ShortStack.pl and required third-party tools per above
+    instructions
+
+    2. Trim your raw reads to remove adapters
+
+    3. Ensure the chromosome names of the reference genome are short and
+    sweet, containing no whitespace or metacharacters (see below)
+
+    4. Align your reads to the reference genome, and output the results in
+    sam/bam format. Note the total number of mapped reads. Suggested aligner
+    is bowtie 1 (0.12.7) but method that outputs in sam/bam format is fine.
+
+    5. Ensure your alignments have intact CIGAR strings, not just "*"
+    placeholders (see SAM specification). Bowtie 1's SAM output is fine;
+    check for other aligners.
+
+    6. If not already present, generate the NH:i: tags on your .sam/.bam
+    file (see SAM specification), which indicate the total number of
+    mappings for each read.
+
+    7. Ensure the .bam file is then sorted by chromosomal position. Note
+    that the tool "Prep_bam.pl", included with the ShortStack package, will
+    take a read-sorted and non-NH:i'd sam/bam file (typical of bowtie
+    output), calculate and add the NH:i: tags, and output a
+    chromosomal-sorted .bam file suitable for analysis with ShortStack.pl
+
+    8. For a full de-novo run with default parameters, call "Shortstack.pl
+    [in.bam] [genome.fasta]". See OPTIONS below for other options and run
+    modes.
+
+OPTIONS
+    --outdir [string] : Name of directory to be created to receive results
+    of the run. Deafults to "ShortStack_[time]", where time is the number of
+    non-leap seconds since Jan 1, 1970 UTC, if not provided
+
+    --reads [integer] : Number of reads (NOT mappings) in the input .bam
+    file. No default. Reads are required to output quantifications in
+    mappings per million mapped, instead of in raw rads. If not provided,
+    the run will be forced into "--raw" mode, because mappings per million
+    mapped reads cannot be calculated.
+
+    --mindepth [integer] : Minimum depth of mapping coverage to define an
+    'island'. Default = 20. Must be at least 2, more than 5 preferred.
+
+    --pad [integer] : Number of nucleotides upstream and downstream to
+    extend initial islands during cluster definition. Default = 100
+
+    --dicermin [integer] : Smallest size in the Dicer size range (or size
+    range of interest). Deafult = 20. Must be between 15 and 35, and less
+    than or equal to --dicermax
+
+    --dicermax [integer] : Largest size in the Dicer size range (or size
+    range of interest). Deafult = 24. Must be between 15 and 35, and more
+    than or equal to --dicermin
+
+    --maxhpsep [integer] : Maximum allowed span for a base-pair during
+    hairpin search. Default = 300. Must be between 50 and 2000.
+
+    --maxfoldwindow [integer] : Maximum size of input genomic DNA allowed to
+    fold during hairpin search. Default = 1000. Clusters whose unpadded
+    region is larger than --maxfoldwindow will not be subject to hairpin
+    search. Increasing maxfoldwindow could drastically increase run times.
+    Allowed values are between 50 and 100,000
+
+    --minfracpaired [float] : Minimum fraction of paired nucleotides
+    required within a valid hairpin structure. Default = 0.67. Allowed
+    values are greater than 0 and less than or equal to 1.
+
+    --minntspaired [integer] : Minimum absolute number of paired nucleotides
+    required within a valid hairpin structure. Default = 30. Allowed values
+    are greater than zero and less than or equal to --maxhpsep
+
+    --minfrachpdepth [float] : Minimum fraction of nearby coverage within
+    hairpin arms to keep hairpin. Default = 0.5. Allowed values between 0
+    and 1. See below for details.
+
+    --minstrandfrac [float] : Minimum fraction of mappings to one or the
+    other strand call a polarity for non-hairpin clusters. Default = 0.8.
+    Allowed values between 0.5 and 1.
+
+    --mindicerfrac [float] : Minimum fraction of mappings within Dicer size
+    range to annotate a locus as Dicer-derived. Default = 0.85. Allowed
+    values between 0 and 1.
+
+    --phasesize [integer] : Examine phasing only for clusters dominated by
+    the indicated size range. Size must be within the bounds described by
+    --dicermin and --dicermax. Set to 'all' to examine p-values of each
+    locus within the Dicer range, in its dominant size. Default = 21.
+    Allowed values between --dicermin and --dicermax.
+
+    --phaseFDR [float] : False Discovery Rate for phased cluster analysis.
+    FDR of p-values set to this value for Benjamini-Hochberg method. See
+    below for details. Default = 0.05. Allowed values greater than 0 up to
+    1.
+
+    --count [string] : Invokes count mode, in which user-provided clusters
+    are annotated and quantified instead of being defined de novo. When
+    invoked, the file provided with --count is assumed to contain a simple
+    list of clusters. Formatting details below. Default : Not invoked.
+
+    --nohp : If "--nohp" appears on the command line, it invokes running in
+    "no hairpin" mode. RNA folding, hairpin annotation, and MIRNA annotation
+    will be skipped (likely saving significant time).
+
+    --raw : If "--raw" appears on the command line, it prevents conversion
+    of abundances into mappings per million mapped reads, and instead all
+    tallies in the results will simply be the raw reads. --raw mode is
+    forced if the user does not provide the number of reads via the --reads
+    option.
+
+KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
+  Input .bam file
+
+    The mapped reads in the input .bam file must be sorted by chromosomal
+    location, and indexed using the samtools index command -- specifically,
+    ShortStack will look for the [prefix].bam.bai file in the same directory
+    as the input [prefix].bam file.
+
+    Additionally, each mapping in the .bam file must have the NH:i: tag,
+    which indicates the total number of mappings for that read.
+
+    Finally, each mapped read must have the CIGAR string set (column 6 in
+    the SAM specification) -- ShortStack.pl determines the small RNA lengths
+    by parsing the CIGAR string .. if any mappings have "*" entered instead
+    of a valid CIGAR string ShortStack.pl will exit and complain.
+
+    Preparation of proper .bam files can be achieved with the helper script,
+    "Prep_bam.pl", included as part of the ShortStack package. Prep_bam.pl
+    takes in a READ-sorted .bam, .sam, or .sam.gz file and calculates the
+    NH:i: tags, and finally outputs a chromosomal-sorted and indexed .bam
+    file suitable for use by ShortStack.pl. It will also warn you if any
+    CIGAR strings are missing.
+
+    Finally, it is critical that the chromosome names referenced in the .bam
+    file correspond exactly to those present in the genome.fasta file.
+
+  Input genome.fasta file
+
+    It is critical that this be the precise genome to which the reads in the
+    input .bam file were mapped.
+
+    Additionally, the chromosome names in the FASTA headers must be kept
+    SIMPLE. Specifically, ShortStack.pl at several points parses clusters by
+    the regex /^(\S+):(\d+)-(\d+)$/ or some variant thereof, where the first
+    pattern is the chromosome name. Therefore, the chromosome names must
+    match (\S+) .. e.g. a single string of one or more non-white-space
+    characters, with no metacharacters. So, ">Chr1" in your reference genome
+    is good, but ">Chr1 | XM00023 | this is a bunch of annotation blah blah
+    blah" is bad. This same concern applies to the input .bam file, so your
+    chromosome names should be shortened BEFORE mapping your reads, so that
+    they are short and they are exactly reflected in the .bam file.
+
+    If not already present, a .fai index file for the genome will be created
+    using samtools faidx at the beginning of the run.
+
+  --count file
+
+    If running in --count mode, the user-provided file is expected to be a
+    simple text file containing a list of coordinates in the format :
+    [Chr]:[start]-[stop], where Chr is defined in the genome file AND in the
+    .bam file, and start and stop are one-based, inclusive. The same
+    requirement for short, non-whitespaced chromosome names as discussed
+    above holds true for input --count files. Comment lines, that begin with
+    '#', are ignored. Tab-delimited files are also accepted, provided the
+    first column has the coordinates. The second column in tab-delimted
+    files is assumed to be the names of the clusters, and will be used
+    accordingly. Any other columns in a tab-delimited input file are
+    ignored.
+
+    Importantly, the 'Results.txt' file produced by a previous ShortStack.pl
+    run can be used directly in subsequent runs in --count mode. This is
+    useful when comparing identical intervals across multiple samples.
+
+SUGGESTIONS FOR ADAPTER-TRIMMING AND ALIGNMENTS
+    The results from ShortStack.pl are strongly affected by how the reads
+    were processed and aligned. Alignment parameters in particular need to
+    be carefully documented, especially with regard to how multi-mapped
+    small RNA reads are treated. For instance, if your alignment protocol
+    demanded a unique match to the genome, and suppressed results for
+    multi-mapped reads, that will strongly influence cluster discovery as
+    well as render the comparisons of 'total' and 'rep-total' and
+    'unique-mappers' in the results meaningless. There (probably?) is no
+    single 'best' method (although I have some suggestions below), but it is
+    clear that, for comparison of results from different samples, all
+    pre-ShortStack processing steps should be explicit and identical between
+    the samples.
+
+    Trimming of adapters, while seemingly mundane and simple, also will have
+    profound effects on ShortStack results. For instance, if reads were
+    computationally filtered before alignment to only retain those in the
+    Dicer size range, than all clusters will be annotated by ShortStack.pl
+    as being dominated by Dicer-sized small RNAs. However, because the data
+    were selectively used, this may lead to false results.
+
+  Suggestions for Adapter Trimming
+
+    In general, I suggest retaining the broadest possible size range of
+    adapter-trimmed reads. In our group, we are typically retaining 15-35nt
+    reads for mapping at present. Inputting all reads for alignment will
+    allow ShortStack to confidently discern clusters dominated by reads in
+    the Dicer size range, from clusters that are not (which will often be
+    degradation fragments from abundant RNA species). Of course, the range
+    of small RNA sizes will also be dictated by the library construction
+    method used, but my suggestion is that a broad size range is preferable
+    in order to allow confident discrimination of Dicer-derived clusters
+    from non-Dicer-derived clusters.
+
+  Suggestions for Pre-Filtering
+
+    In short, I suggest avoid pre-filtering of the small RNAs prior to
+    alignment. Pre-filtering is often used to remove reads mapped to rRNAs,
+    tRNAs, and other abundant RNA species that frequently generate a lot of
+    small RNAs that are not thought to be Dicer-derived. Because ShortStack
+    discriminates clusters based on the sizes, clusters formed by non-Dicer
+    processes will be readily apparent. In addition, there is evidence that
+    some tRNA and snoRNA-derived fragments might be biologically meaningful,
+    instead of just random degradation ... so throwing out those data
+    altogether does not seem like the best idea.
+
+  Suggestions for Multi-mapped Reads
+
+    In many species, particularly plants, a great deal of small RNAs
+    correspond to repetitive genomic sequences, so in general it seems
+    imprudent to discard multi-mapped reads. Because ShortStack.pl will
+    report the total alignments within a cluster, the total alignments from
+    uniquely-mapped small RNAs, and the repeat-normalized total alignments,
+    the 'repetitiveness' of each cluster should be readily apparent. So in
+    general I advocate for alignment parameters that retain multi-mapped
+    reads in all possible positions (e.g. all mappings for the given read).
+    However, there is a practical limit where storing huge numbers of
+    alignments for a single read becomes prohibitive in terms of file size.
+    We generally cap the number of allowed mappings for any one read to 50
+    .. e.g., report only the 1st 50 alignments for a single read. (In bowtie
+    1, this would be -k 50).
+
+OUTPUT
+  Results.txt
+
+    This is a simple tab-delimited text file. The first line begins with a
+    "#" (comment) sign, and then lists column headers. Each subsequent line
+    describes the key traits of a single cluster.
+
+    Column 1: Locus : The genome-browser-friendly coordinates of the
+    clusters. Coordinates are one-based, inclusive (e.g. Chr1:1-100 refers
+    to a 100 nt interval beginning with nt 1 and ending with nt 100).
+
+    Column 2: Name : Name of cluster. Unless the run was in --count mode and
+    the input file of a priori clusters already had names, the names are
+    arbitrarily designated as "Cluster_1", "Cluster_2", etc.
+
+    Column 3: HP : Whether this cluster appears to be hairpin-derived or
+    not. If not, a "." is present. If it is a hairpin, but NOT qualified as
+    a MIRNA, "HP" is indicated. MIRNAs are indicated by "MIRNA". If the run
+    was in "--nohp" mode, than all entries in the column will be "ND"
+    (meaning 'not determined').
+
+    Column 4: Strand : The pre-dominant strand from which the small RNA
+    emanate. If ".", no strand was called. HPs and MIRNAs always have a
+    polarity, based on the hairpin's originating strand. Non-HP clusters
+    have their polarity determined by the --minstrandfrac setting.
+
+    Column 5: Frac_Wat : Fraction of mappings to the Watson (e.g. +) strand
+    of the cluster. 1 means all were from Watson Strand, 0 means all were
+    from Crick (e.g. -) strand.
+
+    Column 6: Total : Total mappings within the cluster, either in raw
+    mappings (for --raw mode) or in mappings per million mapped.
+
+    Column 7: Uniquely Mapped Total : Total mappings derived from uniquely
+    mapped reads .. e.g., those with NH:i:1. In raw mappings (for --raw
+    mode) or in mappings per million mapped.
+
+    Column 8: Rep-Total : Repeat normalized total mappings. Instead of each
+    mapping counting as "1", each mapping instead counts as "1/NH", where NH
+    is the total number of mappings that read had, according to the NH:i:
+    tag.
+
+    Column 9: Dicer Call : If "N", the cluster is not dicer-derived, per
+    options --dicermin, --dicermax, and --mindicerfrac. If it is in the
+    format "21:0.786", then it IS being annotated as a Dicer-derived
+    cluster, in which 21mers were the most numerous (in terms of total
+    mappings) species, comprising 78.6% of all mappings.
+
+    Column 10: Phasing : If "ND", phasing p-value was not calculated for
+    this cluster. Otherwise, this will be a colon-delimited entry in the
+    format [offset]:[p-value]:[FDR-call]. The offset is the one-based
+    genomic position with which the cluster appears to be "in-phase" (based
+    on the 5' nt of a sense-mapped small RNA). Phasing is always in
+    increments identicial to the Dicer size call in column 9 (e.g., for the
+    "21:0.786" example, 21nt phasing was tested). The p-value is derived
+    from a modified hypergeometric distribution, as described below. The FDR
+    call will begin with either "OK" or "NS" (meaning 'not significant') and
+    then list the alpha used in the Benjamini-Hochberg procedure.
+
+    Column 11: Short : The total mappings from reads with lengths less than
+    --dicermin, either in raw reads (--raw mode), or mappings per million
+    mapped.
+
+    Column 12: Long : The total mappings from reads with lengths more than
+    --dicermax, either in raw reads (--raw mode), or mappings per million
+    mapped.
+
+    Columns 13 - the end : The total mappings from reads with the indicated
+    lengths. These are the sizes within the Dicer range.
+
+  Log.txt
+
+    This is a simple log file which records the key settings and key results
+    from the run.
+
+  ShortStack.bed
+
+    This is a .bed file for viewing the clusters on a genome browser. It
+    follows the .bed specification given at the UCSC broswer site
+    <http://genome.ucsc.edu/FAQ/FAQformat.html>. Clusters are color-coded
+    based on the dominant size. Non-Dicer clusters are always dark gray. If
+    the number of sizes in the Dicer range is seven or less, the colors
+    proceed in order (from --dicermin to --dicermax) as follows: Red, Dark
+    Orange, Gold, Green, Blue, DarkOrchid3 (a dark purple-ish color), and
+    Magenta). If the --dicermin to --dicermax range spans more than seven
+    sizes, then clusters are no longer differentiated by color -- all in the
+    Dicer range will simply be red.
+
+    Note that the bed coordinate system is zero-based, and the 'stop'
+    coordinate is the first nt NOT in the interval. So, a 100 nt interval
+    beginning at base 1 and ending at base 100 would have a start of 0 and a
+    stop of 100 in the bed file.
+
+    Hairpins and MIRNAs are graphically indicated: The helical arms will be
+    shown as thick boxes, and the rest of the cluster will be thin lines.
+
+  Hairpin-MIRNA_summary.txt
+
+    This is a tab-delimited text file showing in detail the results of the
+    hairping and MIRNA analysis procedure. If the run was in --nohp mode,
+    this file will not be created. The first line begins with a comment
+    symbol "#" and contains column headers. Each subsequent row describes a
+    cluster. A value of zero indicates failure of the specific test for that
+    column. A value of one (or more for some columns) indicates success of
+    that test.
+
+    Column 1: Acceptable Hairpin : Indicates whether the cluster has a
+    possible hairpin whose structure conforms to the --minfracpaired and
+    --minntspaired settings. Note that a zero will be applied if no hairpins
+    are found OR in the cases where no RNA folding is attempted (because the
+    cluster size exceeds option --maxfoldwindow.
+
+    Column 2: Coverage Pattern : Indicates whether the small RNAs have a
+    coverage pattern that is consistent with biogenesis from the putative
+    hairpin. To examine the coverage pattern, the hairpin size is first,
+    temporarily, expanded to include an upstream flanking region equal in
+    length to the 5' arm, and a downstream flanking region equal in length
+    to the 3' arm. The per-nucleotide depth of coverage is then determined
+    across the extended region. The sum of coverage on the sense strand
+    (relative to the hairpin direction) within the two arms is divided by
+    the total sum of coverage on both strands of the extended region. This
+    ratio must be >= to the fraction specififed in option --minfrachpdepth
+    in order to pass this step.
+
+    Column 3: Candidates > 20% : Number of small RNAs within the cluster, on
+    the sense strand relative to the putative hairpin, that comprise more
+    than 20% of the total abundance mapped to the cluster. This is the first
+    filter for processing precision. These are candidate mature miRNAs.
+
+    Column 4: Candidates <= 4mm : Number of candidate mature miRNAs that
+    have four or fewer unpaired nts. The last 2nts are not counted, as they
+    are not paired in the miR/miR* duplex.
+
+    Column 5: Candidates not loop-spanning : Number of candidate mature
+    miRNAs that do not span a loop (i.e., number that do not have any
+    intra-molecular pairs).
+
+    Column 6: Stars <= 4mm : For each expected miRNA* partner of each miRNA
+    candidate, reports number that have four or fewer unpaired nts, omitting
+    the 2nts on the 3' end.
+
+    Column 7: Stars not loop-spanning : Number of expected miRNA* partners
+    that do not span a loop (i.e., number that do not have any
+    intra-molecular pairs).
+
+    Column 8: Stars expressed : Number of expected miRNA*s that have at
+    least one actual mapping. Thus, there is a hard requirement for
+    isolation of the exact miRNA*.
+
+    Column 9: Candidate plus Star > 25% : Indicates how many candidate
+    miRNAs and corresponding miRNA*s have an abundance >= 25% of the total
+    abundance from the cluster. This is the second filter for precision in
+    processing.
+
+    Column 10: Non-redundant : The final number of mature miRNAs annotated
+    from the hairpin.
+
+    Clusters with 1 or more listed in Column 10 are annotated as MIRNAs.
+    Clusters with 1's in both columns 1 and 2, but with a zero listed in
+    column 10, are annotated as Hairpin (HP) clusters. All others are
+    classified as non-HP clusters (noted "." in the Results.txt file).
+
+  Hairpin and MIRNA detail files
+
+    Unless the run was done in --nohp mode, each annotated hairpin-derived
+    and MIRNA locus will have its own simple text file to display the
+    details of the locus. These text files all show A) the Name and genomic
+    coordinates of the locus, B) the sequence, in RNA form, C) the
+    identified hairpin structure, in dot-bracket notation, and D) all
+    mappings whose start and stop is within the interval being examined.
+
+    Reads mapped to the sense strand (sense relative to the hairpin, not
+    necessarily relative to the genome) have "."s as placeholders, while
+    reads mapped to the antisense strand (antisense relative to the hairpin,
+    not necessarily relative to the genome) have "<"s as placeholders.
+    Annotated mature miRNAs have "m"s as placeholders, and annotated
+    miRNA*'s have "*"s as placeholders.
+
+    After each read, the read length (l) and the number of mappings (m) is
+    shown. Unless the program was run in --raw mode, the normalized mappings
+    per million mapped reads (mmmr) is also shown.
+
+KEY METHODS
+  de novo Cluster Discovery
+
+    Cluster discovery proceeds in two simple steps:
+
+    1. The total depth of small RNA coverage at each occupied nucleotide in
+    the genome is examined, and initial 'islands' of coverage are defined as
+    continuous stretches where the read depth is greater than or equal to
+    the threshold depth specified by option --mindepth. Note that islands
+    could theoretically be as small as one nucleotide, since they depend on
+    total depth of coverage. Many islands will be 20-24nts in length,
+    corresponding to a pile of a single small RNA species.
+
+    2. The initial islands are then extended on both sides by the distance
+    specified by option --pad. Islands that overlap after extension are
+    merged. After all extensions and resultant mergers are performed, the
+    final result is the initial clusters. If the run is performed in --nohp
+    mode, these are the final clusters. If hairpins and MIRNAs are being
+    examined, some of the clusters may be adjusted in position to fully
+    capture the putative hairpin(s) (see below).
+
+  Hairpin analysis in de novo mode
+
+    1. Clusters whose length exceeds the maximum folding window specified in
+    option --maxfoldwindow will not be analyzed for hairpins / MIRNAs.
+
+    2. For all other clusters, a genomic window centered on the middle of
+    cluster, with a length of 3x the unpadded cluster length is calculated.
+    The unpadded cluster length is the length - (2 * option --pad). If the
+    size of this window exceeds option --maxfoldwindow, RNA structure
+    prediction will not take place. On the opposite end, if the 3 *
+    (unpadded cluster length) size is less than 250nts, a 250nt window
+    centered on the cluster will be folded.
+
+    3. Both the top and bottom genomic strands are then subjected to
+    secondary structure prediction using RNALfold (options -d 2 -noLP
+    (--maxhpsep)), which returns a diverse set of often overlapping
+    predicted structures.
+
+    4. The structures are parsed, retaining only those that satisfy options
+    --minfracpaired and --minntspaired. minfracpaired refers to the fraction
+    of nts in the 'lowest' helix that are paired, NOT to the fraction of ALL
+    nts in the window that are paired. Same for --minntspaired .. only the
+    positions within the lowest helix are considered.
+
+    5. Redundant hairpins are then removed. Redundant hairpins are those
+    whose 5' arms and 3' arms overlap. In pairwise comparisons of redundant
+    hairpins, the hairpin with the lowest deltaG / nt is retained.
+
+    6. Hairpins that don't have overlap with the original cluster are then
+    removed. Because the folding window is often extended substantially
+    around the cluster, there could be many putative hairpins that are not
+    within the original cluster. To have overlap, at least one of the
+    hairpin's helical arms must have at least 20nts within the original
+    cluster coordinates.
+
+    7. The pattern of small RNA expression relative to the remaining
+    hairpins is then examined. To examine the coverage pattern, the hairpin
+    window (not the original cluster window) is first, temporarily, expanded
+    to include an upstream flanking region equal in length to the 5' arm,
+    and a downstream flanking region equal in length to the 3' arm. The
+    per-nucleotide depth of coverage is then determined across the extended
+    region. The sum of coverage on the sense strand (relative to the hairpin
+    direction) within the two arms is divided by the total sum of coverage
+    on both strands of the extended region. This ratio must be >= to the
+    fraction specififed in option --minfrachpdepth in order to pass this
+    step.
+
+    8. Clusters with one or more hairpins that make it through step 7 intact
+    are considered to be hairpin-derived, and will be subject to MIRNA
+    analysis later on. The original cluster coordinates are removed, and
+    replaced by new clusters defined based upon the location of the hairpin,
+    padded by 15nts on each side. Note an original cluster could have more
+    than one causal hairpin. Original clusters are removed, and replaced by
+    one (or potentially more than one) new clusters centred around the
+    causal hairpin(s). Also note that this can result in final clusters that
+    have some overlap.
+
+  Hairpin analysis in --count mode
+
+    In --count mode, hairpin analysis differs in that it does NOT fold an
+    extended region around the unpadded input cluster, nor does it redefine
+    the cluster locations after analyzing the hairpins. Step by step,
+    relative to the step discussed above in de novo mode...
+
+    1. Same as step one above
+
+    2. Only the actual input region is folded, not a extended window around
+    the unpadded region.
+
+    3. Same as step 3 above
+
+    4. Same as step 4 above
+
+    5. Same as step 5 above
+
+    6. Same as step 6 above, except that it is never relevant, as all
+    hairpins will for certain be within the original cluster
+
+    7. Same as step 7 above.
+
+    8. Same as step 8 above, EXCEPT that no padding of the cluster takes
+    place, AND, in case more than one valid hairpin is returned, only one
+    (arbitrarily chosen) is retained.
+
+  MIRNA Annotation
+
+    MIRNA locus annotation is designed to satisfy the criteria for de novo
+    annotation of plant MIRNAs as described in Meyers et al. (2008) Plant
+    Cell 20:3186-3190. PMID: 19074682. In fact, ShortStack's criteria is a
+    little stricter than Meyers et al., in that ShortStack has an absolute
+    requirement for sequencing of the exact predicted miRNA* sequence for a
+    candidate mature miRNA. It is important to note that ShortStack's MIRNA
+    annotation method is designed to reduce false positives at the expense
+    of an increased rate of false negatives. In other words, there are
+    likely many bona fide MIRNA loci that end up being classified as
+    Hairpins, instead of MIRNAs, because they don't quite meet the strict
+    criteria set forth below.
+
+    Criteria for MIRNA annotation by ShortStack :
+
+    1. The putative hairpin must have a valid structure (step 4 in hairpin
+    analysis above: satisfying options --minfracpaired and --minntspaired)
+    and have a pattern of small RNA coverage consistent with small RNA
+    biogenesis preferentially from the hairpin arms (step 7 in hairpin
+    analysis above).
+
+    2. There must be at least one candidate mature miRNA that comprises at
+    least 20% of the total abundance of small RNAs mapped to the hairpin.
+
+    3. Candidate mature miRNAs must contain no more than 4 unpaired nts
+    (excepting the 2nts on the 3' end), and they must not span a loop (i.e.,
+    no base-pairs to themselves).
+
+    4. The predicted miRNA*s of candidate mature miRNAs must contain no more
+    than 4 unpaired nts (excepting the 2nts on the 3' end), and they must
+    not span a loop (i.e., no base-pairs to themselves). Predicted miRNA*'s
+    are based on identifying the small RNA that would form a miR/miR* duplex
+    with a canonical 2nt, 3' overhang.
+
+    5. The exact predicted miRNA*s of candidate miRNAs must have at least
+    one mapped read.
+
+    6. The total abundance of any candidate mature miRNA/miRNA* pair must be
+    at least 25% of the total small RNA abundance at the locus.
+
+    7. Redundant candidate mature miRNAs are removed, as the steps above
+    initially might classify a small RNA as both a miRNA* and mature miRNA.
+    In such cases, the partner with the higher abundance is called the
+    miRNA, the other the miRNA*.
+
+    The step by step results of all of these tests is reported in the output
+    file Hairpin-MIRNA_summary.txt
+
+  Quantification of clusters
+
+    All mappings with either their left-ends, right-ends, or both within the
+    cluster are tallied as being within the cluster. Thus, for a cluster
+    located at Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and
+    2000-2021 are all counted as being within the cluster during
+    quantification. Note that it's possible to count the same mapping within
+    non-overlapping clusters.
+
+  Analysis of Phasing
+
+    'Phasing' describes the periodic mapping of small RNAs to repeating
+    intervals equal to their size. It occurs when helical RNA is Diced
+    processively from a defined terminus; often the terminus is defined by a
+    prior small RNA slicing event followed by RDRP activity, although some
+    MIRNA hairpins are also phased. Nearly all documented examples of phased
+    small RNA production (in plants) occur for 21nt small RNAs in 21nt
+    increments, hence the default settings of ShortStack to examine only
+    21-dominated clusters. This can be changed with option --phasesize.
+
+    ShortStack's basic method to identify phased small RNAs involves
+    calculation of a p-value based on the hypergeometric distribution --
+    this approach was inspired by Chen et al. (2007) PNAS 104: 3318-3323
+    PMID: 17360645. However, ShortStack's method modifies the Chen et al.
+    approach to make it more robust at detecting phasing in highly expressed
+    clusters with a background of non-phased noise; the method also allows
+    phasing analysis in any register within the dicer size range (controlled
+    by option --phasesize), and analyzes regions of arbitrary length.
+    Finally, ShortStack's analysis of phasing is "fuzzy" -- that it, exactly
+    phased reads, and those +1 and -1 phase are all counted as "phased".
+
+    Phasing analysis proceeds as follows:
+
+    1. Clusters to be analyzed must be annotated as Dicer-derived and be
+    dominated by the size class indicated by option --phasesize. If
+    --phasesize is set to 'all', all clusters within the Dicer size range
+    will be analyzed.
+
+    2. Cluster must also have a length of more than 4 x the phase size in
+    question .. so, more than 84nts under the default --phasesize 21
+    setting. Clusters that are too short are not examined.
+
+    3. Phasing is only analyzed with respect to the dominant size of the
+    cluster. So, for a cluster dominated by 21mers, only phasing in 21nt
+    increments will be examined.
+
+    4. The 5' positions of all sense-mapped small RNAs are tallied as a
+    function of genomic position. The 3' positions of all antisense-mapped
+    small RNAs are also tallied, after adding 2nts to account for the 2nt,
+    3' overhangs left by Dicer processing. After this process, each genomic
+    position within the cluster has a number reflecting the number of small
+    RNA termini at that position. If the cluster is longer than 20 times the
+    phase (e.g. 20 x 21 for the default settings), reads mapped beyond the
+    20 x 21 mark are allocated to the beginning of the cluster, keeping it
+    in phase. For instance, assuming --phasesize of 21, reads in position
+    420 are assigned at 420, those at 421 get flipped back to 1, 422 back to
+    2, and so on. This is necessary because p-value calculation involved
+    calculation of binomial coefficents, which grow too large to calculate
+    (easily) with inputs of more than 500 or so.
+
+    5. The average abundance of termini across the locus is calculated from
+    the above representation of the reads.
+
+    6. The total abundance in each of the possible phasing registers (there
+    are 21 registers in the default mode of --phasesize 21) is calculated.
+    The register with the maximum total abundance is the used in p-value
+    determination. The offset of this register is also noted; the offset is
+    the 1st genomic position representing the 5'-sense position of a phased
+    small RNA.
+
+    7. The p-value within the chosen register is then calculated using the
+    cumulative distribution function (CDF) for the hypergeometric
+    distribution. Sorry, hard to show equations in plain-text -- see
+    Wikipedia's Hypergeometric distribution entry, under CDF. N (the
+    population size) is the number of nt positions in the locus. m (the
+    number of success states in the population) is the number of possible
+    positions in the phasing register of interest, INLCUDING POSITIONS +1
+    AND -1 RELATIVE TO THE REGISTER OF INTEREST. This means phasing is
+    "fuzzy", which is often seen in the known examples of this phenomenon. n
+    (the number of draws) is defined as the total number of positions with
+    ABOVE AVERAGE abundance. k (the number of successes) is the number of
+    phased positions (inlduing the fuzzy +1 and -1 positions) with ABOVE
+    AVERAGE abundance. The p-value is then calculated per the hypergeometric
+    distribution CDF. NOTE: The restriction of n and k to only above-average
+    abundance works well to eliminate low-level noise and focus on the
+    dominant small RNA pattern within the locus.
+
+    8. After all p-values have been caluclated, ShortStack uses the
+    Benjamini-Hochberg method to control for the false discovery rate at a
+    user-specified alpha (default is 0.05). Significant clusters are noted
+    'OK' and non-significant clusters are noted 'NS'; in both cases the
+    p-values are reported. These data appear in column 10 of the Results.txt
+    file.
+
