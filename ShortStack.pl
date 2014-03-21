@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version = "0.2.2";
+my $version = "0.2.3";
 #####
 
 ##### get options and validate them
@@ -3994,6 +3994,9 @@ sub write_bed_with_hp {
 		    $left_begin = $4 - $bedstart;
 		    $right_begin = $2 - $bedstart;
 		}
+		## added in 0.2.3 ... adjust the left and right begin coordinates to zero-based
+		--$left_begin;
+		--$right_begin;
 		print BED "$left_block_size";
 		print BED ",";
 		print BED "$right_block_size\t";
@@ -4646,7 +4649,9 @@ A manuscript describing the ShortStack package has been written and submitted as
 
 =head1 VERSIONS
 
-0.2.2 : September 23, 2012.  THIS VERSION.  Minor changes to HP and MIRNA calling during countmode to increase the consistency of calls between de novo and count mode runs.
+0.2.3 : October 18, 2012.  Fixed bug in formatting of BED files .. blockStarts (in column 12) are now correctly reported in zero-based coordinates.
+
+0.2.2 : September 23, 2012.  Minor changes to HP and MIRNA calling during countmode to increase the consistency of calls between de novo and count mode runs.
 
 0.2.1 : September 14, 2012.  Speed improvements during the merging of einverted-derived hairpins with RNALfold-derived hairpins.
 
@@ -4670,17 +4675,73 @@ Michael J. Axtell, Penn State University, mja18@psu.edu
 
 install samtools from <http://samtools.sourceforge.net/> and ensure that samtools is in your PATH
 
-install the ViennaRNA package VERSION 1.7.X or 1.8.X <http://www.tbi.univie.tion run, including inverted repeats file:
+install the ViennaRNA package VERSION 1.7.X or 1.8.X <http://www.tbi.univie.ac.at/~ivo/RNA/> and ensure that RNALfold is in your PATH.  NOTE: VERSION 2.X OF THE VIENNA RNA PACAKAGE IS INCOMPATIBLE WITH ShortStack, due to a option specification change in RNALfold upon the 1.x to 2.x transition.  Future versions of ShortStack may update this, but for now, MAKE SURE you have a VERSION 1.7.X or 1.8.X installation (e.g. 1.8.5).
 
-ShortStack.pl --inv_file Athaliana_167.inv col_leaf_ok.bam Athaliana_167.fa
+ensure the script is executable                                                                  
+                                                                                                 
+    chmod +x ShortStack.pl                                                         
+                                                                                                 
+ensure the script is in your PATH (examples):                                                    
+                                                                                                 
+    sudo cp ShortStack.pl /usr/bin/                                                
+                                                                                                 
+OR just for one session assuming script is in your working directory:                            
+                                                                                                 
+    PATH=$PATH:.                                                                                 
+                                                                                                 
+ensure 'perl' is located in /usr/bin/ .. if not, edit line 1 of script accordingly                 
+
+=head1 USAGE
+                                                                                                                             
+Shortstack.pl [options] [in.bam] [genome.fasta] 
+
+=head1 QUICK START 
+
+1. Install ShortStack.pl and Prep_bam.pl, and required third-party tools (RNALfold, samtools) per above instructions
+
+2. Trim your raw reads to remove adapters.  The Axtell Lab has some scripts for trimming 3' adapters from typical raw small RNA-seq data. (see http://axtell-lab-psu.weebly.com/tools.html)
+
+3. Ensure the chromosome names of the reference genome are short and sweet, containing no whitespace or metacharacters (see below)
+
+4. Align your reads to the reference genome, output the results in sam/bam format, and pipe through 'Prep_bam.pl' to generate a properly formatted, sorted, and indexed .bam alignment.  Note the total number of mapped reads.  Suggested aligner is bowtie 1 (0.12.8) but any method that outputs in sam/bam format is fine.  If you use bowtie, the following command can be used for one-step mapping, formatting, sorting, and indexing (assuming of course you've installed bowtie and built the bowtie index for your reference genome):
+
+bowtie [bowtie_options] -S [bowtie_genome_index] [trimmed_reads] | Prep_bam.pl --genome [genome.fasta] --prefix [file_name_prefix]
+
+5.  If you use another mapping method besides the one above, the final .bam formatted file must be sorted by chromosomal position, have NH:i: tags present (see SAM specification), and be indexed with the .bam.bai index file in the same directory as the .bam file.  In additional, all data lines (except those for unmapped reads, which are ignored) must have a valid CIGAR string (see SAM specification).  Non-conforming .sam or .bam files can be processed with 'Prep_bam.pl' -- see the README for Prep_bam.pl included with this package.
+
+6. For a full de-novo run with default parameters, call "Shortstack.pl [in.bam] [genome.fasta]".  See OPTIONS below for other options and run modes.
+
+=head1 TEST
+
+Some Arabidopsis test data can be found at http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
+
+1.  Athaliana_genome.tgz : The "TAIR10" Arabidopsis thaliana (ecotype-Col-0) genome assembly including the plastid and mitochrondria, and its .fai index.  Retrieved from Phytozome.  This is the assembly to which the .bam files in this directory were mapped.
+
+2.  col_leaf_ok.bam[.bai] : Sorted and indexed small RNA-seq alignments in BAM format.  Derived from wild-type rosette leaves -- Liu et al. (2012) Plant Physiology PMID: 22474216.  This alignment contains 26,523,213 mapped reads, 14,351,052 of which were "uniquely" mapped (just one alignment), and a total of 104,980,568 alignments.  The small RNA sizes range from 15-27nts.  To create this alignment, the raw .csfasta and .QV.qual files were combined to make a colorspace-fastq formatted file, adapters were trimmed along with the corresponding quality values (including the hybrid 3' color and Q value), and mapped using bowtie 0.12.7.  The bowtie settings were -C -v 1 --best --strata -k 50 --col-keepends -S, which allow zero or one mismatch, keeping only the best scoring 'stratum', and retaining only the first 50 alignments observed, and outputting in sam format.  SAM lines corresponding to unmapped reads were filtered out.  The SAM file was then processed with Prep_bam.pl (included in ShortStack package) to add the NH:i: tags to each alignment, and to output a chromosomal-sorted alignment in the BAM format.
+
+3. ath_hp_mb19_SStack_Athal_167.txt : Coordinates for Arabidopsis thaliana MIRNA hairpin sequences, as determined by taking the top-scoring hit from a blastn search using miRBase 19 ath- hairpins as queries against the reference genome.  This file is useful as input for a ShortStack run in --count mode.
+
+4.  ath_mature_nr_mb19.bam[.bai] : Sorted and indexed alignments of all non-redundant mature Arabidopsis thaliana miRNAs from miRBase19 against the A. thaliana reference genome.  Mapped and processed using bowtie 0.2.18 and Prep_bam.pl with the call
+
+    bowtie -f --all -v 0 -m 20 -S Athaliana_167 ath_mature_nr_mb19.fa | Prep_bam.pl --genome Athaliana_167.fa --prefix ath_mature_nr_mb19
+
+Thus, retaining perfect matches only, no alignments reported if more than 20 were observed.  These alignments are useful for testing the miR_homologs.pl helper script.
+
+5.  Athaliana_167.inv : einverted-derived file resulting from analysis of Arabidopsis genome (file 1) with default settings except -maxrepeat 10000.
+
+Some Tests:
+
+A) full de-novo annotation run, including inverted repeats file:
+
+    ShortStack.pl --inv_file Athaliana_167.inv col_leaf_ok.bam Athaliana_167.fa
 
 B) count mode run to quantify and annotate known miRBase MIRNA loci:
 
-ShortStack.pl --count ath_hp_mb19_SStack_Athal_167.txt col_leaf_ok.bam Athaliana_167.fa
+    ShortStack.pl --count ath_hp_mb19_SStack_Athal_167.txt col_leaf_ok.bam Athaliana_167.fa
 
 C) Analyze annotated miRBase mature miRNAs for acceptable structure with miR_homologs.pl:
 
-miR_homologs.pl ath_mature_nr_mb19.bam Athaliana_167.fa
+    miR_homologs.pl ath_mature_nr_mb19.bam Athaliana_167.fa
 
 
 =head1 OPTIONS
