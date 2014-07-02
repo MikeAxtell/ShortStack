@@ -1,0 +1,246 @@
+SYNOPSIS
+    butter: Bowtie UTilizing iTerative placEment of Repetitive small rnas
+
+    A wrapper for bowtie to produce small RNA-seq alignments where
+    multimapped small RNAs tend to be placed near regions of confidently
+    high density.
+
+LICENSE
+    Copyright (C) 2014 Michael J. Axtell
+
+    This program is free software: you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by the
+    Free Software Foundation, either version 3 of the License, or (at your
+    option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+    Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with this program. If not, see <http://www.gnu.org/licenses/>.
+
+CITATION
+    None yet, stay tuned!
+
+AUTHOR
+    Michael J. Axtell, Penn State University, mja18@psu.edu
+
+DEPENDENCIES
+    perl (version 5; <www.perl.org>) .. installed at /usr/bin/perl
+
+    samtools <http://samtools.sourceforge.net/> .. installed to your PATH
+
+    bowtie <http://bowtie-bio.sourceforge.net/index.shtml> .. installed to
+    your PATH
+
+INSTALL
+    Install dependencies (see above), and then place the butter script in
+    your PATH
+
+USAGE
+    butter [options] [reads.fa/.fasta/.fq/.fastq] [genome.fa]
+
+OPTIONS
+    --version: print version and quit
+
+    --help: print usage and option information, then quit
+
+    --quiet: suppress progress reports
+
+    --no_condense: do not condense trimmed reads into non-redundant
+    sequences for bowtie mapping. Preserves original read names, but is
+    (much) slower.
+
+    --mismatches [integer]: Number of mismatches allowed for a valid
+    alignment. Default 0. Must be either 0 or 1.
+
+    --aln_cores [integer]: Number of processor cores to use during bowtie
+    alignment phase. Default 1. Must be integer 1-00.
+
+    --max_rep [integer]: Maximum number of possible placements for a
+    multi-mapped read being guided by density. Such reads with a number of
+    placements more than --max_rep will be reported as unmapped and have
+    custom tag XY:Z set to M. Default: 1000. Must be integer of at least 6.
+
+    --ranmax [integer]: Maximum number of possible placements for a
+    multi-mapped read that can't be guided by density. Such reads with a
+    number of placements more than --ranmax will be reported as unmapped and
+    have custom tag XY:Z set to O. Default: 3. Must be integer of 1 or more.
+
+    --adapter [string]: 3' Adapter sequence to trim. Must be 8 or more
+    ATGCatgc characters. If specified, 3' adapter trimming is enabled.
+
+INPUT FILES
+  Small RNA-seq data
+    Files must be in FASTA, FASTQ, or colorspace-fasta format. File
+    extensions must be used to indicate the format. .fasta and .fa are
+    acceptable for FASTA files. .fastq and .fq are accetpable for colorspace
+    files. .csfasta must be used for color-space files. There is no support
+    for paired-end reads.
+
+    Colorspace data are assumed to conform to colorspace-FASTA
+    specifications (beginning with a nucleotide, followed by a string of
+    colors [0,1,2,3] or ambiguity codes [.]. If trimmed colorspace data are
+    provided, it is assumed that the 'hybrid' color at the 3' end has been
+    removed. If colorspace data are trimmed by butter, the hybrid color at
+    the 3' end will be removed (see below).
+
+  Reference genome
+    File must be in FASTA format. Chromosome names will be truncated after
+    the first white-space encountered.
+
+    butter will search for the expected bowtie indices in the same directory
+    as the genome file. If the input format is FASTQ or FASTA, butter will
+    expect the bowtie indices to have the form [your_genome].[ebwt], where
+    'your_genome' is the name of your genome file, and [ebwt] represents the
+    six distinct file extensions for bowtie genome index files. If your
+    input data is colorspace, butter will expect the genome indices to have
+    the form [your_genome].cs.[ebwt] instead. The .cs serves as a reminder
+    that the indices are built in colorspace. If the expected bowtie indices
+    are not found, butter will attempt to use bowtie-build under default
+    parameters to build them.
+
+METHODS
+  Adapter trimming - FASTA
+    For each read, the 3'-most exact match to the supplied adapter sequence
+    (via option --adapter) is found and trimmed off. Trimmed data shorter
+    than 15nts are suppressed from output. In addition, reads with non
+    ATGCatgc characters after trimming are also suppressed. Comment lines in
+    the original file are ignored, and will not be output to the trimmed
+    file.
+
+  Adapter trimming - FASTQ
+    Identical to trimming for FASTA data, with the addition of trimming the
+    quality values to the same length as the trimmed sequence data.
+
+  Adapter trimming - Colorspace-FASTA
+    The input --adapter sequence is converted to colorspace. Then, for each
+    read, the 3'-most exact match to the color-string is found. Trimming
+    takes off the matched color string, as well as the ambiguous color left
+    at the end .. this is the hybrid color formed by the di-base created by
+    the last nucleotide of the small RNA and the first nt of the adapter.
+    When mapped using bowtie with the --col-keepends option, this trimming
+    results in the alignment of the full length small RNA.
+
+  Read Condensation
+    For the purpose of bowtie mapping, the trimmed reads are condensed such
+    that each unique small RNA sequence is represented only once. In the
+    process, the reads are re-named. Condensaiton can save considerable CPU
+    time, and the re-naming of the reads saves substantial memory (because
+    each read name does not have to be stored by the script for later
+    output). The condensed reads are written in FASTA or .csfasta format
+    (e.g. the quality values from FASTQ files are ignored). This is
+    justified because the bowtie alignment parameters being used ignore
+    quality values.
+
+    The condensed reads are written to a file in the working directory with
+    the name [your_reads]_condensed.(cs)fasta.
+
+    The condensed read names follow a simple system. Consider an example
+    read name:
+
+    >my_reads_758883_12
+
+    The '758883' indicates that this is unique sequence number 758883
+    (arbitrarily ordered). The '12' indicates that there were 12 reads in
+    the input file with this sequence.
+
+    The option --no_condense turns off read condensation, so the original
+    read names are preserved. This option is much slower. If option
+    --no_condense is used for an input file in FASTQ format, a FASTA version
+    of the reads will be written to disk.
+
+  Alignments and placements
+    Four iterations of bowtie are called successively on the reads after
+    adapter trimming (if applicable) and condensation (if applicable) and
+    conversion from FASTQ to FASTA format (if applicable, see above).
+
+    The first iteration uses bowtie setting -m 1 to limit alignments to
+    reads with only one unique possible position in the reference genome.
+    This output stream is parsed to retain unmapped reads, and reads with
+    unique alignments. Using bowtie's --max option, reads with more than 1
+    possible alignment are written to a temporary FASTA or csFASTA file.
+
+    After this, the densities of the uniquely placed reads are tallied,
+    genome-wide, using a sliding window of 250 nts, and a step size of 50
+    nts. The density in each window is simply the sum of all of the
+    read-depths at each nt in the window (e.g., 'area under curve').
+
+    The second bowtie iteration uses the multi-mapped reads set aside in the
+    first iteration for a run with bowtie -m set to 2. Thus, only reads with
+    2 possible placements are output. After calculating the densities, both
+    possible placements for each read that had 2 possible locations are
+    analyzed. Each location falls into 5 different windows .. the window
+    with the maximum score is taken as the existing density of each
+    placement. In cases where all possible placements have an exisiting
+    density of zero, the choice of which placement to retain is simply
+    random. If one possible placement has existing density and the other
+    doesn't, the retained placement will be that which is next to existing
+    density. If both possible placements have existing density, the retained
+    placement will be selected based on probabilities dictated by the
+    relative density abundances among the two choices. For example, if
+    placement one had a maximum density score of 70, and and placement two
+    had a maximum density score of 30, the probability of placement one
+    being retained is 70 / (70 + 30) [e.g. 70%] and the probability of
+    placement two being retained is 30 / (70 + 30) [e.g. 30%]. As in the
+    first iteration, reads with multi-mappings higher than the -m set point
+    are written to a temporary FASTA or csFASTA file for analysis in the
+    next iteration.
+
+    After the process is repeated for two more iterations .. the densities
+    are updated with the new data, and multi-mapped reads that remain are
+    re-mapped iteratively. Iteration three captures reads with 3-5 possible
+    placements, and iteration four captures reads with between 5 and
+    --max_rep number of placements (default is 1000).
+
+  De-condensation
+    Unless run with option --no_condense, reads must be de-condensed. This
+    occurs while writing sorted BAM files, the non-redundant queries are
+    de-condensed, such that there is an alignment line for each copy of that
+    sequence present in the input data. For instance, with our example read
+    from above (my_reads_758883_12), there were 12 copies. So, somewhere in
+    the output BAM file there will be twelve reads .. my_reads_758883_12,
+    my_reads_758883_11, my_reads_758883_10 ... all the way down to
+    my_reads_758883_1.
+
+    Note that, for reads with more than 1 potential placement, each
+    de-condensed read is considered separately. Because placement of
+    multi-mapped reads can be either random or probabilistic (see above
+    'Placement'), this means that not all copies of an identical sequence
+    will necessarily be placed at the same location.
+
+  Merging
+    After all iterations of placements and density calculations have
+    completed, the resulting sorted bam files are merged to a single final
+    bam alignment, and the intermediate bam files deleted.
+
+  Temporary files
+    butter writes a number of temporary files to disk during a run ..
+    intermediate BAM files, and temporary FASTA (or csFASTA) files. These
+    will all be deleted at the completetion of the run.
+
+OUTPUT
+    The output is a single BAM alignment file sorted by chromosomal
+    position. The BAM header includes lines describing the run. butter adds
+    three custom tags for each alignment. All reads are in the alignment
+    file, including reads that were unmapped (unmapped reads have bit 0x4
+    set in the SAM FLAG field, per SAM specification). Other custom tags not
+    described below are from bowtie .. see bowtie documentation for their
+    meaning.
+
+    Custom tag XX:i: indicates number of valid placements for the read (of
+    which only one is being shown)
+
+    Custom tag XY:Z: indicates how the reported placement was selected. U:
+    uniquely mapped, P: multi-mapped and placed due to clustering, R:
+    multi-mapped and randomly placed, N: unmapped, M: Multi-mappings
+    exceeded setting --max_rep, so no placement performed, O: multi-mapped
+    with no density-based placement possible, number of locations exceeded
+    setting --ranmax, so no placement performed.
+
+    Custom tag XZ:f: indicates the probability that the given read came from
+    the reported position, based on the butter iterative density analysis.
+    Set to 1 for reads with XY:Z: of M, U, N, and O.
+

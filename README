@@ -1,5 +1,5 @@
 LICENSE
-    ShortStack.pl
+    ShortStack
 
     Copyright (C) 2012-2014 Michael J. Axtell
 
@@ -30,48 +30,52 @@ CITATION
     Shahid S., Axtell MJ. (2013) Identification and annotation of small RNA
     genes using ShortStack. Methods doi:10.1016/j.ymeth.2013.10.004
 
-VERSION
-    1.2.4 :: Released January 21, 2014
-
 AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
 
 DEPENDENCIES
-    perl samtools RNAeval RNALfold bowtie (0.12.x OR 1.x) [only if aligning
-    reads] bowtie-build (0.12.x OR 1.x) [only if aligning reads]
+    perl samtools RNAfold butter bowtie bowtie-build maple
 
-    ShortStack.pl is a perl script, so it needs perl to compile. It expects
-    to find perl at /usr/bin/perl. If this is not where your perl is, modify
-    line 1 of ShortStack.pl (the hashbang) accordingly. It also requires the
-    package Getopt::Long, which I think is standard in most Perl
+    ShortStack is a perl5 script, so it needs perl5 to compile. It expects
+    to find perl5 at /usr/bin/perl. If this is not where your perl is,
+    modify line 1 of ShortStack (the hashbang) accordingly. It also requires
+    the package Getopt::Long, which I think is standard in most Perl
     distributions. If this package is not installed, get it from CPAN.
 
     samtools <http://samtools.sourceforge.net/> needs to be installed in
     your PATH. ShortStack was developed using samtools 0.1.18. Other
     versions should be OK as far as I know, but let me know if not!
 
-    RNAeval and RNALfold are from the ViennaRNA package. See
+    RNAfold is from the ViennaRNA package. See
     <http://www.tbi.univie.ac.at/~ronny/RNA/vrna2.html>. Both need to be
     installed in your PATH.
+
+    butter (bowtie using iterative placement of repetitive small RNAs) ships
+    with ShortStack, and is also at http://github.com/MikeAxtell/butter . It
+    must be installed in your PATH.
 
     bowtie and bowtie-build must be version "1" .. either 0.12.x or 1.x.
     These are required ONLY if you are aligning reads to the genome. Bowtie
     can be found at http://bowtie-bio.sourceforge.net/index.shtml. Like the
     other dependencies, they must be in your PATH.
 
+    maple (microRNA analysis program leveraging expression) ships with
+    ShortStack, and is also at http://github.com/MikeAxtell/maple . It must
+    be installed in your PATH.
+
 INSTALL
     There is no 'real' installation. After installing the dependencies (see
-    above), you should check to make sure the ShortStack.pl is executable.
-    It should be, but if not you can:
+    above), you should check to make sure the ShortStack is executable. It
+    should be, but if not you can:
 
-        chmod +x ShortStack.pl                                                         
+        chmod +x ShortStack
                                                                                                  
-    For convenience, you can add it to your PATH .. for instance
+    Then add it to your PATH .. for instance
 
-    sudo cp ShortStack.pl /usr/bin/
+    sudo cp ShortStack /usr/bin/
 
 USAGE
-    Shortstack.pl [options] [genome.fasta]
+    ShortStack [options] [genome.fasta]
 
     There are three modes which differ in the the types of pre-analysis that
     are performed. Each of the modes has a different set of REQUIRED
@@ -80,14 +84,14 @@ USAGE
     Mode 1: Trim small RNA-seq reads to remove 3' adapter seqeuence, align
     them, and then analyze. Required options:
 
-    --untrimmedFA OR --untrimmedFQ OR --untrimmedCS
+    --reads
 
     --adapter
 
     Mode 2: Align pre-trimmed small RNA-seq reads, and then analyze.
     Required options:
 
-    --trimmedFA OR --trimmedFQ OR --trimmedCS
+    --reads
 
     Mode 3: Analyze a pre-existing BAM alignment of small RNA-seq reads.
     Require option:
@@ -97,78 +101,53 @@ USAGE
     Additionally, in modes 1 or 2, the option --align_only will terminate
     analysis after making the alignment file.
 
-TUTORIAL
-    A full tutorial with sample Arabidopsis data can be found at
-    http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
-
 OPTIONS
     --help : Print a help message and then quit.
 
     --version : Print the version number and then quit.
 
     --outdir [string] : Name of directory to be created to receive results
-    of the run. Deafults to "ShortStack_[time]", where time is "UNIX time"
-    (the number of non-leap seconds since Jan 1, 1970 UCT), if not provided
-
-    --untrimmedFA [string] : Path to untrimmed small RNA-seq data in FASTA
-    format. Multiple datasets can be provided as a comma-delimited list.
-
-    --untrimmedFQ [string] : Path to untrimmed small RNA-seq data in FASTQ
-    format. Multiple datasets can be provided as a comma-delimited list.
-
-    --untrimmedCS [string] : Path to untrimmed small RNA-seq data is
-    Colorpsace-FASTA format. Multiple datasets can be provided as a
-    comma-delimited list.
-
-    --untrimmedCSQV [string] : Path to untrimmed small RNA-seq quality
-    values from SOLiD datasets, corresponding to colorspace-fasta files
-    given in option --untrimmedCS. Multiple datasets can be provided as a
-    comma-delimited list.
+    of the run. Deafults to \"ShortStack_[time]\", where time is \"UNIX
+    time\" (the number of non-leap seconds since Jan 1, 1970 UCT), if not
+    provided
 
     --adapter [string] : Sequence of 3' adapter to search for during adapter
-    trimming. Must be at least 8 nts in length, and all ATGC characters.
-    Required if either --untrimmedFA or --untrimmedFQ are specified.
-    Multiple adapters (for when multiple input untrimmedFA/FQ files are
-    specified) can be provided as a comma-delimited list.
+    trimming. Must be at least 8 nts in length, and all ATGC characters. If
+    provided, reads will be trimmed.
 
-    --trimmedFA [string] : Path to trimmed and ready to map small RNA-seq
-    data in FASTA format. Multiple datasets can be provided as a
-    comma-delimited list.
-
-    --trimmedFQ [string] : Path to trimmed and ready to map small RNA-seq
-    data in FASTQ format. Multiple datasets can be provided as a
-    comma-delimited list.
-
-    --trimmedCS [string] : Path to trimmed and ready to map small RNA-seq
-    data in Colorspace-FASTA format. Multiple datasets can be provided as a
-    comma-delimited list.
-
-    --trimmedCSQV [string] : Path to trimmed color-space quality value
-    files, corresponding to trimmed colorspace-fasta files provided in
-    option --trimmedCS. Multiple datasets can be provided as a
-    comma-delimited list.
+    --reads [string] : Path to reads file in fasta (.fa or .fasta
+    extension), fastq (.fastq or .fq extension), or colorspace-fasta
+    (.csfasta extension). Can be multiple files, separated by commas.
+    ShortStack knows the format only thought the file extensions.
 
     --bowtie_cores [integer] : Number of processor cores to use during
-    bowtie alignment. Be sure to reserve 3 cores for the rest of alignment
-    pipeline. Default: 1.
+    bowtie / butter alignment. Default: 1.
+
+    --mismatches [integer] : Number of allowable mismatched for butter
+    alignment. Must be 0 or 1. Default: 0.
+
+    --max_rep [integer] : Reads with more than this number of possible
+    alignment positions will be reported as unmapped regardless of butter
+    density placement probabilities. Default: 1000.
+
+    --ranmax [integer] : Reads with more than this number of possible
+    alignment positions where the choice can't be guided by
+    butter-calculated probabilities will be reported as unmapped. Default:
+    3.
+
+    --HPscore : Minimum maple-derived score in order to keep a locus that
+    failed as a MIRNA as an HP locus. Deafult: 0.8.
 
     --align_only : Exits program after completion of small RNA-seq data
     alignment, creating BAM file.
 
     --bamfile [string] : Path to properly formatted and sorted BAM alignment
-    file of small RNA-seq data.
+    file of small RNA-seq data. Files require custom tags provided by the
+    butter aligner.
 
     --read_group [string] : Analyze only the indicated read-group.
     Read-group must be specified in the bam alignment file header. Default =
     [not active -- all reads analyzed]
-
-    --inv_file [string] : PATH to an einverted-produced .inv file of
-    inverted repeats within the genome of interest. Not required but
-    strongly suggested for more complete annotations of hairpin-derived
-    small RNA genes. Default = {blank}. Not needed for runs in "nohp" mode
-    or runs in "count" mode (because "count" mode forces "nohp" mode as
-    well). A typical eniverted run uses default parameters except
-    "-maxrepeat 10000", in order to capture long IRs.
 
     --flag_file [string] : PATH to a simple file of genomic loci of
     interest. The ShortStack-analyzed small RNA clusters will be analyzed
@@ -190,55 +169,12 @@ OPTIONS
     range of interest). Deafult = 24. Must be between 15 and 35, and more
     than or equal to --dicermin
 
-    --minUI [float] : Minimum uniqueness index required to attempt RNA
-    folding. Must be a value between 0 and 1. Zero forces all clusters to be
-    folded; default: 0.1
-
-    --maxhpsep [integer] : Maximum allowed span for a base-pair during
-    hairpin search with RNALfold; Also serves as the maximum size of genomic
-    query to fold with RNALfold .. loci whose unpadded size is more than
-    --maxhpsep will not be analyzed at all with RNALfold. Default = 300.
-    Must be between 50 and 2000.
-
-    --minfracpaired [float] : Minimum fraction of paired nucleotides
-    required within a valid hairpin structure. Default = 0.67. Allowed
-    values are greater than 0 and less than or equal to 1.
-
-    --minntspaired [integer] : Minimum absolute number of paired nucleotides
-    required within a valid hairpin structure. Default = 15. Allowed values
-    are greater than zero and less than or equal to --maxhpsep
-
-    --maxdGperStem [float] : Maximum deltaG / stem length allowed in a valid
-    hairpin structure. Stem length is 0.5 * (left_stem_length +
-    right_stem_length). Default = -0.5
-
-    --minfrachpdepth [float] : Minimum fraction of corrected coverage within
-    hairpin arms to keep hairpin for further analysis. Default = 0.67.
-    Allowed values between 0 and 1. See below for details.
-
-    --miRType [string] : Either "plant" or "animal". Defaults to "plant".
-    This option sets --maxmiRHPPairs, --maxmiRUnpaired, and --maxLoopLength
-    to 150, 5, and 100,000 respectively for type "plant". For type "animal",
-    the three are instead set to 45, 6, and 15, respectively.
-
-    --maxmiRHPPairs [integer] : Maximum number of base pairs in a valid
-    MIRNA hairpin. default: set by --miRType "plant" to 150. --miRType
-    "animal" sets to 45 instead. When provided, user settings will override
-    miRType settings.
-
-    --maxmiRUnpaired [integer] : Maximum number of unpaired miRNA nts in a
-    miRNA/miRNA* duplex. default: set by --miRType "plant" to 5. --miRType
-    "animal" instead sets it to 6. When provided, user settings will
-    override miRType settings.
-
-    --maxLoopLength [integer] : maximum allowed loop length for a valid
-    hairpin. default: set by --miRType "plant" be essentially unlimited
-    (100,000). --miRType "plant" sets it to 15. When provided, user settings
-    will override miRType settings.
+    --miRType [string] : Either \"plant\" or \"animal\". Defaults to
+    \"plant\".
 
     --minstrandfrac [float] : Minimum fraction of mappings to one or the
     other strand call a polarity for non-hairpin clusters. Also the minimum
-    fraction of "non-dyad" mappings to the sense strand within potential
+    fraction of \"non-dyad\" mappings to the sense strand within potential
     hairpins/miRNAs to keep the locus annotated as a hp or miRNA. See below
     for details. Default = 0.8. Allowed values between 0.5 and 1.
 
@@ -259,10 +195,10 @@ OPTIONS
     list of clusters. Count mode also forces nohp mode. Formatting details
     below. Default : Not invoked.
 
-    --nohp : If "--nohp" appears on the command line, it invokes running in
-    "no hairpin" mode. RNA folding, hairpin annotation, and MIRNA annotation
-    will be skipped (likely saving significant time). Note that --count mode
-    forces --nohp mode as well. Default: Not invoked.
+    --nohp : If \"--nohp\" appears on the command line, it invokes running
+    in \"no hairpin\" mode. RNA folding, hairpin annotation, and MIRNA
+    annotation will be skipped (likely saving significant time). Note that
+    --count mode forces --nohp mode as well. Default: Not invoked.
 
 KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
   Input genome.fasta file
@@ -283,29 +219,20 @@ KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
 
   Small RNA-seq reads.
     FASTA or FASTQ data should be devoid of comment lines and conform to
-    FASTA or FASTQ specs. In addition, ShortStack.pl assumes that each read
+    FASTA or FASTQ specs. In addition, ShortStack assumes that each read
     will occupy a single line in the file. There is no support for
     paired-end reads. Colorspace-FASTA formatted data (from SOLiD) can have
     comment lines. Format is assumed to conform to colorspace-FASTA
     specifications (beginning with a nucleotide, followed by a string of
     colors [0,1,2,3] or ambiguity codes [.]. For SOLiD data, the quality
-    value files can also be input (with option --untrimmedCSQV or
-    --trimmedCSQV); these files are expected to be space delimited list of
-    integers, in the same order as the corresponding colorspace-fasta files.
-    During alignment, read names with white-space will be truncated,
-    beginning at the first white-space character found.
+    values (_QV.qual files) are not usable as valid inputs.
 
   Input .bam file
-    It is highly recommended that you create the BAM alignment file with
-    ShortStack.pl itself to ensure compatibility. Unfortunately, BAM files
-    created using versions of ShortStack.pl prior to 1.0.0 (and the
-    now-obsoleted 'Prep_bam.pl' script) will NOT be compatibile with
-    ShortStack v 1.0.0 and higher. Sorry. There are good reasons for this,
-    as the previously recommended alignment methods were sub-optimal.
+    As of ShortStack 2.0.0, bam alignment files must have been created with
+    the program butter. Validation of bam files requires:
 
-    If you do make your own BAM alignments, outside of ShortStack.pl, they
-    must pass the following validation steps that are performed by
-    ShortStack:
+    If you do make your own BAM alignments, outside of ShortStack, they must
+    pass the following validation steps that are performed by ShortStack:
 
     1. The header must be present
 
@@ -315,9 +242,8 @@ KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
     3. All of the chromosome names found in the header MUST also be found in
     the genome.fasta file
 
-    4. The data lines must contain the custom XX:i:(\d+) tag, where \d+ is
-    an integer representing the total number of valid alignment positions
-    for that read.
+    4. The data lines must contain the custom XX, XY, and XZ tags added by
+    butter.
 
     5. If the option --read_group is being used, the specified read_group
     must be mentioned in the header in an @RG line.
@@ -328,18 +254,10 @@ KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
     the run.
 
     Each mapped read must have the CIGAR string set (column 6 in the SAM
-    specification) -- ShortStack.pl determines the small RNA lengths by
-    parsing the CIGAR string .. if any mappings (except unmapped reads,
-    which are ignored) have "*" entered instead of a valid CIGAR string
-    ShortStack.pl will exit and complain.
-
-    Finally, a key assumption that ShortStack.pl makes about the BAM
-    alignment is that each original small RNA-seq read is represented by
-    just one alignment line. For reads that had more than one valid
-    alignment position, just one should be randomly selected, and the total
-    number of valid alignment positions noted in the XX tag. Users of
-    ShortStack versions prior to 1.0.0 please note that this is quite
-    different from the earlier methods.
+    specification) -- ShortStack determines the small RNA lengths by parsing
+    the CIGAR string .. if any mappings (except unmapped reads, which are
+    ignored) have "*" entered instead of a valid CIGAR string ShortStack
+    will exit and complain.
 
   --count file
     If running in --count mode, the user-provided file is expected to be a
@@ -354,7 +272,7 @@ KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
     accordingly. Any other columns in a tab-delimited input file are
     ignored.
 
-    Importantly, the 'Results.txt' file produced by a previous ShortStack.pl
+    Importantly, the 'Results.txt' file produced by a previous ShortStack
     run can be used directly in subsequent runs in --count mode. This is
     useful when comparing identical intervals across multiple samples.
 
@@ -370,18 +288,6 @@ KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
     Coordinates must be in the format [Chr]:[start]-[stop], where Chr is
     defined in the genome file AND the .bam file, and start and stop are
     one-based, inclusive.
-
-  --inv_file
-    Unless you are running in "nohp" mode, providing a inv_file will enhance
-    the accuracy of the hairpin annotations. RNALfold-based folding of
-    clusters will often miss very large inverted repeats that einverted can
-    capture. To make the .inv file, download and install the EMBOSS package
-    ( http://emboss.sourceforge.net/ ), then run einverted against your
-    genome of interest. For the purposes of ShortStack analysis, the fasta
-    file can be ignored / deleted. The .inv file is used for ShortStack
-    analysis. Note that the inv_file is not required, but ShortStack will
-    warn you if it is missing (unless you are running in 'nohp' or 'count'
-    mode).
 
 OUTPUT
   Results.txt
@@ -407,95 +313,53 @@ OUTPUT
     comma-separated. If there were none, or no flag_file was provided, than
     a "." is present in this column instead.
 
-    Column 4: HP : Whether this cluster appears to be hairpin-derived or
-    not. If not, a "." is present. If it is a hairpin, but NOT qualified as
-    a MIRNA, "HP" is indicated. MIRNAs are indicated by "MIRNA". If the run
-    was in "--nohp" mode, than all entries in the column will be "ND"
-    (meaning 'not determined').
+    Column 4: Size : Size in nts of the locus.
 
-    Column 5: Strand : The pre-dominant strand from which the small RNA
-    emanate. If ".", no strand was called. HPs and MIRNAs always have a
-    polarity, based on the hairpin's originating strand. Non-HP clusters
-    have their polarity determined by the --minstrandfrac setting.
+    Column 5: MIRNA : Whether this cluster appears to be a MIRNA or not. If
+    not, a "." is present. If it is a hairpin, but NOT qualified as a MIRNA,
+    "HP" is indicated. MIRNAs are indicated by "MIRNA". If the run was in
+    "--nohp" mode, than all entries in the column will be ".".
 
-    Column 6: Frac_Wat : Fraction of aligned reads to the Watson (e.g. +)
+    Column 6: MIRNA_Score : Score of the locus via MIRNA analysis by maple.
+    Ranges from 0-1, with 1 being the best. "NA" if locus was pre-excluded
+    from maple analysis (because of excessive length, not coming from a
+    clear single-strand, or DicerCall of N).
+
+    Column 7: Strand : The predominant genomic strand from which the small
+    RNA emanate. If ".", no strand was called.
+
+    Column 8: Frac_Wat : Fraction of aligned reads to the Watson (e.g. +)
     strand of the cluster. 1 means all were from Watson Strand (e.g. +), 0
     means all were from Crick (e.g. -) strand.
 
-    Column 7: Total : Total aligned reads within the cluster.
+    Column 9: Total : Total aligned reads within the cluster.
 
-    Column 8: Uniques : Total aligned reads derived from uniquely mapped
+    Column 10: Uniques : Total aligned reads derived from uniquely mapped
     reads .. e.g., those with XX:i:1.
 
-    Column 9: UI : Uniqueness index. This is a value >0 and <=1. To
-    determine the UI, the ambiguity normalized counts within the locus are
-    summed and divided by the total number of alignments. For a given read,
-    the ambiguity-normalized value is defined as 1 / d, where d is the
-    integer in the XX:i:[d] tag representint the total number of possible
-    locations for that read. Thus, loci with a low UI have a large
-    proportion of reads that are ambiguous in their origins.
-
-    Column 10: DicerCall : If "N", the cluster was not annotated as
+    Column 11: DicerCall : If "N", the cluster was not annotated as
     dicer-derived, per options --dicermin, --dicermax, and --mindicerfrac.
     Otherwise this is a number, within the --dicermin to --dicermax size
     range, which indicates the most abundant small RNA size within the
     mappings at that cluster.
 
-    Column 11: PhaseOffset : If "ND", phasing p-value was not calculated for
+    Column 12: PhaseOffset : If "NA", phasing p-value was not calculated for
     this cluster. Otherwise, the offset is the one-based genomic position
     with which the cluster appears to be "in-phase" (based on the 5' nt of a
     sense-mapped small RNA). Phasing is always in increments identicial to
     the Dicer size call in column 9.
 
-    Column 12: Phase_pval : If "ND", phasing p-value was not calculated for
+    Column 13: Phase_pval : If "NA", phasing p-value was not calculated for
     this cluster. Otherwise, the p-value is derived from a modified
     hypergeometric distribution, as described below.
 
-    Column 13: Pairs : Number of base-pairs in the hairpin stems. If this is
-    not a HP or MIRNA locus, "NA" is entered instead.
+    Column 14: Short : The total mappings from reads with lengths less than
+    --dicermin.
 
-    Column 14 : FracPaired : Fraction of the stem nucleotides that are
-    paired. If this is not a HP or MIRNA locus, "NA" is entered instead.
+    Column 15: Long : The total mappings from reads with lengths more than
+    --dicermax.
 
-    Column 15 : StemLength : Defined as 0.5 * (5' arm length + 3' arm
-    length). If this is not a HP or MIRNA locus, "NA" is entered instead.
-
-    Column 16 : LoopLength : Number of nucleotides between the 5' and 3'
-    stems. If this is not a HP or MIRNA locus, "NA" is entered instead.
-
-    Column 17 : dGperStem : deltaG of the stems divided by the StemLength.
-    If this is not a HP or MIRNA locus, "NA" is entered instead.
-
-    Column 18 : FracCovHP : Fraction of the per-nucleotide coverage present
-    in the originally found cluster that is located in the two arms of the
-    hairpin. If this is not a HP or MIRNA locus, "NA" is entered instead.
-
-    Column 19 : HPSizeResult : "1" indicates the number of pairs in the
-    hairpin was less than or equal to maxmiRHPPairs; 0 indicates the
-    opposite. If this is not a HP or MIRNA locus, "NA" is entered instead.
-
-    Column 20 : PrecisionResult : The number of small RNA sequences in the
-    stem region of the hairpin that accounted for >= 20% of the mappings. If
-    this is not a HP or MIRNA locus, "NA" is entered instead.
-
-    Column 21 : DuplexResult : The number of possible miRNA/miRNA* duplexes
-    in which neither partner spanned a loop and neither partner had >
-    maxmiRUnpaired number of unpaired nucleotides in the putative duplex. If
-    this is not a HP or MIRNA locus, "NA" is entered instead.
-
-    Column 22 : StarResult : The number of putative miRNA*'s that were
-    actually sequenced. Values of 1 or more here indicate a MIRNA annoation.
-    If this is not a HP or MIRNA locus, "NA" is entered instead.
-
-    Column 23: Short : The total mappings from reads with lengths less than
-    --dicermin, either in raw reads (--raw mode), or mappings per million
-    mapped.
-
-    Column 24: Long : The total mappings from reads with lengths more than
-    --dicermax, either in raw reads (--raw mode), or mappings per million
-    mapped.
-
-    Columns 25 - the end : The total mappings from reads with the indicated
+    Columns 16 - the end : The total mappings from reads with the indicated
     lengths. These are the sizes within the Dicer range.
 
   Log.txt
@@ -507,108 +371,25 @@ OUTPUT
     a DicerCall that is NOT N), and the 'N' loci (those with a DicerCall of
     'N'). There are NOT produced in a --count mode run.
 
-  miRNA_summary.txt
-    This is a tab-delimited text file that summarizes key features of the
-    loci annotated as MIRNAs, including mature miRNA sequences, miRNA-star
-    sequences, and the numbers of mappings for each and for the entire
-    locus.
-
   Hairpin and MIRNA detail files
-    Unless the run was done in --nohp mode, each annotated hairpin-derived
-    and MIRNA locus will have its own simple text file to display the
-    details of the locus. These text files all show A) the Name and genomic
-    coordinates of the locus, B) the sequence, in RNA form, C) the
-    identified hairpin structure, in dot-bracket notation, and D) all
-    mappings whose start and stop is within the interval being examined.
-
-    Reads mapped to the sense strand (sense relative to the hairpin, not
-    necessarily relative to the genome) have "."s as placeholders and are
-    shown in the 5'-->3' orientation. Reads mapped to the antisense strand
-    (antisense relative to the hairpin, not necessarily relative to the
-    genome) have "<"s as placeholders, and are written in the 3' --> 5'
-    orientation. Annotated mature miRNAs have "m"s as placeholders, and
-    annotated miRNA*'s have "*"s as placeholders.
-
-    After each read, the read length (l) and the number of mappings (m) is
-    shown.
-
-    Note that alignments for very complex HP loci are suppressed (only the
-    sequence and structure will be displayed in the detail file, along with
-    a note indicating the alignment was suppressed). This has a major impact
-    on reducing the memory footprint of ShortStack. In addition, since the
-    alignments are meant for visual inspection, very complex alignments
-    aren't really parseable by eye anyway. Complex loci are defined as those
-    where the hairpin is longer than 400nts AND/OR has more than 400
-    distinct small RNA sequences. All MIRNA loci have the alignments
-    presented, regardless of whether it is complex or not.
+    Text-based and graphical files for each MIRNA and HP locus are created.
+    See the maple documentation for details.
 
 KEY METHODS
-  Adapter trimming (FASTA or FASTQ)
-    Adapter trimming by ShortStack searches for the right-most occurence of
-    the string given in the option --adapter. If found, the adapter is
-    chopped off. Reads where no adapter is found are discarded, as are those
-    shorter than 15 nts after trimming. Finally, any reads that contain
-    non-ATGC characters after trimming are also discarded. Adapter-matching
-    is performed by a simple regex and allows for no mismatches. If the
-    input file is in FASTQ format, the quality values are trimmed as well.
-
-  Adapter trimming (Colorspace-FASTA)
-    Adapter trimming of colorspace data first translates the input adapter
-    sequence to colorspace. The right-most occurence of the color-space
-    adapter sequence is identified. Trimming begins 1 color BEFORE the match
-    to the color-space adapter. This removes the 'hybrid' color
-    corresponding to the dinucleotide at the junction of the small RNA and
-    the adapter. Reads where no adapter is found are discarded, as are those
-    shorter than 15 colors after trimming. Finally, any reads that contain
-    non-0123 colors after trimming are also discarded. Adapter-matching is
-    performed by a simple regex and allows for no mismatches. If SOLiD
-    formatted quality values were provided (via option --untrimmedCSQV), the
-    quality values are also trimmed at the corresponding position.
-
-  Alignments
-    FASTA and FASTQ alignments are performed with the bowtie settings -v 1
-    -a --best --strata -S. Color-space alignments use bowtie settings -C -f
-    --col-keepends (and if quality values are available, -Q) -v 1 -a --best
-    --strata -S. Initial alignments are parsed by ShortStack to retain just
-    ONE randomly selected valid alignment per read. After this selection,
-    and the addition of the XX tag (indicating the total number of possible
-    positions for the read), the data are then piped through samtools view
-    and samtools sort to create a sorted BAM formatted file. The header is
-    also modified to note ShortStack processing. Note that unmapped reads
-    are also retained in the alignment, with the SAM Flag set as 0x4 to
-    indicate that.
-
-    One valid question is why force bowtie to report all valid alignments,
-    and then parse to select just one, instead of explicitly telling bowtie
-    to report just one alignment (e.g. k 1)? The reason is that bowtie's
-    selection of reported positions in those cases is clearly NOT random. So
-    even though ShortStack's method incurs a performance penalty during
-    alignment, it will guarantee a more accurate alignment.
+  Adapter trimming and alignments
+    Adapter trimming and alignments are handled by butter. See the butter
+    documentation for details.
 
   Multiple libraries
-    As of version 1.1.0, ShortStack supports input of multiple FASTA or
-    FASTQ datasets (and as of version 1.2.0, multiple colorspace-FASTA
-    datasets as well), either trimmed or untrimmed. These are passed in via
-    the options --untrimmedFA, --untrimmedFQ, --untrimmedCS, --trimmedFA,
-    --trimmedFQ, or --trimmedCS as comma-delimited lists. If the input is
-    untrimmed, option --adapter also allows input of a corresponding
-    comma-delimited list of adapters. If the data are colorspace, options
-    --untrimmedCSQV and --trimmedCSQV allow input of comma-delimited lists
-    of quality value files corresponding to their colorspace FASTA
-    coutnerparts given by options --untrimmedCS or --trimmedCS. The
-    untrimmed files and the adapters are assumed to be in the same order. If
-    all untrimmed files have the same adapter, just one sequence for option
-    --adapter is acceptable, and will be used to guide trimming for all
-    files.
-
-    When multiple small RNA-seq libraries are input, each one is first
-    aligned separately, creating temporary .bam files. When this is
-    complete, they are merged into a single alignment, which is given the
-    name "outdir.bam" in the working directory, where "outdir" is the string
-    given in option --outdir. During the merging, the read group information
-    is stored, so all alignments can be de-convoluted back to their parent
-    libraries if desired. The individual .bam alignments created intially
-    are deleted.
+    ShortStack supports input of multiple small RNA-seq libraries through
+    the option --reads. Files are provided as a comma-delimited list. When
+    multiple small RNA-seq libraries are input, each one is first aligned
+    separately, creating temporary .bam files. When this is complete, they
+    are merged into a single alignment, which is given the name "outdir.bam"
+    in the working directory, where "outdir" is the string given in option
+    --outdir. During the merging, the read group information is stored, so
+    all alignments can be de-convoluted back to their parent libraries if
+    desired. The individual .bam alignments created intially are deleted.
 
   Read groups
     As of version 1.1.0, ShortStack incorporates the option --read_group.
@@ -632,12 +413,11 @@ KEY METHODS
 
     1. The total depth of small RNA coverage at each occupied nucleotide in
     the genome is examined, and initial 'islands' of coverage are defined as
-    continuous stretches where the read depth is greater than or equal to
-    the threshold depth specified by option --mindepth. Note that islands
-    could theoretically be as small as one nucleotide, since they depend on
-    total depth of coverage, not the small RNA length per se. Many islands
-    may often be 20-24nts in length, corresponding to a pile of a single
-    small RNA species.
+    continuous stretches of non-zero coverage where the read depth, at at
+    lest one point, is greater than or equal to the threshold depth
+    specified by option --mindepth. Note that this definition of islands is
+    different, and more inclusive, than that used by ShortStack versions
+    prior to 2.0.0.
 
     2. The initial islands are then temporarily extended on both sides by
     the distance specified by option --pad. Islands that overlap after
@@ -646,109 +426,19 @@ KEY METHODS
     end trimmings are performed, the final result is the initial clusters.
     If the run is performed in --nohp mode, these are the final clusters. If
     hairpins and MIRNAs are being examined, some of the clusters may be
-    adjusted in position to fully capture the putative hairpin(s) (see
-    below).
+    adjusted in position to reflect the extent of the apparent hairpin
+    precursor.
 
   Hairpin and MIRNA analysis
-    1. Clusters are first filtered to determine eligbility for secondary
-    structure analysis. Only clusters whose uniqueness index* is >=
-    [--minUI] are eligible. In addition, clusters with a DicerCall of "N"
-    are excluded from folding analysis.
+    MIRNA analysis is performed by maple. For speed, not all clusters are
+    subject to analysis by maple. Clusters that exceed 1kb in length, have a
+    DicerCall of "N", or that don't have a clear single-stranded pattern of
+    read alignments are not sent to maple for analysis. The miRType option
+    also limits queries based on kingdonm-specific requirement
+    (specifically, if the miRTtype is 'animal', than the query can't be
+    longer than 250 nts.).
 
-    2. The genomic window to be subject to RNA folding is first determined.
-    If the locus size is > --maxhpsep, no RNA folding will take place at the
-    locus. Otherwise, a window with length of --maxhpsep is centered on the
-    locus to determine the nucleotides to fold
-
-    3. Both the top and bottom genomic strands from the window are then
-    subjected to secondary structure prediction using RNALfold (option -L
-    [--maxhpsep]), which returns a diverse set of often overlapping
-    predicted structures.
-
-    4. The structures are parsed, retaining only those that satisfy options
-    --minfracpaired, --minntspaired, --maxLoopLength, amd --maxdGperStem.
-
-    5. If an .inv file was provided, all inverted repeats in that file are
-    parsed, and then filtered to also satisfy options --minfracpaired,
-    --minntspaired, --maxLoopLength, amd --maxdGperStem. In addition, loop
-    lengths from einverted data are not allowed to be longer than 50% of the
-    helix length of the putative hairpin. Putative RNA secondary structures
-    in dot-bracket notation are generated from the .inv alignment, not by
-    actual RNA thermodynamic analysis. All G-U alignments are considered
-    paired, in addition to the standard A-U and G-C pairings. Both strands
-    are used, subject to passing the --minfracpaired, --minntspaired,
-    --maxLoopLength, amd --maxdGperStem criteria. Inverted-repeats that
-    survive these filters are then filtered to retain only those with
-    overlap to the original set of structure-eligible clusters (see 1
-    above), and the resulting set of eniverted-derived hairpins is merged
-    with the RNALfold-derived set.
-
-    6. Redundant hairpins are then removed. Redundant hairpins are those
-    whose 5' arms and 3' arms overlap. In pairwise comparisons of redundant
-    hairpins, the longest hairpin is retained.
-
-    7. Hairpins that don't have overlap with the original cluster are then
-    removed. Because the folding window could have been extended around the
-    cluster, there could be putative hairpins that are not within the
-    original cluster. To have overlap, at least one of the hairpin's helical
-    arms must have at least 1nt within the original cluster coordinates.
-
-    8. The pattern of small RNA expression relative to the remaining
-    hairpins is then examined. The per-nucleotide coverage across every
-    base, on both strands separately, across the original locus coordinates
-    is calculated. If there is a single hairpin whose 5' and 3' arms contain
-    >= [--minfrachpdepth] of the total coverage of the original locus, the
-    hairpin is kept for futher analysis. If more than one hairpin meets this
-    criterion, than the one with the highest coverage fraction in the arms
-    is retained. Note that this step contains a correction for reads that
-    are "dyads" .. reads that map twice to a hairpin, once in each arm, on
-    opposite strands... this happens for perfect inverted repeat loci. Such
-    reads are counted towards the sense strand only for a given hairpin.
-
-    9. The pattern of small RNA expression relative to the single hairpin
-    candidate is further scrutinized for polarity. The fraction of all
-    mappings in the hairpin interval must be >= [--minstrandfrac]. As in
-    step 8, this step corrects for "dyad" reads (see above). Hairpins that
-    pass this step are either HP or MIRNA loci. The coordinates of the
-    originally determined de novo locus are discarded, and replaced with the
-    hairpin coordinates.
-
-    10. Each potential hairpin that remains is next analyzed to see if it
-    qualifies as a MIRNA. MIRNA locus annotation is designed to satisfy the
-    criteria for de novo annotation of plant MIRNAs as described in Meyers
-    et al. (2008) Plant Cell 20:3186-3190. PMID: 19074682. In fact,
-    ShortStack's criteria is a little stricter than Meyers et al., in that
-    ShortStack has an absolute requirement for sequencing of the exact
-    predicted miRNA* sequence for a candidate mature miRNA. It is important
-    to note that ShortStack's MIRNA annotation method is designed to reduce
-    false positives at the expense of an increased rate of false negatives.
-    In other words, there are likely many bona fide MIRNA loci not annotated
-    as such because they don't quite meet the strict criteria set forth
-    below.
-
-    - Hairpin Size: The total number of pairs in the hairpin must be <=
-    [--maxmiRHPPairs]
-
-    - Precision: There must be at least one candidate mature miRNA that
-    comprises at least 20% of the total abundance of small RNAs mapped to
-    the hairpin.
-
-    - Duplex: Both partners in a candidate miRNA/miRNA* duplex must not span
-    any loops (i.e. neither is allowed to have base-pairs to itself). In
-    addition, there must be <= [--maxmiRUnpaired] unpaired mature miRNA nts
-    in the miRNA/miRNA* duplex, and <= [--maxmiRUnpaired] unpaired miRNA*
-    nts in the miRNA/miRNA* duplex.
-
-    - Star: The exact predicted miRNA*s of candidate miRNAs must have at
-    least one mapped read, and the total abundance of any candidate mature
-    miRNA/miRNA* pair must be at least 25% of the total small RNA abundance
-    at the locus. Finally, redundant candidate mature miRNAs are removed, as
-    the steps above initially might classify a small RNA as both a miRNA*
-    and mature miRNA. In such cases, the partner with the higher abundance
-    is called the miRNA, the other the miRNA*.
-
-    Hairpin loci passing all four of these loci are annotated as MIRNAs.
-    Those failing one or more are reported as HP loci instead.
+    See the maple documentation for details of how it works.
 
   Quantification of clusters
     All mappings with at lease one nt of overlap within the cluster are
