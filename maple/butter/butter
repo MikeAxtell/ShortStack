@@ -2,7 +2,7 @@
 use strict;
 use Getopt::Long;
 
-my $version_num = "0.2.4"; 
+my $version_num = "0.2.4.1"; 
 my $help_message = get_help($version_num);
 
 my $version;
@@ -1599,7 +1599,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 =head1 CITATION
 
-None yet, stay tuned!
+A preprint describing butter has been deposited at http://biorxiv.org/
+
+Butter: High-precision genomic alignment of small RNA-seq data. Michael J Axtell bioRxiv doi: http://dx.doi.org/10.1101/007427
 
 =head1 AUTHOR
 

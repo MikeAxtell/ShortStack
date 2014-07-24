@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "2.0.0";
+my $version_num = "2.0.1";
 
 ##### get options and validate them
 
@@ -377,7 +377,7 @@ log_it ($logfile," done\n\n");
 
 if(($mode == 1) or ($mode == 2)) {
     my @input_read_files = split (",", $reads);
-    my $butter_call = "butter";
+    my $butter_call = "butter --aln_cores $bowtie_cores";
     if($no_condense) {
 	$butter_call .= " --no_condense";
     }
@@ -2618,11 +2618,11 @@ Mode 1: Trim small RNA-seq reads to remove 3' adapter seqeuence, align them, and
 
 --adapter
 
-Mode 2: Align pre-trimmed small RNA-seq reads, and then analyze. Required options:
+Mode 2: Align pre-trimmed small RNA-seq reads, and then analyze. Required option:
 
 --reads
 
-Mode 3: Analyze a pre-existing BAM alignment of small RNA-seq reads. Require option:
+Mode 3: Analyze a pre-existing BAM alignment of small RNA-seq reads. Required option:
 
 --bamfile
 
