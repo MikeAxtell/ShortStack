@@ -89,12 +89,12 @@ USAGE
     --adapter
 
     Mode 2: Align pre-trimmed small RNA-seq reads, and then analyze.
-    Required options:
+    Required option:
 
     --reads
 
     Mode 3: Analyze a pre-existing BAM alignment of small RNA-seq reads.
-    Require option:
+    Required option:
 
     --bamfile
 

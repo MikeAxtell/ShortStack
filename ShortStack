@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "2.0.1";
+my $version_num = "2.0.2";
 
 ##### get options and validate them
 
@@ -457,7 +457,7 @@ if($count) {
 } else {
     log_it ($logfile," de novo\n");
 
-    my @islands = get_islands($bamfile,$mindepth,$expected_faidx,$read_group);
+    my @islands = get_islands($bamfile,$mindepth,$read_group);
     
     @clusters = merge_clusters(\@islands,\$pad,\$genome);
     
@@ -2240,86 +2240,70 @@ sub requant {
 }
 
 sub get_islands {
-    my($bamfile,$mindepth,$expected_faidx,$read_group) = @_;
-    # go chr by chr, using the .fai index file to get the chr names
-    my @chrs = ();
-    open(FAI, "$expected_faidx");
+    my($bamfile,$mindepth,$read_group) = @_;
+    
     my @fields = ();
-    
-    my $genome_sum = 0;
-    my %fai_hash = ();
-    while (<FAI>) {
-	chomp;
-	@fields = split ("\t", $_);
-	push(@chrs, $fields[0]);
-	$fai_hash{$fields[0]} = $fields[1];
-	$genome_sum += $fields[1];
-    }
-    close FAI;
-    
     my @islands = ();
     
-    my $last_start;
+    my $last_start = -1;
     my $ok;
+    my $last_chr = "NULL";
     
     my $started;
     my $stopped;
-    my $last_location;
+    my $last_location = -1;
     
     my $island;
     
     my $mindpad;
     
-    ## A progress bar based on the % of genome (in nts) analyzed, updated only at the completion of chromosomes
-    log_it($logfile,"\tProgress in sub-routine get_islands \(dots = 5 percent\; updates only at completion of a chromosome\): ");
-    my $dots_printed = 0;
-    my $frac_done = 0;
-    my $needed_dots = 0;
-    foreach my $chr (@chrs) {
-	
-	$last_start = -1;
-	$ok = '';
-	$last_location = -1;
-	
-	if($read_group) {
-	    open(DEPTH, "samtools view -F 0x4 -r $read_group -b -u $bamfile $chr | samtools depth /dev/stdin 2> /dev/null |");
-	} else {
-	    open(DEPTH, "samtools view -F 0x4 -b -u $bamfile $chr | samtools depth /dev/stdin 2> /dev/null |");
-	}
-	while (<DEPTH>) {
-	    chomp;
-
-	    @fields = split ("\t", $_);
-	    if($fields[1] != ($last_location + 1)) {
-		if($ok) {
-		    # close
-		    $island = "$chr" . ":" . "$last_start" . "-" . "$last_location";
-		    push(@islands,$island);
-		    $ok = '';
-		}
-		$last_start = $fields[1];
-	    }
-	    if($fields[2] >= $mindepth) {
-		$ok = 1;
-	    }
-	    $last_location = $fields[1];
-	}
-	close DEPTH;
-	## close the last one, if there is one
-	if($ok) {
-	    $island = "$chr" . ":" . "$last_start" . "-" . "$last_location";
-	    push(@islands,$island);
-	}
-	
-	## update progress bar
-	$frac_done += ($fai_hash{$chr} / $genome_sum);
-	$needed_dots = int ($frac_done / 0.05);
-	until($dots_printed == $needed_dots) {
-	    log_it($logfile,"\.");
-	    ++$dots_printed;
-	}
-	
+    # progress bar based on number of occupied chromosomes finished
+    log_it($logfile, "\tNumber of chromosomes analyzed \(occupied chromosomes only\):\n\t");
+    my $chrcount = 0;
+    
+    
+    if($read_group) {
+	open(DEPTH, "samtools view -r $read_group -b -u $bamfile | samtools depth /dev/stdin 2> /dev/null |");
+    } else {
+	open(DEPTH, "samtools view -b -u $bamfile | samtools depth /dev/stdin 2> /dev/null |");
     }
+    while (<DEPTH>) {
+	chomp;
+	
+	@fields = split ("\t", $_);
+	if(($fields[1] != ($last_location + 1)) or
+	   ($fields[0] ne $last_chr)) {
+	    if($ok) {
+		# close
+		$island = "$last_chr" . ":" . "$last_start" . "-" . "$last_location";
+		push(@islands,$island);
+		$ok = '';
+	    }
+	    $last_start = $fields[1];
+	}
+	if($fields[2] >= $mindepth) {
+	    $ok = 1;
+	}
+	# progress
+	if(($fields[0] ne $last_chr) and 
+	   ($last_chr ne "NULL")) {
+	    log_it($logfile, ".");
+	    ++$chrcount;
+	    if(($chrcount % 50) == 0) {
+		log_it($logfile, " $chrcount\n\t");
+	    }
+	}
+		
+	$last_location = $fields[1];
+	$last_chr = $fields[0];
+    }
+    close DEPTH;
+    ## close the last one, if there is one
+    if($ok) {
+	$island = "$last_chr" . ":" . "$last_start" . "-" . "$last_location";
+	push(@islands,$island);
+    }
+
     log_it($logfile," Done\n");
     return @islands;
     
