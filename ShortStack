@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "2.0.2";
+my $version_num = "2.0.3";
 
 ##### get options and validate them
 
@@ -473,12 +473,17 @@ if(@clusters) {
     exit;
 }
 
+### New in 2.0.3 .. ensure sorting of clusters relative to bam file.
+my @clusters_s = sort_clusters(\@clusters, \$expected_faidx);
+
 ### NEW PHASE 2 -- INITIAL QUANTIFICATION
 
 log_it ($logfile,`date`);
 log_it ($logfile,"Phase Two: Quantify all clusters\n");
 
-my %quant_master = quant(\@clusters,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\%names, \$read_group);
+my %quant_master = quant(\@clusters_s,\$bamfile,\$dicermin,\$dicermax,\$minstrandfrac,\$mindicerfrac,\$phasesize,\%names, \$read_group);
+
+
 
 # in this initial hash, the fields are
 #[0] : locus
@@ -522,7 +527,7 @@ if($nohp) {
     log_it ($logfile,"\n");
     log_it ($logfile,`date`);
     log_it ($logfile,"Running in nohp mode: Skipping phase three\n");
-    @final_clusters = @clusters;
+    @final_clusters = @clusters_s;
     # add extra fields to quant entries
     foreach my $fc (@final_clusters) {
 	my @qf = split ("\t", $quant_master{$fc});
@@ -574,7 +579,7 @@ if($nohp) {
     system "mkdir $MIR_dir";
     system "mkdir $HP_dir";
     
-    foreach my $original_cluster (@clusters) {
+    foreach my $original_cluster (@clusters_s) {
 	if($original_cluster =~ /^(\S+):(\d+)-(\d+)$/) {
 	    $o_cluster_size = $3 - $2 + 1;
 	    $o_chr = $1;
@@ -740,18 +745,18 @@ if($nohp) {
 	}
 	## progress
 	++$clusters_done;
-	$should_be_printed = int(($clusters_done / (scalar @clusters)) / 0.05);
+	$should_be_printed = int(($clusters_done / (scalar @clusters_s)) / 0.05);
 	until($dots_printed == $should_be_printed) {
-	    print ".";
+	    log_it($logfile, ".");
 	    ++$dots_printed;
 	}
     }
     ## completion
-    print " Done\n";
-    print "\tMIRNAs: $n_MIRNA\n";
-    print "\tHPs: $n_FAIL_HP\n";
+    log_it($logfile, " Done\n");
+    log_it($logfile, "\tMIRNAs: $n_MIRNA\n");
+    log_it($logfile, "\tHPs: $n_FAIL_HP\n");
     my $others = $n_NA + $n_FAIL;
-    print "\tOthers: $others\n";
+    log_it($logfile, "\tOthers: $others\n");
 }
 
 
@@ -1140,41 +1145,52 @@ sub range_overlap_count {
     
 sub quant {
     my($clus_array,$bamfile,$dicer_min,$dicer_max,$strand_cutoff,$dicer_cutoff,$phasesize,$names,$read_group) = @_; ## passed by reference .. first one is array, hp_hash and miR_hash are hashes, others scalars
-    my %output = ();
-    my %internal = ();
-    my $total;
-    my $watson;
-    my $repnorm;
-    my $i;
-    my @fields = ();
+    
+    ## version 2.0.3 begin new
+    # open stream
+    if($$read_group) {
+	open(SAM, "samtools view -F 0x4 -r $$read_group $$bamfile |");
+    } else {
+	open(SAM, "samtools view -F 0x4 $$bamfile |");
+    }
+    
+    # get a local copy of the sorted clusters that can be whittled
+    my @local_clus_array = @$clus_array;
+    
+    # initialize the name of the first locus, and its info
+    my $locus = shift @local_clus_array;
+    my $loc_chr;
     my $loc_start;
     my $loc_stop;
     my $loc_size;
-    my $read_length;
-    my $nh;
-    my $frac_watson;
-    my $frac_crick;
-    my $strand;
-    my $total_norm;
-
-    my $size_norm;
-    
+    if($locus =~ /^(\S+):(\d+)-(\d+)$/) {
+	$loc_chr = $1;
+	$loc_start = $2;
+	$loc_stop = $3;
+	$loc_size = $loc_stop - $loc_start + 1;
+    } else {
+	die "FATAL in sub-routine quant: Couldn't parse cluster name $locus\n";
+    }
     my %phase_hash = ();
-    my $in_dicer_range;
+    my $i;
+    for($i = $loc_start; $i <= $loc_stop; ++$i) {
+	$phase_hash{$i} = 0;
+    }
+    my %reads_by_size = ();
+    my $total = 0;
+    my $watson = 0;
+    my $uniques = 0;
+    my $in_total = 0;
+    my $max_size;
+    my $max_value;
     my $dicer_call;
-    my $max_d_size;
-    my $max_d_proportion;
-    
-    my %phase_p_values = ();
-    my %phase_offsets = ();
     my $p_val;
-    my $offset;    
+    my $offset;
+    my $short;
+    my $not_long;
+    my $long;
     
-    my $uniques;
-    
-    #my $ui;
-    
-    my $x;
+    my $last_read_chr = "NULL";
     
     # for progress tracking
     my $n_2_analyze = scalar @$clus_array;
@@ -1182,219 +1198,448 @@ sub quant {
     my $n_analyzed = 0;
     log_it($logfile, "\tProgress in sub-routine quant \(dot = five percent\): ");
     
-    foreach my $locus (@$clus_array) {
-        ## progress
-	++$n_analyzed;
-	if($n_analyzed >= $five_percent) {
-	    ## TEST
-	    ##last;
-	    ## END TEST
-	    log_it($logfile,"\.");
-	    $n_analyzed = 0;
+    # variable declarations
+    my @fields = ();
+    my $read_length;
+    my $read_end = -2;
+    my %output = ();
+    my $frac_watson;
+    my $record;
+    
+    # note which chromosomes have at least one locus
+    my %occupied_chrs = ();
+    foreach my $lcs (@$clus_array) {
+	if($lcs =~/^(\S+):/) {
+	    $occupied_chrs{$1} = 1;
+	} else {
+	    die "FATAL in sub-routine quant: failed to parse locus $lcs\n";
+	}
+    }
+    
+    # let's go!
+    while (<SAM>) {
+	chomp;
+	# ignore header lines, should they be present
+	if($_ =~ /^@/) {
+	    next;
+	}
+	# get fields
+	@fields = split ("\t", $_);
+	# ignore unmapped reads, should they appear
+	if($fields[1] & 4) {
+	    next;
+	}
+	# where is the read?
+	$read_length = parse_cigar($fields[5]);
+	$read_end = $fields[3] + $read_length - 1;
+	
+	# go to next read if this read is on a chromosome lacking any clusters
+	unless(exists($occupied_chrs{$fields[2]})) {
+	    next;
 	}
 	
-	%internal = (); ## reset each time
-	%phase_hash = (); ## reset each time
-	$total = 0;
-	$watson = 0;
-	$repnorm = 0;
-	$uniques = 0;
-	$internal{'short'} = 0;
-	$internal{'long'} = 0;
-	for($i = $$dicer_min; $i <= $$dicer_max; ++$i) {
-	    $internal{$i} = 0;
+	# Should the current locus be recorded and closed?
+	if(($last_read_chr ne $fields[2]) and ($last_read_chr ne "NULL") and ($last_read_chr eq $loc_chr)) {
+	    # A) chromosome of read has changed, and the current locus was on that chr. Need to close, and then
+	    #  advance locus until you either run out of loci, or get a match between loc_chr and fields[2]
+	    #  then, after you get a match, advance loci further (if needed), as for condition B below
+	    
+	    
+	    $record = "A";
+	} elsif (($last_read_chr eq $fields[2]) and ($fields[2] eq $loc_chr) and ($fields[3] > $loc_stop)) {
+	    # B) On same chrom, but all reads in that locus have been recorded. Need to close, and then advance loci until
+	    #  you either get one on same chr that is matching or in front, or you get to next chr
+	    $record = "B";
+	} else {
+	    $record = "N";
 	}
 	
-	if($locus =~ /:(\d+)-(\d+)/) {
-	    $loc_start = $1;
-	    $loc_stop = $2;
-	    $loc_size = $loc_stop - $loc_start + 1;
-	} else {
-	    log_it($logfile, "\nFATAL in sub-routine \"quant\" : could not parse coordinates from locus $locus\n");
-	    exit;
-	}
-	# initialize phase hash
-	for($i = $loc_start; $i <= $loc_stop; ++$i) {
-	    $phase_hash{$i} = 0;
-	}
-	if($$read_group) {
-	    open(SAM, "samtools view -F 0x4 -r $$read_group $$bamfile $locus |");
-	} else {
-	    open(SAM, "samtools view -F 0x4 $$bamfile $locus |");
-	}
-	while (<SAM>) {
-	    chomp;
-	    # ignore header lines, should they be present
-	    if($_ =~ /^@/) {
-		next;
+	if($record eq "A") {
+	    # record
+	    ################# recording block
+	    # [0] Locus
+	    $output{$locus} .= "$locus";
+	    # [1] Name
+	    $output{$locus} .= "\t$$names{$locus}";
+	    # [2] Size
+	    $output{$locus} .= "\t$loc_size";
+	    # [3] Strand
+	    if($total == 0) {
+		$output{$locus} .= "\t\.";
+	    } elsif (($watson / $total) >= $$strand_cutoff) {
+		$output{$locus} .= "\t+";
+	    } elsif ((1-($watson / $total)) >= $$strand_cutoff) {
+		$output{$locus} .= "\t-";
+	    } else {
+		$output{$locus} .= "\t\.";
 	    }
-	    # get fields
-	    @fields = split ("\t", $_);
-	    # ignore unmapped reads, should they appear
-	    if($fields[1] & 4) {
-		next;
+	    # [4] Frac Watson
+	    if($total == 0) {
+		$frac_watson = "NA";
+	    } else {
+		$frac_watson = sprintf("%.3f", ($watson / $total));
 	    }
-	    $read_length = parse_cigar($fields[5]);
-
-	    # determine the number of total mappings for the read from the XX:i tag
-	    $nh = '';
-	    if($_ =~ /\tXX:i:(\d+)/) {
-		$nh = $1;
+	    $output{$locus} .= "\t$frac_watson";
+	    # [5] Total
+	    $output{$locus} .= "\t$total";
+	    # [6] Uniques
+	    $output{$locus} .= "\t$uniques";
+	    # [7] DicerCall
+	    if($total) {
+		$in_total = 0;
+		$max_size = '';
+		$max_value = 0;
+		for(my $rs = $$dicer_min; $rs <= $$dicer_max; ++$rs) {
+		    if(exists($reads_by_size{$rs})) {
+			$in_total += $reads_by_size{$rs};
+			if($reads_by_size{$rs} >= $max_value) {
+			    $max_value = $reads_by_size{$rs};
+			    $max_size = $rs;
+			}
+		    }
+		}
+		if(($in_total / $total) >= $$dicer_cutoff) {
+		    $output{$locus} .= "\t$max_size";
+		    $dicer_call = $max_size;
+		} else {
+		    $output{$locus} .= "\tN";
+		    $dicer_call = "N";
+		}
+	    } else {
+		$output{$locus} .= "\tN";
+		$dicer_call = "N";
 	    }
-	    unless($nh) {
-		log_it($logfile,"\nFATAL in sub-routine \"quant\": Could not parse XX:i flag from sam line $_\n");
-		exit;
+	    # [8] and [9] .. phase offset and phase p-value
+	    if (($$phasesize eq "none") or
+		($dicer_call eq "N") or
+		(($$phasesize ne "all") and ($dicer_call != $$phasesize)) or
+		($loc_size < (4 * $dicer_call))) {
+		
+		$output{$locus} .= "\tNA\tNA";
+	    } else {
+		# test
+		#print STDERR "\tSending to eval_phasing: dc: $dicer_call lstart: $loc_start lstop: $loc_stop\n";
+		($p_val,$offset) = eval_phasing(\%phase_hash,\$dicer_call,\$loc_start,\$loc_stop);
+		$output{$locus} .= "\t$p_val\t$offset";
+	    }
+	    # [10] short [11] long [12-end] in dicer ranges
+	    $short = 0;
+	    $not_long = 0;
+	    if($total) {
+		for (my $rs2 = 1; $rs2 < $$dicer_min; ++$rs2) {
+		    if(exists($reads_by_size{$rs2})) {
+			$short += $reads_by_size{$rs2};
+		    }
+		}
+		$output{$locus} .= "\t$short";
+		for (my $rs3 = $$dicer_min; $rs3 <= $$dicer_max; ++$rs3) {
+		    if(exists($reads_by_size{$rs3})) {
+			$not_long += $reads_by_size{$rs3};
+		    }
+		}
+		$not_long += $short;
+		$long = $total - $not_long;
+		$output{$locus} .= "\t$long";
+		for (my $rs4 = $$dicer_min; $rs4 <= $$dicer_max; ++$rs4) {
+		    if(exists($reads_by_size{$rs4})) {
+			$output{$locus} .= "\t$reads_by_size{$rs4}";
+		    } else {
+			$output{$locus} .= "\t0";
+		    }
+		}
+	    } else {
+		$output{$locus} .= "\t0\t0";
+		for (my $rs5 = $$dicer_min; $rs5 <= $$dicer_max; ++$rs5) {
+		    $output{$locus} .= "\t0";
+		}
+	    }
+	    # test
+	    # print STDERR "CONDITON A\n\t$output{$locus}\n";
+	    
+	    # progress
+	    ++$n_analyzed;
+	    if($n_analyzed >= $five_percent) {
+		log_it($logfile,"\.");
+		$n_analyzed = 0;
+	    }
+	    ############### end core recording block
+	    
+	    # test
+	    #print STDERR "Recorded locus $locus on condition A. Read_chr $fields[2] read start: $fields[3] read end: $read_end\n";
+	    
+	    
+	    ### condition A ... advance loci until you run out of loci, or get a locus on the same chr as current read
+	    until ($loc_chr eq $fields[2]) {
+		# are we done?
+		unless(@local_clus_array) {
+		    $locus = '';
+		    last; ## breaks the until loop
+		}
+		$locus = shift @local_clus_array;
+		if($locus =~ /^(\S+):(\d+)-(\d+)$/) {
+		    $loc_chr = $1;
+		    $loc_start = $2;
+		    $loc_stop = $3;
+		    $loc_size = $loc_stop - $loc_start + 1;
+		} else {
+		    die "FATAL in sub-routine quant: Couldn't parse cluster name $locus\n";
+		}
+		%phase_hash = ();
+		for($i = $loc_start; $i <= $loc_stop; ++$i) {
+		    $phase_hash{$i} = 0;
+		}
+		%reads_by_size = ();
+		$total = 0;
+		$watson = 0;
+		$uniques = 0;
+		
+		# test
+		#print STDERR "\tPulled locus $locus in FIRST loop under condition A\n";
+		
 	    }
 	    
-	    # tally
+	    # done?
+	    unless($locus) {
+		last;
+	    }
+	    
+	    ### condition A, part two ... advance loci until you get to a candidate, or change chromosomes
+	    until (($loc_chr ne $fields[2]) or ($fields[3] <= $loc_stop)) {
+		# are we done?
+		unless(@local_clus_array) {
+		    $locus = '';
+		    last; ## breaks the until loop
+		}
+		$locus = shift @local_clus_array;
+		if($locus =~ /^(\S+):(\d+)-(\d+)$/) {
+		    $loc_chr = $1;
+		    $loc_start = $2;
+		    $loc_stop = $3;
+		    $loc_size = $loc_stop - $loc_start + 1;
+		} else {
+		    die "FATAL in sub-routine quant: Couldn't parse cluster name $locus\n";
+		}
+		%phase_hash = ();
+		for($i = $loc_start; $i <= $loc_stop; ++$i) {
+		    $phase_hash{$i} = 0;
+		}
+		%reads_by_size = ();
+		$total = 0;
+		$watson = 0;
+		$uniques = 0;
+
+		# test
+		#print STDERR "\tPulled locus $locus in SECOND loop under condition A\n";
+	    }
+	    
+	    # done?
+	    unless($locus) {
+		last;
+	    }
+	} elsif ($record eq "B") {
+	    # record
+	    ################# recording block
+	    # [0] Locus
+	    $output{$locus} .= "$locus";
+	    # [1] Name
+	    $output{$locus} .= "\t$$names{$locus}";
+	    # [2] Size
+	    $output{$locus} .= "\t$loc_size";
+	    # [3] Strand
+	    if($total == 0) {
+		$output{$locus} .= "\t\.";
+	    } elsif (($watson / $total) >= $$strand_cutoff) {
+		$output{$locus} .= "\t+";
+	    } elsif ((1-($watson / $total)) >= $$strand_cutoff) {
+		$output{$locus} .= "\t-";
+	    } else {
+		$output{$locus} .= "\t\.";
+	    }
+	    # [4] Frac Watson
+	    if($total == 0) {
+		$frac_watson = "NA";
+	    } else {
+		$frac_watson = sprintf("%.3f", ($watson / $total));
+	    }
+	    $output{$locus} .= "\t$frac_watson";
+	    # [5] Total
+	    $output{$locus} .= "\t$total";
+	    # [6] Uniques
+	    $output{$locus} .= "\t$uniques";
+	    # [7] DicerCall
+	    if($total) {
+		$in_total = 0;
+		$max_size = '';
+		$max_value = 0;
+		for(my $rs = $$dicer_min; $rs <= $$dicer_max; ++$rs) {
+		    if(exists($reads_by_size{$rs})) {
+			$in_total += $reads_by_size{$rs};
+			if($reads_by_size{$rs} >= $max_value) {
+			    $max_value = $reads_by_size{$rs};
+			    $max_size = $rs;
+			}
+		    }
+		}
+		if(($in_total / $total) >= $$dicer_cutoff) {
+		    $output{$locus} .= "\t$max_size";
+		    $dicer_call = $max_size;
+		} else {
+		    $output{$locus} .= "\tN";
+		    $dicer_call = "N";
+		}
+	    } else {
+		$output{$locus} .= "\tN";
+		$dicer_call = "N";
+	    }
+	    # [8] and [9] .. phase offset and phase p-value
+	    if (($$phasesize eq "none") or
+		($dicer_call eq "N") or
+		(($$phasesize ne "all") and ($dicer_call != $$phasesize)) or
+		($loc_size < (4 * $dicer_call))) {
+		
+		$output{$locus} .= "\tNA\tNA";
+	    } else {
+		# test
+		#print STDERR "\tSending to eval_phasing: dc: $dicer_call lstart: $loc_start lstop: $loc_stop\n";
+		($p_val,$offset) = eval_phasing(\%phase_hash,\$dicer_call,\$loc_start,\$loc_stop);
+		$output{$locus} .= "\t$p_val\t$offset";
+	    }
+	    # [10] short [11] long [12-end] in dicer ranges
+	    $short = 0;
+	    $not_long = 0;
+	    if($total) {
+		for (my $rs2 = 1; $rs2 < $$dicer_min; ++$rs2) {
+		    if(exists($reads_by_size{$rs2})) {
+			$short += $reads_by_size{$rs2};
+		    }
+		}
+		$output{$locus} .= "\t$short";
+		for (my $rs3 = $$dicer_min; $rs3 <= $$dicer_max; ++$rs3) {
+		    if(exists($reads_by_size{$rs3})) {
+			$not_long += $reads_by_size{$rs3};
+		    }
+		}
+		$not_long += $short;
+		$long = $total - $not_long;
+		$output{$locus} .= "\t$long";
+		for (my $rs4 = $$dicer_min; $rs4 <= $$dicer_max; ++$rs4) {
+		    if(exists($reads_by_size{$rs4})) {
+			$output{$locus} .= "\t$reads_by_size{$rs4}";
+		    } else {
+			$output{$locus} .= "\t0";
+		    }
+		}
+	    } else {
+		$output{$locus} .= "\t0\t0";
+		for (my $rs5 = $$dicer_min; $rs5 <= $$dicer_max; ++$rs5) {
+		    $output{$locus} .= "\t0";
+		}
+	    }
+	    # test
+	    #print STDERR "Recorded locus $locus on condition B. Read_chr $fields[2] read start: $fields[3] read end: $read_end\n";
+	    
+	    # test
+	    #print STDERR "CONDITON B\n\t$output{$locus}\n";
+	    
+	    # progress
+	    ++$n_analyzed;
+	    if($n_analyzed >= $five_percent) {
+		log_it($logfile,"\.");
+		$n_analyzed = 0;
+	    }
+	    ############### end core recording block
+	    ### condition B ... advance loci until you get to a candidate, or change chromosomes
+	    until (($loc_chr ne $fields[2]) or ($fields[3] <= $loc_stop)) {
+		# are we done?
+		unless(@local_clus_array) {
+		    $locus = '';
+		    last; ## breaks the until loop
+		}
+		$locus = shift @local_clus_array;
+		if($locus =~ /^(\S+):(\d+)-(\d+)$/) {
+		    $loc_chr = $1;
+		    $loc_start = $2;
+		    $loc_stop = $3;
+		    $loc_size = $loc_stop - $loc_start + 1;
+		} else {
+		    die "FATAL in sub-routine quant: Couldn't parse cluster name $locus\n";
+		}
+		%phase_hash = ();
+		for($i = $loc_start; $i <= $loc_stop; ++$i) {
+		    $phase_hash{$i} = 0;
+		}
+		%reads_by_size = ();
+		$total = 0;
+		$watson = 0;
+		$uniques = 0;
+
+		# test
+		#print STDERR "\tPulled locus $locus in loop under condition B\n";
+	    }
+	    
+	    # done?
+	    unless($locus) {
+		last;
+	    }
+	}
+	    
+	# Tally if the read is in the current locus
+	unless($locus) {
+	    last;
+	}
+	
+	if(($fields[2] eq $loc_chr) and
+	   ($fields[3] <= $loc_stop) and
+	   ($read_end >= $loc_start)) {
+	    
+	    # this read is in the current cluster
 	    ++$total;
-	    if($nh == 1) {
+	    if($_ =~ /\tXX:i:1/) {
 		++$uniques;
 	    }
 	    unless($fields[1] & 16) {
 		++$watson;
 	    }
+	    ++$reads_by_size{$read_length};
+	    if($fields[1] & 16) {
+		++$phase_hash{($fields[3] + 2)};
+	    } else {
+		++$phase_hash{$fields[3]};
+	    }
+	}
+	$last_read_chr = $fields[2];
+    }
+    close SAM;
+    
+    # fill in any empty clusters
+    foreach my $loc2 (@$clus_array) {
+	unless(exists($output{$loc2})) {
+	    $output{$loc2} = "$loc2\t$$names{$loc2}";
+		if($loc2 =~ /^(\S+):(\d+)-(\d+)$/) {
+		    $loc_chr = $1;
+		    $loc_start = $2;
+		    $loc_stop = $3;
+		    $loc_size = $loc_stop - $loc_start + 1;
+	    } else {
+		die "FATAL in sub-routine quant: Couldn't parse cluster name $locus\n";
+	    }
+	    $output{$loc2} .= "\t$loc_size\t\.\tNA\t0\t0\tN\tNA\tNA\t0\t0";
+	    for (my $rs6 = $$dicer_min; $rs6 <= $$dicer_max; ++$rs6) {
+		$output{$loc2} .= "\t0";
+	    }
 	    
-	    ## $repnorm += (1 / $nh);
-	    if($read_length < $$dicer_min) {
-		++$internal{'short'};
-	    } elsif ($read_length > $$dicer_max) {
-		++$internal{'long'};
-	    } else {
-		++$internal{$read_length};
-		## add to phase hash
-		## make sure to inlcude reads whose left end is outside the locus.. for those simply add the read length to get a correct register
-		if($fields[1] & 16) {
-		    if(($fields[3] + 2) < $loc_start) {
-			++$phase_hash{($fields[3] + 2 + $read_length)};
-		    } else {
-			++$phase_hash{($fields[3] + 2)};
-		    }
-		} else {
-		    if($fields[3] < $loc_start) {
-			++$phase_hash{($fields[3] + $read_length)};
-		    } else {
-			++$phase_hash{$fields[3]};
-		    }
-		}
+	    # progress
+	    ++$n_analyzed;
+	    if($n_analyzed >= $five_percent) {
+		log_it($logfile,"\.");
+		$n_analyzed = 0;
 	    }
-	}
-	close SAM;
-	if($total > 0) {
-	    $frac_watson = sprintf ("%.4f", ($watson / $total));
-	} else {
-	    $frac_watson = 0;
-	}
-	
-	$frac_crick = 1 - $frac_watson;
-	
-	# Evaluate whether this will be annotated a Dicer-derived locus or not, based on the cutoff supplied
-	$in_dicer_range = 0; # reset
-	for($i = $$dicer_min; $i <= $$dicer_max; ++$i) {
-	    $in_dicer_range += $internal{$i};
-	}
-	
-	if($total > 0) {
-	    if(($in_dicer_range / $total) >= $$dicer_cutoff) {
-		# is a dicer locus.  find the dicer-read size with max n reads, and calc proportion
-		# reset variables
-		$max_d_size = "null";
-		$max_d_proportion = 0;
-		for($i = $$dicer_min; $i <= $$dicer_max; ++$i) {
-		    if(($internal{$i} / $total) > $max_d_proportion) {
-			$max_d_proportion = $internal{$i} / $total;
-			$max_d_size = $i;
-		    }
-		}
-		# shorten the proportion to three decimal places
-		$max_d_proportion = sprintf("%.3f",$max_d_proportion);
-		## as of version 0.1.2, dicer_call no longer has colon-delimted information, and the proportion is omitted
-		#$dicer_call = "$max_d_size" . ":" . "$max_d_proportion"; ## OLD
-		$dicer_call = $max_d_size;
-	    } else {
-		# Not a Dicer locus
-		$dicer_call = "N";
-	    }
-	} else {
-	    # shouldn't be here unless somehow $total was zero
-	    $dicer_call = "N";
-	}
-	
-	# see whether phasing should be examined
-	unless(($$phasesize =~ /^none$/) or
-	       ($dicer_call =~ /^N$/)) {
-	    if($$phasesize =~  /^all$/) {
-		if (($loc_stop - $loc_start + 1) > (4 * $max_d_size)) {
-		    ($p_val,$offset) = eval_phasing(\%phase_hash,\$dicer_call,\$loc_start,\$loc_stop);
-		    $phase_p_values{$locus} = $p_val;
-		    $phase_offsets{$locus} = $offset;
-		}
-	    } elsif (($dicer_call == $$phasesize) and
-		     (($loc_stop - $loc_start + 1) > (4 * $$phasesize))) {
-		
-		($p_val,$offset) = eval_phasing(\%phase_hash,\$dicer_call,\$loc_start,\$loc_stop);
-		$phase_p_values{$locus} = $p_val;
-		$phase_offsets{$locus} = $offset;
-	    }
-	}
-	
-        # begin entry
-	# [0] : locus name
-	$output{$locus} .= "$locus";
-	
-	# [1] : name from name hash
-	$output{$locus} .= "\t$$names{$locus}";
-	
-	# [2] SIZE
-	$output{$locus} .= "\t$loc_size";
-	
-	# [3] : STRAND .. in this sub-routine, based solely upon $$strand_cutoff.
-	
-	if($frac_watson >= $$strand_cutoff) {
-	    $strand = "+";
-	} elsif($frac_crick >= $$strand_cutoff) {
-	    $strand = "-";
-	} else {
-	    $strand = "\.";
-	}
-	$output{$locus} .= "\t$strand";
-	
-	# [4] FRAC_WAT
-	$output{$locus} .= "\t$frac_watson";
-	
-	# calculate mappings, reporting only in raw in this sub-routine
-	# [5] TOTAL
-	$output{$locus} .= "\t$total";
-	
-	# [6] UNIQUE MAPPERS
-	$output{$locus} .= "\t$uniques";
-	
-	# [7] DICER ... either 'N' or a number within the dicer_min to dicer_max range
-	# was calculated above
-	$output{$locus} .= "\t$dicer_call";
-	
-	# [8] and [9] .. phase offset and phase p-value
-	if(exists($phase_p_values{$locus})) {
-	    $output{$locus} .= "\t$phase_offsets{$locus}\t$phase_p_values{$locus}";
-	} else {
-	    $output{$locus} .= "\tNA\tNA";
-	}
-		
-	# [10] SHORT
-	$output{$locus} .= "\t$internal{'short'}";
-	
-	# [11] LONG
-	$output{$locus} .= "\t$internal{'long'}";
-	
-	# [12] through whenenver .. Dicer 
-	for($i = $$dicer_min; $i <= $$dicer_max; ++$i) {
-	    $output{$locus} .= "\t$internal{$i}";
 	}
     }
-
-    log_it($logfile," Done\n");
+    log_it ($logfile, " Done\n");
     return %output;
 }
+
 
 sub eval_phasing {
     my($phase_hash,$dcall,$loc_start,$loc_stop) = @_; ## passed by reference
@@ -1451,6 +1696,8 @@ sub eval_phasing {
     
     
     # determine the mean frequency of occupancy within the exam window
+    # test
+    #print STDERR "Before offending line, loc_start is $$loc_start exam_stop is $exam_stop\n";
     for($j = $$loc_start; $j <= $exam_stop; ++$j) {
 	$sum += $$phase_hash{$j};
     }
@@ -1925,11 +2172,11 @@ sub summarize {
     my $i;
     
     if($$nohp) {
-	$abun{'NA'}{'N'} = 0;
-	$loci{'NA'}{'N'} = 0;
+	$abun{'.'}{'N'} = 0;
+	$loci{'.'}{'N'} = 0;
 	for($i = $$dicermin; $i <= $$dicermax; ++$i) {
-	    $abun{'NA'}{$i} = 0;
-	    $loci{'NA'}{$i} = 0;
+	    $abun{'.'}{$i} = 0;
+	    $loci{'.'}{$i} = 0;
 	}
     } else {
 	$abun{'MIRNA'}{'N'} = 0;
@@ -1969,30 +2216,22 @@ sub summarize {
 
     if($$nohp) {
 	log_it($$logfile,"DicerCall\tLoci\tAlignments\n");
-	log_it($$logfile, "N\t$loci{'NA'}{'N'}\t");
-	#$rounded = sprintf("%.1f",$abun{'NA'}{'N'});
-	log_it($$logfile,"$abun{'NA'}{'N'}\n");
+	log_it($$logfile, "N\t$loci{'.'}{'N'}\t");
+	log_it($$logfile,"$abun{'.'}{'N'}\n");
 	for($i = $$dicermin; $i <= $$dicermax; ++$i) {
-	    log_it($$logfile,"$i\t$loci{'NA'}{$i}\t");
-	    #$rounded = sprintf ("%.3f",$abun{'NA'}{$i});
-	    log_it($$logfile,"$abun{'NA'}{$i}\n");
+	    log_it($$logfile,"$i\t$loci{'.'}{$i}\t");
+	    log_it($$logfile,"$abun{'.'}{$i}\n");
 	}
     } else {
 	log_it($$logfile,"DicerCall\tNON-HP_Loci\tHP_Loci\tMIRNA_Loci\tNON-HP_Alignments\tHP_Alignments\tMIRNA_Alignments\n");
 	log_it($$logfile,"N\t$loci{'.'}{'N'}\t$loci{'HP'}{'N'}\t$loci{'MIRNA'}{'N'}\t");
-	#$rounded = sprintf("%.1f",$abun{'.'}{'N'});
 	log_it($$logfile,"$abun{'.'}{'N'}\t");
-	#$rounded = sprintf("%.1f",$abun{'HP'}{'N'});
 	log_it($$logfile,"$abun{'HP'}{'N'}\t");
-	#$rounded = sprintf("%.1f",$abun{'MIRNA'}{'N'});
 	log_it($$logfile,"$abun{'MIRNA'}{'N'}\n");
 	for($i = $$dicermin; $i <= $$dicermax; ++$i) {
 	    log_it($$logfile,"$i\t$loci{'.'}{$i}\t$loci{'HP'}{$i}\t$loci{'MIRNA'}{$i}\t");
-	    #$rounded = sprintf("%.1f",$abun{'.'}{$i});
 	    log_it($$logfile,"$abun{'.'}{$i}\t");
-	    #$rounded = sprintf("%.1f",$abun{'HP'}{$i});
 	    log_it($$logfile,"$abun{'HP'}{$i}\t");
-	    #$rounded = sprintf("%.1f",$abun{'MIRNA'}{$i});
 	    log_it($$logfile,"$abun{'MIRNA'}{$i}\n");
 	}
     }
@@ -2481,6 +2720,7 @@ sub merge_em {
 	$n_unmapped = $n_all - $n_mapped;
 	$rg = $bamfile_part;
 	$rg =~ s/\.[^\/]+$//g;   #### s/\..*$//g;  bug-fix 1.2.4
+	$rg =~ s/^\S+\///g;  #### bug fix to remove paths, version 2.0.3
 	log_it($logfile, "\tRead Group: $rg added to list .. Mapped: $n_mapped Unmapped: $n_unmapped\n");
 	# add to header
 	system "echo \"\@RG\tID:$rg\tDS:Mapped=$n_mapped\;Unmapped=$n_unmapped\" >> ShortStack_SAM_head_temp.txt";
@@ -2518,7 +2758,70 @@ sub install_check {
     return $response;
 }
 
+sub sort_clusters {
+    my($in,$fai) = @_; ## by reference .. array and scalar
+    # hash the clusters by chromosome name
+    my %hash = ();
+    foreach my $clus_name (@$in) {
+	if($clus_name =~ /^(\S+):(\d+-\d+)$/) {
+	    push(@{$hash{$1}}, $2);
+	} else {
+	    die "FATAL in sub-routine sort_clusters .. could not parse cluster name $clus_name\n";
+	}
+    }
+    # define the order of chromosomes, based on the .fai file
+    (open(FAI, "$$fai")) || die "FATAL in sub-routine sort_clusters .. could not open faidx file $$fai\n";
+    my @order = ();
+    while (<FAI>) {
+	chomp;
+	my @f = split ("\t", $_);
+	push(@order,$f[0]);
+    }
+    close FAI;
+    # define the output array
+    my @output = ();
+    # holder for any warnings .. for overlapping clusters
+    my @warnings = ();
+    # go chromosome by chromosome
+    foreach my $o_c (@order) {
+	if(exists($hash{$o_c})) {
+	    my %lefts = ();
+	    foreach my $full (@{$hash{$o_c}}) {
+		my @full_f = split ("-", $full);
+		$lefts{$full_f[0]} = $full_f[1];
+	    }
+	    # sort ascending by left-most coordinate
+	    my @lefts_sorted = sort {$a <=> $b} keys %lefts;
+	    # file them away, flagging any cases where the left-most of the next cluster is <= the right-most of the previous
+	    my $last_right = -2;
+	    my $last_name = "NULL";
+	    foreach my $left (@lefts_sorted) {
+		my $name = "$o_c" . ":" . "$left" . "-" . "$lefts{$left}";
+		push(@output, $name);
+		if($left <= $last_right) {
+		    push(@warnings,$last_name);
+		    push(@warnings,$name);
+		}
+		$last_right = $lefts{$left};
+		$last_name = $name;
+	    }
+	}
+    }
+    # report on warnings, if present
+    if(@warnings) {
+	log_it($logfile, "\nWARNING: Some clusters overlap each other. Quantification will force reads into just one cluster, so the quantification may not be as expected\!\n");
+	log_it($logfile, "Offending Clusters:\n");
+	while (@warnings) {
+	    my $name1 = shift @warnings;
+	    my $name2 = shift @warnings;
+	    log_it($logfile, "$name1 and $name2\n");
+	}
+    }
+    return @output;
+}
 	       
+	       
+    
 
 __END__
 
