@@ -74,6 +74,9 @@ INSTALL
 
     sudo cp ShortStack /usr/bin/
 
+    Depending on your system, you may need administrative privileges to
+    install the dependencies and/or to add ShortStack to you PATH
+
 USAGE
     ShortStack [options] [genome.fasta]
 
@@ -136,7 +139,7 @@ OPTIONS
     3.
 
     --HPscore : Minimum maple-derived score in order to keep a locus that
-    failed as a MIRNA as an HP locus. Deafult: 0.8.
+    failed as a MIRNA as an HP locus. Deafult: 0.9
 
     --align_only : Exits program after completion of small RNA-seq data
     alignment, creating BAM file.

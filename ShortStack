@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "2.0.3";
+my $version_num = "2.0.4";
 
 ##### get options and validate them
 
@@ -51,7 +51,9 @@ my $no_condense; ## for butter
 my $mismatches; ## for butter
 my $max_rep; ## for butter
 my $ranmax; ## for butter
-my $HPscore = 0.8; ## minimum maple score for a FAIL locus required to keep as a potential HP-derived cluster.
+my $HPscore = 0.9; ## minimum maple score for a FAIL locus required to keep as a potential HP-derived cluster.
+    # default of above changed to 0.9 from 0.8 as of version 2.0.4
+
 
 # get user options from command line
 GetOptions ('outdir=s' => \$outdir,
@@ -476,6 +478,13 @@ if(@clusters) {
 ### New in 2.0.3 .. ensure sorting of clusters relative to bam file.
 my @clusters_s = sort_clusters(\@clusters, \$expected_faidx);
 
+## test
+#print "\nAt end of phase one, clusters_s is \n";
+#foreach my $test1 (@clusters_s) {
+#    print "$test1\n";
+#}
+
+
 ### NEW PHASE 2 -- INITIAL QUANTIFICATION
 
 log_it ($logfile,`date`);
@@ -588,6 +597,10 @@ if($nohp) {
 	} else {
 	    die "FATAL: failed to parse cluster name $original_cluster in main at phase three\n";
 	}
+	
+	# test
+	#print "Analyzing original_cluster $original_cluster\n";
+	
 	my @qfields = split ("\t", $quant_master{$original_cluster});
 	if ((($qfields[3] eq "+") or ($qfields[3] eq "-")) and
 	    ($qfields[7] ne "N") and
@@ -694,15 +707,22 @@ if($nohp) {
 			}
 			# re-quant
 			my $requant_string = requant($quant_master{$original_cluster},$bamfile,$dicermin,$dicermax,$minstrandfrac,$mindicerfrac,$phasesize,$read_group,$locus_verdict,$locus_score,$output_coordinates);
-			$quant_master{$output_coordinates} = $requant_string;
 			delete $quant_master{$original_cluster};
+			$quant_master{$output_coordinates} = $requant_string;
 			push(@final_clusters,$output_coordinates);
+			
+			# test
+			#print "\t t1 Pushed output_coordinates $output_coordinates\n";
 			
 			
 		    } else {
 			# Keep original coordinates, don't output the maple output. Record maple verdict and score.
 			system "rm -f $ps_file";
 			push(@final_clusters,$original_cluster);
+			
+			# test
+			#print "\t t2 Pushed original_cluster $original_cluster\n";
+			
 			my $newstring = "$qfields[0]\t$qfields[1]\t$qfields[2]\t\.\t$locus_score";
 			for (my $ii = 3; $ii < (scalar @qfields); ++$ii) {
 			    $newstring .= "\t$qfields[$ii]";
@@ -716,6 +736,10 @@ if($nohp) {
 			system "rm -f $ps_file";
 		    }
 		    push(@final_clusters,$original_cluster);
+		    
+		    # test
+		    #print "\t t3 Pushed original_cluster $original_cluster\n";
+		    
 		    my $newstring = "$qfields[0]\t$qfields[1]\t$qfields[2]\t\.\t0";
 		    for (my $ii = 3; $ii < (scalar @qfields); ++$ii) {
 			    $newstring .= "\t$qfields[$ii]";
@@ -726,6 +750,10 @@ if($nohp) {
 	    } else {
 		# no maple analysis attempted. Keep original coordinates, report score as NA
 		push(@final_clusters,$original_cluster);
+		
+		# test
+		#print "\t t4 pushed original_cluster $original_cluster\n";
+		
 		my $newstring = "$qfields[0]\t$qfields[1]\t$qfields[2]\t\.\tNA";
 		for (my $ii = 3; $ii < (scalar @qfields); ++$ii) {
 		    $newstring .= "\t$qfields[$ii]";
@@ -736,6 +764,10 @@ if($nohp) {
 	} else {
 	    # no maple analysis attempted. Keep original coordinates, report score as NA
 	    push(@final_clusters,$original_cluster);
+	    
+	    # test
+	    #print "\t t5 pushed original_cluster $original_cluster\n";
+	    
 	    my $newstring = "$qfields[0]\t$qfields[1]\t$qfields[2]\t\.\tNA";
 	    for (my $ii = 3; $ii < (scalar @qfields); ++$ii) {
 		$newstring .= "\t$qfields[$ii]";
@@ -758,6 +790,12 @@ if($nohp) {
     my $others = $n_NA + $n_FAIL;
     log_it($logfile, "\tOthers: $others\n");
 }
+
+# test
+#print "\nAt end of phase three, final_clusters are :\n";
+#foreach my $test2 (@final_clusters) {
+#    print "$test2\n";
+#}
 
 
 ## Phase 4 - Final output
@@ -1018,8 +1056,11 @@ sub merge_clusters {
 	}
     }
     ## last one
-    $entry = "$last_chr" . ":" . "$last_start" . "-" . "$last_stop";
-    push(@output,$entry);
+    # failsafe added version 2.0.4
+    unless($last_chr eq "null") {
+	$entry = "$last_chr" . ":" . "$last_start" . "-" . "$last_stop";
+	push(@output,$entry);
+    }
     return @output;
 }
     
@@ -2892,6 +2933,7 @@ Then add it to your PATH .. for instance
 
 sudo cp ShortStack /usr/bin/
 
+Depending on your system, you may need administrative privileges to install the dependencies and/or to add ShortStack to you PATH
 
 =head1 USAGE
                                                                                                                              
@@ -2935,7 +2977,7 @@ Additionally, in modes 1 or 2, the option --align_only will terminate analysis a
 
 --ranmax [integer] : Reads with more than this number of possible alignment positions where the choice can't be guided by butter-calculated probabilities will be reported as unmapped. Default: 3.
 
---HPscore : Minimum maple-derived score in order to keep a locus that failed as a MIRNA as an HP locus. Deafult: 0.8.
+--HPscore : Minimum maple-derived score in order to keep a locus that failed as a MIRNA as an HP locus. Deafult: 0.9
 
 --align_only : Exits program after completion of small RNA-seq data alignment, creating BAM file.
 
