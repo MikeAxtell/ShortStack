@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "2.0.4";
+my $version_num = "2.0.5";
 
 ##### get options and validate them
 
@@ -1836,8 +1836,12 @@ sub write_gff3s {
     my($clus_array,$quant_hash,$outdir) = @_; ## passed by reference
 
     # open files
-    my $dclfile = "$$outdir" . "\/" . "$$outdir" . "_DCL.gff3";
-    my $nfile = "$$outdir" . "\/" . "$$outdir" . "_N.gff3";
+    # determine base .. bugfix in 2.0.5
+    my $base = $$outdir;
+    $base =~ s/.*\///g;  ## strip off path information, if present
+    
+    my $dclfile = "$$outdir" . "\/" . "$base" . "_DCL.gff3";
+    my $nfile = "$$outdir" . "\/" . "$base" . "_N.gff3";
     open(DCL, ">$dclfile");
     open(N, ">$nfile");
 
