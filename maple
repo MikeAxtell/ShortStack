@@ -2,7 +2,7 @@
 use strict;
 use Getopt::Long;
 
-my $version_num = "0.1.1"; 
+my $version_num = "0.1.2"; 
 
 # Begin tracking information for postscript output legend
 my $ps_info = $version_num;
@@ -3114,7 +3114,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 =head1 CITATION
 
-As yet unpublished.
+As of August 25, 2014, a manuscript describing maple has been submitted and is currently under review.
 
 =head1 AUTHOR
 
@@ -3131,7 +3131,7 @@ Perl is required to be at /usr/bin/perl in order to compile maple.
 
 samtools <http://samtools.sourceforge.net/> needs to be installed in your PATH. maple was developed using samtools 0.1.19.
 
-RNAfold is from the ViennaRNA package. See <http://www.tbi.univie.ac.at/~ronny/RNA/vrna2.html>. RNAfold must in your PATH. maple was developed using version 2.1.3
+RNAfold and RNAplot are from the ViennaRNA package. See <http://www.tbi.univie.ac.at/~ronny/RNA/vrna2.html>. RNAfold and RNAplot must be in your PATH. maple was developed using version 2.1.3
 
 =head1 INSTALL
 

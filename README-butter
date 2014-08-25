@@ -27,6 +27,9 @@ CITATION
     Butter: High-precision genomic alignment of small RNA-seq data. Michael
     J Axtell bioRxiv doi: http://dx.doi.org/10.1101/007427
 
+    A manuscript describing butter has also been submitted (as of Aug 25,
+    2014) to a peer-reviewed journal and is currently under review.
+
 AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
 
@@ -37,6 +40,16 @@ DEPENDENCIES
 
     bowtie <http://bowtie-bio.sourceforge.net/index.shtml> .. installed to
     your PATH
+
+OPTIONAL DEPENDENCIES
+    bam2wig <https://github.com/MikeAxtell/bam2wig> .. installed to your
+    PATH. Not required to run butter but is required to make wiggle files
+    from the BAM alignment. bam2wig is also included with the butter
+    download.
+
+    wigToBigWig <http://genome.ucsc.edu/goldenPath/help/bigWig.html> ..
+    installed to your PATH. Not required to run butter but is required to
+    make bigwig files from wiggle files.
 
 INSTALL
     Install dependencies (see above), and then place the butter script in
@@ -74,6 +87,14 @@ OPTIONS
 
     --adapter [string]: 3' Adapter sequence to trim. Must be 8 or more
     ATGCatgc characters. If specified, 3' adapter trimming is enabled.
+
+    --bam2wig [string]: Options for generating wiggle and bigwig coverage
+    file(s) from the final BAM alignment. Can be 'combined', 'degradome',
+    'strandspec2', or 'none'. Defaults to 'combined'. Combined merges
+    coverage on both strands to a single positive value. Degradome creates
+    two separate tracks for the plus and minus strands, each tallying just
+    the coverage at 5' ends. strandspec2 creates two files, one for each
+    strand, tallying total coverage. None creates no wiggle/bigwig files.
 
 INPUT FILES
   Small RNA-seq data
@@ -246,4 +267,9 @@ OUTPUT
     Custom tag XZ:f: indicates the probability that the given read came from
     the reported position, based on the butter iterative density analysis.
     Set to 1 for reads with XY:Z: of M, U, N, and O.
+
+  Wiggle and bigwig files
+    Depending on setting of option --bam2wig and the availability of the
+    bam2wig and wigToBigWig programs, butter will also create wiggle and
+    bigwig coverage files for easier use on a genome browser.
 

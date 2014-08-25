@@ -1,8 +1,9 @@
 #!/usr/bin/perl -w
 use strict;
 use Getopt::Long;
+use File::Basename;
 
-my $version_num = "0.2.4.1"; 
+my $version_num = "0.3.0"; 
 my $help_message = get_help($version_num);
 
 my $version;
@@ -14,6 +15,7 @@ my $max_rep = 1000;
 my $adapter;
 my $no_condense;
 my $ranmax = 3;
+my $bam2wig = "combined";
 
 # for use at the end
 my $cl = join(" ", @ARGV);
@@ -34,6 +36,7 @@ GetOptions ('version' => \$version,
 	    'max_rep=i' => \$max_rep,
 	    'adapter=s' => \$adapter,
 	    'ranmax=i' => \$ranmax,
+	    'bam2wig=s' => \$bam2wig,
             'no_condense' => \$no_condense);
 
 # If version, print version_num and quit
@@ -94,18 +97,23 @@ if($adapter) {
     }
 }
 
+# option --bam2wig must be combined, degradome, strandspec2, or none
+unless(($bam2wig eq "combined") or
+       ($bam2wig eq "degradome") or
+       ($bam2wig eq "strandspec2") or
+       ($bam2wig eq "none")) {
+    print "FATAL: option --bam2wig must be either \'combined\', \'degradome\', \'strandspec2\', or \'none\'\n$help_message\n";
+}
+
 # Determine reads file type based on the extension, or die tryin
 my $read_format;
-my $read_extension;
-if(($reads =~ /\.fa$/) or ($reads =~ /\.fasta$/)) {
+my($reads_basename,$reads_dir,$reads_suffix) = fileparse($reads,qr/\.[^.]*/);
+if(($reads_suffix eq ".fasta") or ($reads_suffix eq ".fa")) {
     $read_format = "f";
-    $read_extension = $&;
-} elsif (($reads =~ /\.fq$/) or ($reads =~ /\.fastq$/)) {
+} elsif (($reads_suffix eq ".fastq") or ($reads_suffix eq ".fq")) {
     $read_format = "q";
-    $read_extension = $&;
-} elsif ($reads =~ /\.csfasta$/) {
+} elsif ($reads_suffix eq ".csfasta") {
     $read_format = "C";
-    $read_extension = $&;
 } else {
     print "FATAL: Could not determine format of reads file $reads .. extension must be .fa, .fasta, .fq, or .fastq\n$help_message\n";
     exit;
@@ -113,7 +121,7 @@ if(($reads =~ /\.fa$/) or ($reads =~ /\.fasta$/)) {
 	 
 # Final file name check .. no overwrites!
 my $final_bam = $reads;
-$final_bam =~ s/$read_extension/\.bam/g;
+$final_bam =~ s/$reads_suffix/\.bam/g;
 if(-e $final_bam) {
     print "FATAL: Alignment file $final_bam already exists and overwrites are not allowed. Rename, move, or delete the exisiting $final_bam file before alignment.\n$help_message\n";
     exit;
@@ -145,6 +153,7 @@ unless($quiet) {
     print STDERR "Max number of possible placments for any read: $max_rep\n";
     print STDERR "Max number of possible placement for reads not guideable by density: $ranmax\n";
     print STDERR "Processor cores for bowtie: $aln_cores\n";
+    print STDERR "bam2wig setting: $bam2wig\n";
     print STDERR "Checking dependencies\n";
 }
 
@@ -176,6 +185,33 @@ if($bowtie_check) {
     exit;
 }
 
+my $bam2wig_check;
+my $wigToBigWig_check;
+
+unless($bam2wig eq "none") {
+    $c_query = "bam2wig";
+    $bam2wig_check = check_install($c_query);
+    if($bam2wig_check) {
+	unless($quiet) {
+	    print STDERR "\tbam2wig: $bam2wig_check\n";
+	}
+	$c_query = "wigToBigWig";
+	$wigToBigWig_check = check_install($c_query);
+	if($wigToBigWig_check) {
+	    unless($quiet) {
+		print STDERR "\twigToBigWig: $wigToBigWig_check\n";
+	    }
+	} else {
+	    unless($quiet) {
+		print STDERR "\twigToBigWig: FAIL\! No wiggle to bigwig conversion will take place\n";
+	    }
+	}
+    } else {
+	unless($quiet) {
+	    print STDERR "\tbam2wig: FAIL\! NO wiggle file will be produced\.\n";
+	}
+    }
+}
 
 # Check for indexed reference genome .. expect to find .1.ebwt, .2.ebwt, .3.ebwt, .4.ebwt, .rev.1.ebwt, .rev.2.ebwt
 # If colorspace, expect to find .cs.1.ebwt, .cs.2.ebwt, .cs.3.ebwt, .cs.4.ebwt, .cs.rev.1.ebwt, .cs.rev.2.ebwt
@@ -300,9 +336,9 @@ $m = 0;
 unless(-r $two_bam) {
     die "FATAL: unknown failure .. expected file $two_bam not found\n";
 }
-unless(-r $mmap2_fasta_file) {
-    die "FATAL: unknown failure .. expected file $mmap2_fasta_file not found\n";
-}
+#unless(-r $mmap2_fasta_file) {
+#    die "FATAL: unknown failure .. expected file $mmap2_fasta_file not found\n";
+#}
 
 system "rm -f $two_m_bam";
 
@@ -328,9 +364,9 @@ $m = 0;
 unless(-r $five_bam) {
     die "FATAL: unknown failure .. expected file $five_bam not found\n";
 }
-unless(-r $mmap5_fasta_file) {
-    die "FATAL: unknown failure .. expected file $mmap5_fasta_file not found\n";
-}
+#unless(-r $mmap5_fasta_file) {
+#    die "FATAL: unknown failure .. expected file $mmap5_fasta_file not found\n";
+#}
 
 system "rm -f $five_m_bam";
 
@@ -434,6 +470,27 @@ unless($quiet) {
     print STDERR "$r \/ $read_count_all \($r_per\%\)\n";
     print STDERR "  Multi-mapped reads where placement was based on density: ";
     print STDERR "$p \/ $read_count_all \($p_per\%\)\n";
+}
+
+# index
+print STDERR "\nIndexing alignment for you with samtools index ..";
+system "samtools index $final_bam";
+print STDERR " Done\n";
+
+
+# generate wiggle(s) and bigwig(s) ..
+if(($bam2wig ne "none") and ($bam2wig_check)) {
+    print STDERR "\nCreating wiggle and possible bigwig file\(s\) with bam2wig\n";
+    print STDERR "\nAppending bam2wig log information to bam2wig_log.txt\n";
+    if($bam2wig eq "combined") {
+	system "bam2wig $final_bam 2>> bam2wig_log.txt";
+    } elsif ($bam2wig eq "degradome") {
+	system "bam2wig -s top -d $final_bam 2>> bam2wig_log.txt";
+	system "bam2wig -s bottom -d $final_bam 2>> bam2wig_log.txt";
+    } elsif ($bam2wig eq "strandspec2") {
+	system "bam2wig -s top $final_bam 2>> bam2wig_log.txt";
+	system "bam2wig -s bottom $final_bam 2>> bam2wig_log.txt";
+    }
 }
 
 # too da loo
@@ -1319,6 +1376,10 @@ DEPENDENCIES:
    samtools
    bowtie
 
+OPTIONAL DEPENDENCIES:
+   bam2wig
+   wigToBigig
+
 OPTIONS:
    --version : print version and quit
    --help: print this message and quit
@@ -1329,6 +1390,7 @@ OPTIONS:
    --max_rep [integer]: Maximum number of possible alignments. Reads with more than this number of possible placements are not retained in the final alignment. Default 1000. Must be integer >=6.
    --ranmax [integer]: For multi-mapped reads that can't be placed based on density, suppress random placement if the number of choices exceeds ranmax. Default 3. Must be integer >= 1. Note that setting of one means NO such reads will be placed.
    --adapter [string]: 3' Adapter sequence to trim. Must be 8 or more ATGCatgc characters. If specified, 3' adpater trimming is enabled.
+   --bam2wig [string]: Create wiggle and possibly bigwig file from the final BAM alignment. Either \'combined\', \'degradome\', \'strandspec2\', or \'none\'. Deafults to combined.
 
 DOCUMENTATION:
    type \'perldoc butter\'
@@ -1603,6 +1665,8 @@ A preprint describing butter has been deposited at http://biorxiv.org/
 
 Butter: High-precision genomic alignment of small RNA-seq data. Michael J Axtell bioRxiv doi: http://dx.doi.org/10.1101/007427
 
+A manuscript describing butter has also been submitted (as of Aug 25, 2014) to a peer-reviewed journal and is currently under review.
+
 =head1 AUTHOR
 
 Michael J. Axtell, Penn State University, mja18@psu.edu
@@ -1614,6 +1678,12 @@ perl (version 5; <www.perl.org>) .. installed at /usr/bin/perl
 samtools <http://samtools.sourceforge.net/> .. installed to your PATH
 
 bowtie <http://bowtie-bio.sourceforge.net/index.shtml> .. installed to your PATH
+
+=head1 OPTIONAL DEPENDENCIES
+
+bam2wig <https://github.com/MikeAxtell/bam2wig>  .. installed to your PATH. Not required to run butter but is required to make wiggle files from the BAM alignment. bam2wig is also included with the butter download.
+
+wigToBigWig <http://genome.ucsc.edu/goldenPath/help/bigWig.html> .. installed to your PATH. Not required to run butter but is required to make bigwig files from wiggle files.
 
 =head1 INSTALL
 
@@ -1642,6 +1712,8 @@ butter [options] [reads.fa/.fasta/.fq/.fastq] [genome.fa]
 --ranmax [integer]: Maximum number of possible placements for a multi-mapped read that can't be guided by density. Such reads with a number of placements more than --ranmax will be reported as unmapped and have custom tag XY:Z set to O. Default: 3. Must be integer of 1 or more.
 
 --adapter [string]: 3' Adapter sequence to trim. Must be 8 or more ATGCatgc characters. If specified, 3' adapter trimming is enabled.
+
+--bam2wig [string]: Options for generating wiggle and bigwig coverage file(s) from the final BAM alignment. Can be 'combined', 'degradome', 'strandspec2', or 'none'. Defaults to 'combined'. Combined merges coverage on both strands to a single positive value. Degradome creates two separate tracks for the plus and minus strands, each tallying just the coverage at 5' ends. strandspec2 creates two files, one for each strand, tallying total coverage. None creates no wiggle/bigwig files. 
 
 =head1 INPUT FILES
 
@@ -1720,5 +1792,9 @@ Custom tag XX:i: indicates number of valid placements for the read (of which onl
 Custom tag XY:Z: indicates how the reported placement was selected. U: uniquely mapped, P: multi-mapped and placed due to clustering, R: multi-mapped and randomly placed, N: unmapped, M: Multi-mappings exceeded setting --max_rep, so no placement performed, O: multi-mapped with no density-based placement possible, number of locations exceeded setting --ranmax, so no placement performed.
 
 Custom tag XZ:f: indicates the probability that the given read came from the reported position, based on the butter iterative density analysis. Set to 1 for reads with XY:Z: of M, U, N, and O.
+
+=head2 Wiggle and bigwig files
+
+Depending on setting of option --bam2wig and the availability of the bam2wig and wigToBigWig programs, butter will also create wiggle and bigwig coverage files for easier use on a genome browser.
 
 =cut

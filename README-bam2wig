@@ -1,0 +1,110 @@
+SYNOPSIS
+    bam2wig
+
+    Conversion of a BAM alignment to wiggle and bigwig coverage files, with
+    flexible reporting options.
+
+LICENSE
+    Copyright (C) 2014 Michael J. Axtell
+
+    This program is free software: you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by the
+    Free Software Foundation, either version 3 of the License, or (at your
+    option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+    Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with this program. If not, see <http://www.gnu.org/licenses/>
+
+CITATION
+    None yet..
+
+AUTHOR
+    Michael J. Axtell, mja18@psu.edu
+
+INSTALL
+    bam2wig is a perl program and so it requires perl to compile. It expects
+    that perl is located at /usr/bin/perl on your system. If not, please
+    modify line 1 (the hashbang) of the script accordingly. It was built and
+    tested using perl 5.
+
+    Depending on your system, you may need super-user privileges to install
+    bam2wig and/or its dependencies.
+
+    samtools <http://www.htslib.org/> is a required dependency. Install
+    samtools to your PATH before running bam2wig.
+
+    wigToBigWig <http://genome.ucsc.edu/goldenPath/help/bigWig.html> is an
+    optional dependency. If wigToBigWig is in your PATH, bam2wig will make a
+    bigwig file in addition to a wiggle file.
+
+    Once the dependencies are installed to your PATH, install bam2wig to
+    your PATH for convenience
+
+USAGE
+    bam2wig [options] [alignments.bam]
+
+OPTIONS
+    -t [integer] : Threshold for reporting. Defaults to 1 (all depths
+    reported)
+
+    -s [top/bottom/both] : Strand to report. Defaults to both. 'bottom' will
+    quantify in negative numbers. Used in conjunction with option -g will
+    subset the loci to those on the indicated strand.
+
+    -r [string] : Limit analysis to specified read group
+
+    -l [integer] : Minimum size of read to report. Default: no minimum.
+
+    -L [integer] : Maximum size of read to report. Default: no maximum.
+
+    -c [chr:start-stop] : Limit analysis to the indicated locus.
+
+    -g [string] : Path to a GFF3 file. Loci in the GFF3 will be reported.
+    Negates any setting of -c.
+
+    -d : Treat as degradome/PARE data .. tally only the depths of 5' ends.
+    Option -s must be either 'bottom' or 'top'
+
+    -h : Get help (print this message)
+
+    -v : Print version number and quit
+
+OUTPUT
+    A wiggle file is written to the working directory. The wiggle file LACKS
+    a track line at the top. If wigToBigWig is installed, a bigwig file will
+    also be written to the working directory. The file name will include
+    information on non-default settings. For instance, file name
+    'mydata-t10-l20-L24.wig' indicates an analysis using option t set to 10,
+    option l set to 20, and option L to to 24, with all other options left
+    at their defaults.
+
+BAM FILE REQUIREMENTS
+    The input BAM file must be sorted by chromosome, indexed (use samtools
+    index), and possess a valid header with all @SQ lines present and the
+    sequence names and lengths indicated by SN and LN, respectively (see SAM
+    format specification). If option -r is used, the read groups must also
+    be specified in the header using the @RG lines, per the SAM spec.
+
+USING A GFF3 FILE
+    Using option -g allows the output to be restricted to the loci specified
+    in gff3 file. When used under default setting of option -s (the strand
+    set to 'both'), all loci from the GFF3 will be reported, and the values
+    will represent the read coverage on BOTH strands, regardless of whether
+    the gff3 locus is annotated as strand '+', '-', or '.'. When used with
+    option -s set to "bottom", only GFF3 loci whose strand is annotated as
+    "-" in the file will be used, and only the reads on the - strand of the
+    reference analyzed. Conversely, when used with option -s set to "top",
+    only GFF3 loci whose strand is annotated as "+" in the file will be
+    used, and only the reads on the + strand of the reference analyzed.
+
+DEGRADOME / PARE MODE
+    Option -d triggers activation of degradome / PARE mode. In this mode,
+    the depth of coverage of 5' ends of reads is tallied, instead of total
+    depth of coverage across the whole bodies of the reads. This mode must
+    have option -s (strand) set to either "top" or "bottom".
+

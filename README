@@ -34,7 +34,7 @@ AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
 
 DEPENDENCIES
-    perl samtools RNAfold butter bowtie bowtie-build maple
+    perl, samtools, RNAfold, RNAplot, butter, bowtie, bowtie-build, maple
 
     ShortStack is a perl5 script, so it needs perl5 to compile. It expects
     to find perl5 at /usr/bin/perl. If this is not where your perl is,
@@ -46,13 +46,13 @@ DEPENDENCIES
     your PATH. ShortStack was developed using samtools 0.1.18. Other
     versions should be OK as far as I know, but let me know if not!
 
-    RNAfold is from the ViennaRNA package. See
+    RNAfold and RNAplot are from the ViennaRNA package. See
     <http://www.tbi.univie.ac.at/~ronny/RNA/vrna2.html>. Both need to be
     installed in your PATH.
 
     butter (bowtie using iterative placement of repetitive small RNAs) ships
-    with ShortStack, and is also at http://github.com/MikeAxtell/butter . It
-    must be installed in your PATH.
+    with ShortStack, and is also at https://github.com/MikeAxtell/butter .
+    It must be installed in your PATH.
 
     bowtie and bowtie-build must be version "1" .. either 0.12.x or 1.x.
     These are required ONLY if you are aligning reads to the genome. Bowtie
@@ -60,8 +60,30 @@ DEPENDENCIES
     other dependencies, they must be in your PATH.
 
     maple (microRNA analysis program leveraging expression) ships with
-    ShortStack, and is also at http://github.com/MikeAxtell/maple . It must
+    ShortStack, and is also at https://github.com/MikeAxtell/maple . It must
     be installed in your PATH.
+
+OPTIONAL DEPENDENCIES
+    bam2wig, wigToBigWig
+
+    If using ShortStack to align your small RNA-seq data, wiggle and bigwig
+    files summarizing the coverage of the reads can be automatically created
+    if bam2wig and wigToBigWig are installed on your system
+
+    bam2wig is a perl script included with the ShortStack package, and is
+    also available at https://github.com/MikeAxtell/bam2wig It must be
+    installed in your PATH.
+
+    wigToBigWig is available from UCSC at
+    http://genome.ucsc.edu/goldenPath/help/bigWig.html It must be installed
+    in your PATH
+
+    ShortStack will run just fine without bam2wig and/or wigToBigWig. But,
+    if you are aligning reads, it will give you a warning.
+
+    If a wiggle and/or bigwig file are created, the track will represent
+    total depth of coverage on both strands. You can use bam2wig to make
+    different types of tracks with more flexible options.
 
 INSTALL
     There is no 'real' installation. After installing the dependencies (see
