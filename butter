@@ -3,7 +3,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "0.3.0"; 
+my $version_num = "0.3.1"; 
 my $help_message = get_help($version_num);
 
 my $version;

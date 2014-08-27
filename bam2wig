@@ -3,7 +3,7 @@ use Getopt::Std;
 use strict;
 use File::Basename;
 
-my $version = "0.1"; 
+my $version = "0.2"; 
 my $usage = "bam2wig
 Version $version
 
@@ -455,14 +455,24 @@ sub check_sam {
 	return $samline;
     }
     my @fields = split ("\t", $samline);
+    
+    # test
+    #print STDERR "in check_sam, length is ";
+    #my $xxx = length $fields[9];
+    #print STDERR "$xxx\n";
+    
     my $newseq;
     if($opt_l) {
 	if((length $fields[9]) < $opt_l) {
+	    # test
+	    #print STDERR "\tFailed less than opt_l $opt_l\n";
 	    return 0;
 	}
     }
     if($opt_L) {
 	if((length $fields[9]) > $opt_L) {
+	    # test
+	    #print STDERR "\tFailed more than than opt_L $opt_L\n";
 	    return 0;
 	}
     }
@@ -486,6 +496,9 @@ sub check_sam {
 	    $samline .= "$newseq\t\*\n";
 	    return $samline;
 	}
+    } else {
+	# if not degradome, must have passed the opt_l and/or opt_L filters already, so return it
+	return $samline;
     }
     # why are you here?
     return 0;
