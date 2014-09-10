@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "2.0.7";
+my $version_num = "2.0.8";
 
 ##### get options and validate them
 

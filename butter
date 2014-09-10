@@ -3,7 +3,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "0.3.1"; 
+my $version_num = "0.3.2"; 
 my $help_message = get_help($version_num);
 
 my $version;
@@ -506,6 +506,7 @@ sub get_nr_trimmed {
     my($in,$format,$quiet,$no_condense) = @_; ## by reference .. string, string, string, string
     my $read_count = 0;
     my $query_count = 0;
+    my $warning;
     (open(IN, "$$in")) || return 0;
     if($$no_condense) {
 	# if this is a FASTQ file, will need to re-write as a FASTA file!
@@ -523,12 +524,21 @@ sub get_nr_trimmed {
 		$seq1 = <IN>;
 		$plus1 = <IN>;
 		$qual1 = <IN>;
-		++$read_count;
-		++$query_count;
-		print OUT "$head1","$seq1";
+		if((length $seq1) < 15) {
+		    ++$warning;
+		} else {
+		    ++$read_count;
+		    ++$query_count;
+		    print OUT "$head1","$seq1";
+		}
 	    }
 	    close IN;
 	    close OUT;
+	    
+	    if($warning) {
+		print STDERR "\nWARNING\! $warning of your input reads were less than 15 nts in length. They were ignored\!\n";
+	    }
+	    
 	    unless($$quiet) {
 		print STDERR "\nFASTQ-formatted reads written in FASTA format to file $q2fa\n";
 	    }
@@ -539,16 +549,49 @@ sub get_nr_trimmed {
 	    while (<IN>) {
 		chomp;
 		if($_ =~ /^>/) {
-		    ++$read_count;
-		    ++$query_count;
+		    next;
+		} else {
+		    if((length $_) < 15) {
+			++$warning;
+		    } else {
+			++$read_count;
+			++$query_count;
+		    }
 		}
 	    }
 	    close IN;
-	    my $no_file = "NULL";
-	    unless($$quiet) {
-		print STDERR "\nTotal reads: $read_count\n";
+	    if($warning) {
+		print STDERR "\nWARNING\! $warning of your input reads were less than 15 nts in length. They were ignored\!\n";
+		my $filt = $$in;
+		if($$format eq "C") {
+		    $filt =~ s/\.[^\/]+$/morethan15\.csfasta/g;
+		} else {
+		    $filt =~ s/\.[^\/]+$/morethan15\.fasta/g;
+		}
+		(open(IN, "$$in")) || return 0;
+		(open(OUT, ">$filt")) || return 0;
+		my $headrw;
+		while (<IN>) {
+		    chomp;
+		    if($_ =~ /^>/) {
+			$headrw = $_;
+		    } elsif ((length $_) >= 15) {
+			print OUT "$headrw\n$_\n";
+		    }
+		}
+		close IN;
+		close OUT;
+		unless($$quiet) {
+		    print STDERR "\nTotal reads: $read_count\n";
+		}
+		return ($filt,$read_count,$query_count);
+	    } else {
+		my $no_file = "NULL";
+		unless($$quiet) {
+		    print STDERR "\nTotal reads: $read_count\n";
+		}
+		return ($no_file,$read_count,$query_count);
 	    }
-	    return ($no_file,$read_count,$query_count);
 	}
     } else {
 	my $head;
@@ -569,14 +612,22 @@ sub get_nr_trimmed {
 		chomp $seq;
 		$plus = <IN>;
 		$qual = <IN>;
-		++$temp_hash{$seq};
-		++$reads_in;
+		if((length $seq) < 15) {
+		    ++$warning;
+		} else {
+		    ++$temp_hash{$seq};
+		    ++$reads_in;
+		}
 	    } else {
 		$head = $_;
 		$seq = <IN>;
 		chomp $seq;
-		++$temp_hash{$seq};
-		++$reads_in;
+		if((length $seq) < 15) {
+		    ++$warning;
+		} else {
+		    ++$temp_hash{$seq};
+		    ++$reads_in;
+		}
 	    }
 	}
 	close IN;
@@ -603,6 +654,10 @@ sub get_nr_trimmed {
 	    print OUT "$seq\n";
 	}
 	close OUT;
+	if($warning) {
+	    print STDERR "\nWARNING\! $warning of your input reads were less than 15 nts in length. They were ignored\!\n";
+	}
+	
 	unless($$quiet) {
 	    print STDERR "\n\tReads in: $reads_in\n\tNon-redundant reads out: $nr_out\n";
 	    print STDERR "\tFile: $out\n";
@@ -1665,7 +1720,7 @@ A preprint describing butter has been deposited at http://biorxiv.org/
 
 Butter: High-precision genomic alignment of small RNA-seq data. Michael J Axtell bioRxiv doi: http://dx.doi.org/10.1101/007427
 
-A manuscript describing butter has also been submitted (as of Aug 25, 2014) to a peer-reviewed journal and is currently under review.
+The manuscript is also, as of this writing (Sep 9, 2014), being prepared for submission to a peer-reviewed journal.
 
 =head1 AUTHOR
 

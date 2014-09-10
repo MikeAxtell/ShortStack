@@ -2,7 +2,7 @@
 use strict;
 use Getopt::Long;
 
-my $version_num = "0.1.3"; 
+my $version_num = "0.1.4"; 
 
 # Begin tracking information for postscript output legend
 my $ps_info = $version_num;
@@ -2571,13 +2571,22 @@ sub get_struc {
     (open(FOLD, "echo $seq | RNAfold --noPS 2> /dev/null |")) || die "Abort: Failed to open RNAfold job in sub-routine get_struc.\n";
     my $seq_line = <FOLD>;
     my $brax_line = <FOLD>;
-    
-    # test
-    #print "RNAfold output:\n$seq_line$brax_line";
-    
+    close FOLD;
+
+    ## check if you got anything. If user had RNAfold version 1.x, the call will have failed ...
+    unless(($seq_line) and ($brax_line)) {
+	## command for version 1.x of RNAfold has -noPS instead of --noPS
+	(open(FOLD, "echo $seq | RNAfold -noPS 2> /dev/null |")) || die "Abort: Failed to open RNAfold job in sub-routine get_struc.\n";
+	$seq_line = <FOLD>;
+	$brax_line = <FOLD>;
+	close FOLD;
+    }
     chomp $seq_line;
     chomp $brax_line;
-    close FOLD;
+    
+    # test
+    #print "$seq_line\n$brax_line\n";
+    
     my $brax_untrimmed;
     if($brax_line =~ /^\S+/) {
 	$brax_untrimmed = $&;
