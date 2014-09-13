@@ -386,8 +386,21 @@ log_it ($logfile," done\n\n");
 ##############################################
 # butter
 
+my $bam_name_check;
+
 if(($mode == 1) or ($mode == 2)) {
     my @input_read_files = split (",", $reads);
+
+    # ensure that the final file name doesn't exist already
+    if((scalar @input_read_files) > 1) {
+	$bam_name_check = "$outdir" . ".bam";
+	if(-e $bam_name_check) {
+	    log_it($logfile, "\nFATAL: Alignment file $bam_name_check already exists\. Move it, or rename your run with option --outdir\n");
+	    exit;
+	}
+    }
+
+
     my $butter_call = "butter --aln_cores $bowtie_cores";
     if($no_condense) {
 	$butter_call .= " --no_condense";
