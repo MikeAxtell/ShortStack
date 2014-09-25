@@ -2,7 +2,7 @@
 use strict;
 use Getopt::Long;
 
-my $version_num = "0.1.4"; 
+my $version_num = "0.1.4.1"; 
 
 # Begin tracking information for postscript output legend
 my $ps_info = $version_num;

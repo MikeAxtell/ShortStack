@@ -3,7 +3,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "0.3.2"; 
+my $version_num = "0.3.3"; 
 my $help_message = get_help($version_num);
 
 my $version;
@@ -504,13 +504,14 @@ exit;
 ######
 sub get_nr_trimmed {
     my($in,$format,$quiet,$no_condense) = @_; ## by reference .. string, string, string, string
+    
     my $read_count = 0;
     my $query_count = 0;
     my $warning;
     (open(IN, "$$in")) || return 0;
     if($$no_condense) {
 	# if this is a FASTQ file, will need to re-write as a FASTA file!
-	if($format eq "q") {
+	if($$format eq "q") {
 	    my $q2fa = $$in;
 	    $q2fa =~ s/\.[^\/]+$/\.fasta/g;
 	    (open(OUT, ">$q2fa")) || return 0;
@@ -1473,6 +1474,14 @@ sub trim_FA {
     my $ok;
     my $trim_seq;
     while (<IN>) {
+	# skip lines devoid of anything but a newline
+	if($_ =~ /^\n$/) {
+	    next;
+	}
+	# skip lines devoid of anything at all
+	if($_ =~ /^$/) {
+	    next;
+	}
 	chomp;
 	if($_ =~ /^\#/) {
 	    next;
@@ -1533,6 +1542,14 @@ sub trim_FQ {
     my $qual;
     my $trim_qual;
     while (<IN>) {
+	# skip lines devoid of anything but a newline
+	if($_ =~ /^\n$/) {
+	    next;
+	}
+	# skip lines devoid of anything at all
+	if($_ =~ /^$/) {
+	    next;
+	}
 	chomp;
 	$header = $_;
 	$seq = <IN>;
@@ -1607,6 +1624,14 @@ sub trim_CS {
     my $cs_l_num = 0;
 
     while (<IN>) {
+	# skip lines devoid of anything but a newline
+	if($_ =~ /^\n$/) {
+	    next;
+	}
+	# skip lines devoid of anything at all
+	if($_ =~ /^$/) {
+	    next;
+	}
 	chomp;
 	++$cs_l_num;
 	if($_ =~ /^\#/) {
