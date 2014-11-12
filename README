@@ -217,13 +217,25 @@ OPTIONS
     --count [string] : Invokes count mode, in which user-provided clusters
     are annotated and quantified instead of being defined de novo. When
     invoked, the file provided with --count is assumed to contain a simple
-    list of clusters. Count mode also forces nohp mode. Formatting details
-    below. Default : Not invoked.
+    list of clusters. Count mode also forces nohp mode. Format of files is
+    tab-delimited with coordinates in column 1, names in column 2. All other
+    columns are ignored, and lines beginning with # are also ignored.
+    Results.txt files from previous ShortStack runs are in the correct
+    format. Default : Not invoked. --count is mutually exclusive with
+    --countHP.
+
+    --countHP [string] : Identical to --count, except that noHP mode is NOT
+    forced. Thus, input clusters will be analyzed for MIRNAs and HP loci.
+    Note that the start and stop positions of clusters that are found to be
+    MIRNA or HP can be slightly adjusted relative to the input as part of
+    the secondary structural analysis. --countHP is mutually exclusive with
+    both --count and --nohp.
 
     --nohp : If \"--nohp\" appears on the command line, it invokes running
     in \"no hairpin\" mode. RNA folding, hairpin annotation, and MIRNA
     annotation will be skipped (likely saving significant time). Note that
-    --count mode forces --nohp mode as well. Default: Not invoked.
+    --count mode forces --nohp mode as well. Default: Not invoked. --nohp is
+    mutually exclusive with --countHP.
 
 KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
   Input genome.fasta file

@@ -6,7 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
-my $version_num = "2.0.9";
+my $version_num = "2.0.10";
 
 ##### get options and validate them
 
@@ -54,6 +54,9 @@ my $ranmax; ## for butter
 my $HPscore = 0.9; ## minimum maple score for a FAIL locus required to keep as a potential HP-derived cluster.
     # default of above changed to 0.9 from 0.8 as of version 2.0.4
 
+## New in 2.1.0
+my $countHP;
+
 # get user options from command line
 GetOptions ('outdir=s' => \$outdir,
 	    'mindepth=i' => \$mindepth,
@@ -78,6 +81,7 @@ GetOptions ('outdir=s' => \$outdir,
 	    'max_rep=i' => \$max_rep,
 	    'ranmax=i' => \$ranmax,
 	    'HPscore=f' => \$HPscore,
+	    'countHP=s' => \$countHP,
 	    'version' => \$version,
 	    'help' => \$help);
 
@@ -262,6 +266,25 @@ if($count) {
     $nohp = 1;
 }
 
+# if the --countHP option was provided, make sure the file can be read
+if($countHP) {
+    unless(-r $countHP) {
+	log_it($logfile, "FATAL: Option --countHP : File $countHP could not be read\n\n$usage\n");
+	exit;
+    }
+}
+
+# --count and --countHP are mutually exclusive
+if(($count) and ($countHP)) {
+    log_it($logfile, "FATAL: Options --count and --countHP are mutually exclusive\n\n$usage\n");
+    exit;
+}
+
+if(($countHP) and ($nohp)) {
+    log_it($logfile, "FATAL: Options --nohpand --countHP are mutually exclusive\n\n$usage\n");
+    exit;
+}
+
 # check the --phasesize option to see if it is a number between --dicermin and --dicermax, OR 'all', OR 'none'
 if($phasesize =~ /^\d+$/) {
     unless(($phasesize >= $dicermin) and
@@ -357,6 +380,8 @@ if($align_only) {
     log_it ($logfile,"Clusters:");
     if($count) {
 	log_it ($logfile," Running in \"count\" mode\. User provided clusters from file $count\n");
+    } elsif ($countHP) {
+	log_it ($logfile," Running in \"countHP\" mode. User provided clusters from file $countHP\n");
     } else {
 	log_it ($logfile," To be calculated de novo\n");
 	log_it ($logfile,"Island threshold: $mindepth mappings\n");
@@ -478,6 +503,10 @@ if($count) {
     log_it ($logfile," a priori from file $count\n");
     @clusters = get_clusters_a_priori($count);
     %names = get_names_countmode($count);  ## if names not present in count file, arbitrary names assigned
+} elsif ($countHP) {
+    log_it ($logfile," a priori from file $countHP\n");
+    @clusters = get_clusters_a_priori($countHP);
+    %names = get_names_countmode($countHP);  ## if names not present in count file, arbitrary names assigned
 } else {
     log_it ($logfile," de novo\n");
 
@@ -980,9 +1009,11 @@ OPTIONS:
 
 --phasesize [integer] : Examine phasing only for clusters dominated by the indicated size range.  Size must be within the bounds described by --dicermin and --dicermax.  Set to 'all' to examine p-values of each locus within the Dicer range, in its dominant size.  Set to 'none' to suppress all phasing analysis.  Default = 21.  Allowed values between --dicermin and --dicermax.
 
---count [string] : Invokes count mode, in which user-provided clusters are annotated and quantified instead of being defined de novo.  When invoked, the file provided with --count is assumed to contain a simple list of clusters.  Count mode also forces nohp mode.  Formatting details below.  Default : Not invoked.
+--count [string] : Invokes count mode, in which user-provided clusters are annotated and quantified instead of being defined de novo.  When invoked, the file provided with --count is assumed to contain a simple list of clusters.  Count mode also forces nohp mode.  Format of files is tab-delimited with coordinates in column 1, names in column 2. All other columns are ignored, and lines beginning with # are also ignored. Results.txt files from previous ShortStack runs are in the correct format. Default : Not invoked. --count is mutually exclusive with --countHP.
 
---nohp : If \"--nohp\" appears on the command line, it invokes running in \"no hairpin\" mode.  RNA folding, hairpin annotation, and MIRNA annotation will be skipped (likely saving significant time).  Note that --count mode forces --nohp mode as well.  Default: Not invoked.
+--countHP [string] : Identical to --count, except that noHP mode is NOT forced. Thus, input clusters will be analyzed for MIRNAs and HP loci. Note that the start and stop positions of clusters that are found to be MIRNA or HP can be slightly adjusted relative to the input as part of the secondary structural analysis. --countHP is mutually exclusive with both --count and --nohp.
+
+--nohp : If \"--nohp\" appears on the command line, it invokes running in \"no hairpin\" mode.  RNA folding, hairpin annotation, and MIRNA annotation will be skipped (likely saving significant time).  Note that --count mode forces --nohp mode as well.  Default: Not invoked. --nohp is mutually exclusive with --countHP.
 
 ";
     return $message;
@@ -3038,9 +3069,11 @@ Additionally, in modes 1 or 2, the option --align_only will terminate analysis a
 
 --phasesize [integer] : Examine phasing only for clusters dominated by the indicated size range.  Size must be within the bounds described by --dicermin and --dicermax.  Set to 'all' to examine p-values of each locus within the Dicer range, in its dominant size.  Set to 'none' to suppress all phasing analysis.  Default = 21.  Allowed values between --dicermin and --dicermax.
 
---count [string] : Invokes count mode, in which user-provided clusters are annotated and quantified instead of being defined de novo.  When invoked, the file provided with --count is assumed to contain a simple list of clusters.  Count mode also forces nohp mode.  Formatting details below.  Default : Not invoked.
+--count [string] : Invokes count mode, in which user-provided clusters are annotated and quantified instead of being defined de novo.  When invoked, the file provided with --count is assumed to contain a simple list of clusters.  Count mode also forces nohp mode.  Format of files is tab-delimited with coordinates in column 1, names in column 2. All other columns are ignored, and lines beginning with # are also ignored. Results.txt files from previous ShortStack runs are in the correct format. Default : Not invoked. --count is mutually exclusive with --countHP.
 
---nohp : If \"--nohp\" appears on the command line, it invokes running in \"no hairpin\" mode.  RNA folding, hairpin annotation, and MIRNA annotation will be skipped (likely saving significant time).  Note that --count mode forces --nohp mode as well.  Default: Not invoked.
+--countHP [string] : Identical to --count, except that noHP mode is NOT forced. Thus, input clusters will be analyzed for MIRNAs and HP loci. Note that the start and stop positions of clusters that are found to be MIRNA or HP can be slightly adjusted relative to the input as part of the secondary structural analysis. --countHP is mutually exclusive with both --count and --nohp.
+
+--nohp : If \"--nohp\" appears on the command line, it invokes running in \"no hairpin\" mode.  RNA folding, hairpin annotation, and MIRNA annotation will be skipped (likely saving significant time).  Note that --count mode forces --nohp mode as well.  Default: Not invoked. --nohp is mutually exclusive with --countHP.
 
 =head1 KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
 
