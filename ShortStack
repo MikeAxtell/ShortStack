@@ -6,6 +6,7 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
+
 my $version_num = "2.1.0";
 
 ##### get options and validate them
