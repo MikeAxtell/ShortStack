@@ -6,7 +6,11 @@ use strict;
 
 ###############MAIN PROGRAM BLOCK
 ##### VERSION
+<<<<<<< HEAD
 my $version_num = "2.1.0";
+=======
+my $version_num = "2.0.10";
+>>>>>>> 27a0389d8809cae5275b4345c004072a9d8dc102
 
 ##### get options and validate them
 
