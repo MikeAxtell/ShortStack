@@ -1,7 +1,7 @@
 LICENSE
     ShortStack
 
-    Copyright (C) 2012-2014 Michael J. Axtell
+    Copyright (C) 2012-2015 Michael J. Axtell
 
     This program is free software: you can redistribute it and/or modify it
     under the terms of the GNU General Public License as published by the
@@ -17,11 +17,11 @@ LICENSE
     with this program. If not, see <http://www.gnu.org/licenses/>.
 
 SYNOPSIS
-    Annotation and quantification of small RNA genes based upon
-    reference-aligned small RNA sequences
+    Alignment of small RNA-seq data and annotation of small RNA-producing
+    genes
 
-CITATION
-    If you use ShortStack in your work, please cite
+CITATIONS
+    If you use ShortStack in you work, please cite:
 
     Axtell MJ. (2013) ShortStack: Comprehensive annotation and
     quantification of small RNA genes. RNA 19:740-751.
@@ -30,540 +30,693 @@ CITATION
     Shahid S., Axtell MJ. (2013) Identification and annotation of small RNA
     genes using ShortStack. Methods doi:10.1016/j.ymeth.2013.10.004
 
-AUTHOR
-    Michael J. Axtell, Penn State University, mja18@psu.edu
-
-DEPENDENCIES
-    perl, samtools, RNAfold, RNAplot, butter, bowtie, bowtie-build, maple
-
-    ShortStack is a perl5 script, so it needs perl5 to compile. It expects
-    to find perl5 at /usr/bin/perl. If this is not where your perl is,
-    modify line 1 of ShortStack (the hashbang) accordingly. It also requires
-    the package Getopt::Long, which I think is standard in most Perl
-    distributions. If this package is not installed, get it from CPAN.
-
-    samtools <http://samtools.sourceforge.net/> needs to be installed in
-    your PATH. ShortStack was developed using samtools 0.1.18. Other
-    versions should be OK as far as I know, but let me know if not!
-
-    RNAfold and RNAplot are from the ViennaRNA package. See
-    <http://www.tbi.univie.ac.at/~ronny/RNA/vrna2.html>. Both need to be
-    installed in your PATH.
-
-    butter (bowtie using iterative placement of repetitive small RNAs) ships
-    with ShortStack, and is also at https://github.com/MikeAxtell/butter .
-    It must be installed in your PATH.
-
-    bowtie and bowtie-build must be version "1" .. either 0.12.x or 1.x.
-    These are required ONLY if you are aligning reads to the genome. Bowtie
-    can be found at http://bowtie-bio.sourceforge.net/index.shtml. Like the
-    other dependencies, they must be in your PATH.
-
-    maple (microRNA analysis program leveraging expression) ships with
-    ShortStack, and is also at https://github.com/MikeAxtell/maple . It must
-    be installed in your PATH.
-
-OPTIONAL DEPENDENCIES
-    bam2wig, wigToBigWig
-
-    If using ShortStack to align your small RNA-seq data, wiggle and bigwig
-    files summarizing the coverage of the reads can be automatically created
-    if bam2wig and wigToBigWig are installed on your system
-
-    bam2wig is a perl script included with the ShortStack package, and is
-    also available at https://github.com/MikeAxtell/bam2wig It must be
-    installed in your PATH.
-
-    wigToBigWig is available from UCSC at
-    http://genome.ucsc.edu/goldenPath/help/bigWig.html It must be installed
-    in your PATH
-
-    ShortStack will run just fine without bam2wig and/or wigToBigWig. But,
-    if you are aligning reads, it will give you a warning.
-
-    If a wiggle and/or bigwig file are created, the track will represent
-    total depth of coverage on both strands. You can use bam2wig to make
-    different types of tracks with more flexible options.
-
 INSTALL
-    There is no 'real' installation. After installing the dependencies (see
-    above), you should check to make sure the ShortStack is executable. It
-    should be, but if not you can:
+  Dependencies
+    All dependencies must be executable and findable in the user's PATH
 
-        chmod +x ShortStack
-                                                                                                 
-    Then add it to your PATH .. for instance
+    perl (version 5.x) : Generally installed in linux and mac machines by
+    default. Expected to be installed at /usr/bin/perl
 
-    sudo cp ShortStack /usr/bin/
+    samtools (version 1.x or higher) : Free from http://www.htslib.org/
 
-    Depending on your system, you may need administrative privileges to
-    install the dependencies and/or to add ShortStack to you PATH
+    bowtie (if aligning) : Free from
+    http://bowtie-bio.sourceforge.net/index.shtml .. note: requires bowtie
+    ... NOT bowtie2 !
+
+    bowtie-build (if aligning and .ebwt indices not found) : Free from
+    http://bowtie-bio.sourceforge.net/index.shtml
+
+    gzip (if aligning) : Generally installed in linux and mac machines by
+    default.
+
+    RNAfold (unless running with --nohp option to disable MIRNA search) :
+    Part of the Vienna RNA package, Free from
+    http://www.tbi.univie.ac.at/RNA/
+
+  Install
+    There is no real installation of ShortStack. Make sure it is executable.
+    For convenience, can be added to your PATH. It expects your perl
+    installation to be at /usr/bin/perl.
 
 USAGE
-    ShortStack [options] [genome.fasta]
+    Usage: ShortStack [options] {--readfile <r> | {--bamfile <b> |
+    --cramfile <c>}} --genomefile <g>
 
-    There are three modes which differ in the the types of pre-analysis that
-    are performed. Each of the modes has a different set of REQUIRED
-    options:
+    <r> : readfile must be in fasta (.fasta or .fa), colorspace-fasta
+    (.csfasta), or fastq (.fastq or .fq) format, or their gzip-compressed
+    versions (.fasta.gz, .fa.gz, .csfasta.gz, .fastq.gz, or .fq.gz) Can also
+    be a comma-separated list of several read files.
 
-    Mode 1: Trim small RNA-seq reads to remove 3' adapter seqeuence, align
-    them, and then analyze. Required options:
+    <b> : BAM formatted alignment file (.bam).
 
-    --reads
+    <c> : CRAM formatted alignment file (.cram).
 
-    --adapter
-
-    Mode 2: Align pre-trimmed small RNA-seq reads, and then analyze.
-    Required option:
-
-    --reads
-
-    Mode 3: Analyze a pre-existing BAM alignment of small RNA-seq reads.
-    Required option:
-
-    --bamfile
-
-    Additionally, in modes 1 or 2, the option --align_only will terminate
-    analysis after making the alignment file.
+    <g> : FASTA formatted (.fa or .fasta) genome file.
 
 OPTIONS
-    --help : Print a help message and then quit.
+  General Options:
+    --help : print a help message listing all options and quit
 
-    --version : Print the version number and then quit.
+    --version : print version and quit
 
-    --outdir [string] : Name of directory to be created to receive results
-    of the run. Deafults to \"ShortStack_[time]\", where time is \"UNIX
-    time\" (the number of non-leap seconds since Jan 1, 1970 UCT), if not
-    provided
+    --genomefile [string] : path to reference genome in .fasta or .fa
+    format. Required for any run.
 
-    --adapter [string] : Sequence of 3' adapter to search for during adapter
-    trimming. Must be at least 8 nts in length, and all ATGC characters. If
-    provided, reads will be trimmed.
+    --outdir [string] : name of output directory to be created for results.
+    Defaults to 'ShortStack_[time]', where [time] is the current UNIX time
+    according to the system.
 
-    --reads [string] : Path to reads file in fasta (.fa or .fasta
-    extension), fastq (.fastq or .fq extension), or colorspace-fasta
-    (.csfasta extension). Can be multiple files, separated by commas.
-    ShortStack knows the format only thought the file extensions.
+  Alignment Options:
+    --readfile [string] : path to readfile(s) to be aligned. valid formats:
+    .fasta, .fa, .fasta.gz, .fa.gz, .fastq, .fq, .fastq.gz, .fq.gz,
+    .csfasta, .csfasta.gz. Multiple files, separated by commas, can be
+    specified. Mutually exclusive with --bamfile or --cramfile.
 
-    --bowtie_cores [integer] : Number of processor cores to use during
-    bowtie / butter alignment. Default: 1.
+    --adapter [string] : sequence of 3' adapter to trim off during read-pre
+    processing. Must be at least 8 bases, with only ATCG characters. If not
+    specified, reads are assumed to be already trimmed.
 
-    --mismatches [integer] : Number of allowable mismatched for butter
-    alignment. Must be 0 or 1. Default: 0.
+    --bowtie_cores [integer] : Argument to be passed to bowtie's -p option,
+    specifying number of processor cores to request during alignment.
+    Defaults to 1. Must be an integer of 1 or more.
 
-    --max_rep [integer] : Reads with more than this number of possible
-    alignment positions will be reported as unmapped regardless of butter
-    density placement probabilities. Default: 1000.
+    --mismatches [integer] : Argument to be passed to bowtie's -v option,
+    specifying number of mismatches to be tolerated in a valid alignment.
+    Must be either 0, 1, or 2. In cases of multiple hits, only hits with
+    lowest number of mismatches kept. Default: 1.
 
-    --ranmax [integer] : Reads with more than this number of possible
-    alignment positions where the choice can't be guided by
-    butter-calculated probabilities will be reported as unmapped. Default:
-    3.
+    --nostitch : Disable 'stitching' of fragmented genomes. By default,
+    ShortStack stitches chromosomes shorter than 5E6 nts into larger
+    assemblies. This drastically improves performance when working with
+    highly fragmented reference genomes.
 
-    --HPscore : Minimum maple-derived score in order to keep a locus that
-    failed as a MIRNA as an HP locus. Deafult: 0.9
+    --cquals [string] : path(s) to color-space quality value file(s). Used
+    only in conjunction with .csfasta or .csfasta.gz formatted files in
+    --readfile. Compressed format for cquals is NOT allowed.
 
-    --align_only : Exits program after completion of small RNA-seq data
-    alignment, creating BAM file.
+    --cram : When aligning, convert final alignment to cram format instead
+    of the default bam format.
 
-    --bamfile [string] : Path to properly formatted and sorted BAM alignment
-    file of small RNA-seq data. Files require custom tags provided by the
-    butter aligner.
+    --mmap [string] : Protocol for handling multi-mapped reads. Valid
+    entries are n (none), r (random), u (unique- seeded guide), or f
+    (fractional-seeded guide). default: u
 
-    --read_group [string] : Analyze only the indicated read-group.
-    Read-group must be specified in the bam alignment file header. Default =
-    [not active -- all reads analyzed]
+    --bowtie_m [string] : Setting to be passed to the -m option of bowtie.
+    Over-ridden and set to 1 if option mmap is set to n. This sets the
+    maximum number of multi-mappings allowed. Valid settings are integers >=
+    1 OR set 'all' to disable suppression of highly multi-mapped reads.
+    Default: 50
 
-    --flag_file [string] : PATH to a simple file of genomic loci of
-    interest. The ShortStack-analyzed small RNA clusters will be analyzed
-    for overlap with the loci in the flag_file .. if there is any overlap
-    (as little as one nt), it will be reported. Format for this file is
-    describe below.
+    --ranmax [string] : Reads with more than this number of possible
+    alignment positions where the choice can't be guided by unequal will be
+    reported as unmapped. Irrelevant if option mmap is set to n or r. Must
+    be integer of 2 or greater or set to 'none' to disable. Default: 3.
 
-    --mindepth [integer] : Minimum depth of mapping coverage to define an
-    'island'. Default = 20. Must be at least 2, more than 5 preferred.
+  Analysis Options:
+    --bamfile [string] : path to input .bam alignment file of small RNAs.
+    Only lines with bits 4 and 256 unset will be used. Mutually exclusive
+    with --readfile or --cramfile.
 
-    --pad [integer] : Number of nucleotides upstream and downstream to
-    extend initial islands during cluster definition. Default = 100
+    --cramfile [string] : path to input .cram alignment file of small RNAs.
+    Only lines with bits 4 and 256 unset will be used. Mutually exclusive
+    with --readfile or --bamfile.
 
-    --dicermin [integer] : Smallest size in the Dicer size range (or size
-    range of interest). Deafult = 20. Must be between 15 and 35, and less
-    than or equal to --dicermax
+    --dicermin [integer] : Minimum size of a Dicer-processed small RNA. Must
+    be an integer of at least 15 and <= dicermax. Default: 20.
 
-    --dicermax [integer] : Largest size in the Dicer size range (or size
-    range of interest). Deafult = 24. Must be between 15 and 35, and more
-    than or equal to --dicermin
+    --dicermax [integer] : Maximum size of a Dicer-processed small RNA. Must
+    be an integer of at least 15 and >= dicermin. Deafult: 24.
 
-    --miRType [string] : Either \"plant\" or \"animal\". Defaults to
-    \"plant\".
+    --locifile [string] : Path to a tab-delimited plain-text file listing
+    intervals to analyze. Lines starting with # are ignored. First column is
+    coordinate in format Chr:start-stop, second column is names (optional),
+    and any other columns are ignored. Mutually exclusive with option
+    --locus.
 
-    --minstrandfrac [float] : Minimum fraction of mappings to one or the
-    other strand call a polarity for non-hairpin clusters. Also the minimum
-    fraction of \"non-dyad\" mappings to the sense strand within potential
-    hairpins/miRNAs to keep the locus annotated as a hp or miRNA. See below
-    for details. Default = 0.8. Allowed values between 0.5 and 1.
+    --locus [string] : Analyze the specified interval(s). Interval(s) is
+    specified in format Chr:start-stop. Multiple intervals can be specified
+    in a comma-separated list. Mutually exclusive with option --locifile.
 
-    --mindicerfrac [float] : Minimum fraction of mappings within Dicer size
-    range to annotate a locus as Dicer-derived. Default = 0.85. Allowed
-    values between 0 and 1.
+    --nohp : Disable MIRNA search.
 
-    --phasesize [integer] : Examine phasing only for clusters dominated by
-    the indicated size range. Size must be within the bounds described by
-    --dicermin and --dicermax. Set to 'all' to examine p-values of each
-    locus within the Dicer range, in its dominant size. Set to 'none' to
-    suppress all phasing analysis. Default = 21. Allowed values between
+    --pad [integer] : Initially found clusters of small RNAs will be merged
+    if the distance between them is less than or equal to the value of pad.
+    Must be an integer between 0 and 50000. Default: 50.
+
+    --mincov [integer] : Clusters of small RNAs must have at least this many
+    alignments. Must be an integer between 1 and 50000. Default: 50.
+
+SYSTEM RECOMMENDATIONS
+    ShortStack was developed on Apple Mac OSX devices running 10.9 or 10.10.
+    It has also been tested on Linux (CentOS and Ubuntu).
+
+    At least 4G memory is suggested. Alignment and building bowtie indices
+    tend to be the most memory-intensive portions for a given run, and
+    memory usage seems to scale with genome size, but not as much with the
+    number of small RNAs.
+
+    Alignments benefit from multiple processing cores, via the
+    --bowtie_cores option. All other portions are single-threaded.
+
+    At least 50G of hard disk space is recommended to be available, due to
+    the sometimes large size of the temporary alignment files and the final
+    alignment file. Extreme settings for options --bowtie_m and --ran_max
+    may cause creation of extremely huge files.
+
+    The total time of analysis depends on several factors, including most
+    prominently genome size, number of reads analyzed, whether or not bowtie
+    indices need to be created, and of course your equipment. Excluding
+    building bowtie indices, we generally have observed run times for
+    alignment + analysis runs to take between 20 and about 200 minutes using
+    deafult ShortStack settings.
+
+ALIGNMENT METHODS
+    If ShortStack is given the --readfile option, alignments of the reads
+    will be performed. Specifying --readfile is mutually exclusive with both
+    --bamfile or --cramfile
+
+  Genome pre-processing
+    Genome file format and naming
+    All runs require a reference genome in FASTA format, specified with the
+    --genomefile option. The file must have a valid suffix .. either .fa or
+    .fasta. Remove any other . characters from the file name of the
+    reference genome before using ShortStack.
+
+    Genome stitching
+    If the reference genome has > 50 chromosomes/scaffolds/contigs, and at
+    least one is < 5MB in size, and MIRNAs are to be analyzed (e.g., --nohp
+    was NOT specified), then ShortStack will 'stitch' the small chromosomes
+    together to make fewer but larger chromosomes. This can drastically
+    improve performance during MIRNA searching for highly fragmented genome
+    assemblies. BUT, if the genome is stitched, the coordinates for stitched
+    references are changed (there is a guide produced), and the bowtie
+    indices will need to be built, which can be time-consuming. Genome
+    stitching can be disabled with the option --no_stitch.
+
+    Genome indexing
+    If not detected, an index of the genome will be created using samtools
+    faidx.
+
+    bowtie indices
+    If not detected, bowtie-build, using all default settings, will be
+    invoked to create the required six .ebwt indices of the genome. This can
+    be time-consuming, and memory intensive.
+
+  Reads pre-processing
+    Reads file formats
+    Small RNA reads to be aligned must be in fasta, fastq, or csfasta
+    formats, or their gzip-compressed versions. File extensions must
+    therefore be .fa, .fasta, .fastq, .fq, .csfasta, .fa.gz, .fasta.gz,
+    .fastq.gz, .fq,gz, or .csfasta.gz.
+
+    Multiple readfiles can be specified with option --readfile by separating
+    the file names/paths with commas. Colorspace reads cannot be mixed with
+    base-space reads; otherwise, mixed file formats are ok.
+
+    If you wish to also include quality values from SOLiD data, the _QV.qual
+    file(s) can be passed in through the --cquals option. Color-space
+    quality values are NOT accepted in .gz compressed format.
+
+    No paired-end support
+    There is no support for paired-end reads in ShortStack. Small RNA data
+    are assumed to be single-ended, and represent the 5'-->3' cDNA sequences
+    of cloned RNAs.
+
+    No condensation
+    Input reads are expected to be de-condensed. That is, if a small RNA was
+    sequenced 10,000 times in a run, there should be 10,000 entries, each
+    with a different header name, in the input readfile. In other words,
+    ShortStack is designed to take reads right off the sequencer without any
+    other pre-processing (except perhaps adapter trimming .. see below).
+
+    Adapter trimming
+    ShortStack has a primitive 3'-adapter capability. Specify an adapter of
+    at least 8nts in length with option --adapter. If nothing is given to
+    --adapter, ShortStack assumes your reads are already trimmed. Trimming
+    simply looks for the right-most exact match to the given apdater
+    sequence, and when found, chops it off. If a read is smaller than 15nts
+    after trimming, it is discarded. For more sophisticated adapter
+    trimming, consider cutadapt or trimmomatic
+
+    If quality values are present, they are trimmed as well.
+
+  Alignment overview
+    ShortStack uses bowtie to align reads. It first aligns, and processes
+    the output on the fly to note how many equally good alignment positions
+    were found for each read. It then uses this information in a second
+    phase to 'decide' on the most likely 'correct' location for multi-mapped
+    reads. The final output is a single .bam or .cram formatted alignment
+    file. If multiple readfiles were input, the final bam or cram file notes
+    the origin of each read with the RG tag (see sam format specification).
+
+    mismatches
+    By default, ShortStack allows up to 1 mismatch for a valid alignment.
+    This helps with sequencing errors and SNPs. If a read has some
+    alignments with 0 mismatches, and some with 1, only those with 0
+    mismatches are kept. The option --mismatches controls this threshold,
+    and can be set to 0, 1, or 2.
+
+    Control of multi-mappers with --bowtie_m
+    In general, we find it's not worth the time or effort to deal with
+    'extreme' multimapping reads. The --bowtie_m setting determines the
+    threshold of 'extreme' multi-mappers. Reads that have more than
+    --bowtie_m alignments are simply marked as unmapped. The default setting
+    is 50. Valid settings are >=1 or set 'all' to disable any suppression of
+    extreme multi-mappers (not suggested).
+
+    Optimal placements of multi-mapped reads
+    For multi-mapped reads that have between 2 and --bowtie_m number of
+    equally good alignments, ShortStack has several methods to decide on the
+    true origin of the read. The choice of method is specified with the
+    option --mmap. The methods are:
+
+    u: Placement guided by uniquely mapping reads. During the alignment, the
+    count of uniquely mapped reads is kept in 50nt bins across the reference
+    genome. The bin location is determined by the left-most coordinate of
+    the uniquely mapped read. After the first phase of alignment for all
+    reads (in all files) has completed, this genome-wide map of
+    uniquely-mapped read counts is used to guide the decisions of the most
+    likely locations of multi-mapped reads. Specifically, for a given
+    multi-mapped read, the local count of uniquely mapped reads at each
+    possible location is computed. The local count is that of the specific
+    50nt bin the alignment lies in (again, by left-most positon) plus the
+    counts of the 2 bins upstream and 2 bins downstream. All of the local
+    counts are converted to fractions of the sum of all total counts. These
+    fractions are then used as the probabilities of placement for the
+    multi-mapped read. For instance, suppose a multi-mapped read had three
+    possible positions. The read counts of uniquely mapped reads were 30,
+    65, and 5. This would mean that read has a 30%, 65%, and 5% chance,
+    respectively, of being assigned to each bin. The actual choice is
+    probabilistic, given the computed weightings, for each read.
+
+    f: Placement guided by all mapped reads. Like u, except that
+    multi-mapped reads also contribute to the guidance densities. All reads
+    contribute 1/(n of alignment positions) to each 50nt bin that the occur
+    in.
+
+    r: Placement is simply random. This is faster than u and f, but performs
+    much more poorly at properly placing multi-mapped reads. Achieves high
+    sensitivity, but very low precision.
+
+    n: Multi-mapped reads are all ignored and marked as unmapped. Very fast,
+    but ignores large quantities of data. Achieves high precision, but very
+    low sensitivity.
+
+    The default setting for --mmap is u
+
+    ranmax
+    When running mmap method u or f, there are some cases where no guidance
+    can be given, and so the choice on where to put a multi-mapped read is
+    still random. In those cases, the option ranmax will suppress any
+    alignment where the choice is 'too' random. By default, --ranmax is set
+    at 3, so that if a read can't be placed confidently, no placement is
+    done if there are more than 3 choices.
+
+  Alignment output format
+    Final alignments are sorted bam or cram formatted alignments. bam is the
+    default, while cram is created if the option --cram is set. The
+    alignment file conforms to all SAM/BAM/CRAM format specifications, and
+    has the following features:
+
+    Headers contain @RG lines to describe each read-group (input readfile).
+
+    For multi-mapped read alignments that were NOT chosen as the most likely
+    alignment, bit 256 (secondary alignment) is set in the FLAG. For such
+    lines, the SEQ and QUAL values are not stored, to save space. The SEQ
+    and QUAL for multi-mapped alignments are kept only in the primary
+    (chosen) alignment for the read.
+
+    XX:i tags: Added by ShortStack to each line, this indicates the total
+    number of valid alignments found for the read.
+
+    XY:Z tags: Added by ShortStack to each line, this indicates how the
+    reported alignment was selected: U: Uniquely mapped, P: Multi-mapped and
+    placed based on probabilities calculated by mmap method u or f, R:
+    Multi-mapped and randomly placed, M: Multi-mapped but marked as unmapped
+    becuase the number of alignment positions exceeded --bowtie_m, O:
+    Multi-mapped but marked as unmapped because no guidance possible and
+    choices exceeded setting --ranmax, N: Unmapped because 0 valid
+    alignments found in genome.
+
+    XZ:f tags: Added by ShortStack to each line, this indicates the
+    calculated probability of placement for the read.
+
+BAM AND CRAM FILE REQUIREMENTS
+    Existing alignments can be provided to ShortStack using the --bamfile or
+    --cramfile options (for bam formatted and cram formatted alignments,
+    respectively). --bamfile and --cramfile are mutually exclusive with each
+    other, and with --readfile.
+
+    Any properly formatted bam or cram file should work with ShortStack,
+    subject to the requirements below. However, for best performance, it is
+    recommended to use ShortStack for alignments as well.
+
+    Requirements for input bam or cram files:
+
+    1. Header must be present, and contain @SQ lines.
+
+    2. File most be sorted.
+
+    3. Read groups will not be recognized unless they are properly noted in
+    the header.
+
+    4. Paired-end, spliced, clipped, padded, or gapped alignments will be
+    ignored, with a warning to the user. Reads marked as secondary
+    alignments (bit 256 set in the FLAG) will not be used EXCEPT when
+    estimating the abundance uncertainty due to multi-mapping reads (see
+    below).
+
+DE-NOVO CLUSTER FINDING
+    Unless options --locus or --locifile are used (see below), ShortStack
+    will de-novo identify clusters of small RNA accumulation genome-wide.
+    Cluster definition is simple: First, all regions containing at least one
+    primary alignment are found where the maximum distance between the ends
+    of the alignments is <= option --pad (default: 50). Second, if the
+    number of alignments in the cluster is >= option --mincov (default: 5),
+    the cluster is kept.
+
+USER-SPECIFIED CLUSTERS
+    Users can supply specific loci to analyze in two ways. For just one or a
+    few loci, the option --locus can be used. The argument should be a
+    coordinate in the format Chr:Start-Stop. Multiple loci can be specified
+    in option --locus by using commas to delimit them.
+
+    For larger lists of user-defined loci, and external file can be used
+    instead, specified with option --locifile. The file is a plain-text ,
+    tab-delimited format. The first column should list the coordinates in
+    Chr:Start-Stop format. An optional second column can contain names of
+    the loci. Any other columns will be ignored. Also, lines starting with #
+    will be ignored.
+
+    Options --locus and --locifile are mutually exclusive. Also, if either
+    is used, no de- novo cluster finding occurs.
+
+ANALYSIS METHODS
+    Regardless of whether the small RNA clusters were de-novo discovered or
+    user-defined, the analysis methods of each cluster are the same. The
+    major methods are described below:
+
+  Uncertainties and read-group-specific counts
+    When multi-mapping reads are placed, there is an inherent uncertainty
+    whether they've been put in the right place. When ShortStack is used to
+    make the alignments, all possible alignments for multi-mapping reads are
+    retained (subject to the limits of --bowtie_m and --ranmax; see above)
+    ... one is chosen and marked as the primary, while the others are noted
+    as secondary reads. Importantly the computed probabilities of these
+    placements are retained. Therefore, the alignments in a given cluster,
+    including the secondary alignments, can be resampled to create an
+    estimate of the abundance variability in the locus that is inherent to
+    the multi-mapping decisions made in the alignment.
+
+    To do this, for each cluster analyzed, ShortStack examines ten
+    replicates. Within each replicate, each read is 'resampled', and put
+    into or excluded from the locus based on the probability (as indicated
+    by the XZ:f tags in the line). This process is repeated for a total of
+    ten times, which allows the calculation of a mean abundance and a
+    standard deviation. If the probabilities are not available (i.e., the
+    alignments lack the XZ:f tag), no variation will be found.
+
+    This resampling also occurs separately for each read-group in the
+    alignment. The results are in the 'Counts.txt' file, which has the
+    observed number of reads, the mean number of reads for the ten
+    re-samplings, and the standard deviations. When there are multiple
+    read-groups, this is helpful to gather the raw data for differential
+    expression analysis.
+
+    There is always a read-group called 'main', which is all read-groups
+    combined.
+
+  Strandedness of loci
+    Loci where >= 80% of the primary alignments are on the top genomic
+    strand are noted with a strand of +. Loci where <=20% of the primary
+    alignment are on the top genomic strand are noted with a strand of -.
+    All other loci are given a strand of .
+
+  Major RNA
+    For each locus analyzed, the single most abundant RNA is noted and the
+    sequence reported. In cases where there is a tie, the reported major RNA
+    is chosen arbitrarily from among the tied RNAs.
+
+  Complexity
+    Complexity is a metric that varies from >0 to 1. It is calculated as (n
+    distinct alignments) / (abundance of alignments), thus lower values
+    indicate loci dominated by just a few dominant RNAs, while higher values
+    indicate loci with more diverse sets of small RNAs.
+
+  DicerCall
+    The 'DicerCall' reflects the predominant RNA size observed in the locus.
+    However, if < 80% of the reads in a locus are NOT within the bounds
+    described by the options --dicermin and --dicermax, then the DicerCall
+    is 'N' instead. DicerCalls of N usually reflect loci where the small
+    RNAs are NOT related to an RNAi process ... most often, breakdown
+    products of abundant RNAs.
+
+    Note that the predominant RNA size need not be a majority .. for
+    instance a locus with 40% 21 mers, 39% 22 mers, and 21% 23 mers would
+    have a DicerCall of 21.
+
+  MIRNAs
+    ShortStack's MIRNA analysis is meant to eliminate false positives. It
+    therefore probably allows some degree of false negatives (e.g., loci
+    that really are MIRNAs but are not annotated as such). MIRNA analysis in
+    ShortStack version 3 is a step-wise process. If a locus fails a certain
+    step, it is removed from consideration and given a specific code
+    indicate what step it failed. The codes are below in step-wise order.
+    The Major RNA is always hypothesized to be the mature miRNA in the
+    locus.
+
+    N0: not analyzed due to run in --nohp mode.
+
+    N1: no reads at all aligned in locus
+
+    N2: DicerCall was invalid (< 80% of reads in the Dicer size range
+    defined by --dicermin and --dicermax).
+
+    N3: Major RNA abundance was less than 2 reads.
+
+    N4: Major RNA length is not in the Dicer size range defined by
     --dicermin and --dicermax.
 
-    --count [string] : Invokes count mode, in which user-provided clusters
-    are annotated and quantified instead of being defined de novo. When
-    invoked, the file provided with --count is assumed to contain a simple
-    list of clusters. Count mode also forces nohp mode. Format of files is
-    tab-delimited with coordinates in column 1, names in column 2. All other
-    columns are ignored, and lines beginning with # are also ignored.
-    Results.txt files from previous ShortStack runs are in the correct
-    format. Default : Not invoked. --count is mutually exclusive with
-    --countHP.
+    N5: Locus size is > 300 nts.
 
-    --countHP [string] : Identical to --count, except that noHP mode is NOT
-    forced. Thus, input clusters will be analyzed for MIRNAs and HP loci.
-    Note that the start and stop positions of clusters that are found to be
-    MIRNA or HP can be slightly adjusted relative to the input as part of
-    the secondary structural analysis. --countHP is mutually exclusive with
-    both --count and --nohp.
+    N6: Locus is not stranded (>20% and <80% of reads aligned to top strand)
 
-    --nohp : If \"--nohp\" appears on the command line, it invokes running
-    in \"no hairpin\" mode. RNA folding, hairpin annotation, and MIRNA
-    annotation will be skipped (likely saving significant time). Note that
-    --count mode forces --nohp mode as well. Default: Not invoked. --nohp is
-    mutually exclusive with --countHP.
+    N7: RNA folding attempt failed at locus (if occurs, possible bug?)
 
-KEY FORMATTING REQUIREMENTS AND ASSUMPTIONS
-  Input genome.fasta file
-    It is critical that this be the precise genome to which the reads in the
-    input .bam file were mapped. If it isn't, validation of the BAM
-    alignment file will fail and the run will be aborted.
+    N8: Strand of possible mature miRNA is opposite to that of the locus
 
-    Chromsome names that contain whitespace will be truncated; only the
-    first string of non-white-space characters will be maintained. This
-    applies both during alignment (where bowtie does this) and during the
-    rest of the analysis (where samtools does this, when creating the .fai
-    index file).
+    N9: Retrieval of possible mature miRNA position failed (if occurs,
+    possible bug?)
 
-    If not already present, a .fai index file for the genome will be created
-    using samtools faidx at the beginning of the run. As above, chromosome
-    names will be automatically trimmed starting at the first white-space
-    character, if present.
+    N10: General failure to compute miRNA-star position (if occurs, possible
+    bug?)
 
-  Small RNA-seq reads.
-    FASTA or FASTQ data should be devoid of comment lines and conform to
-    FASTA or FASTQ specs. In addition, ShortStack assumes that each read
-    will occupy a single line in the file. There is no support for
-    paired-end reads. Colorspace-FASTA formatted data (from SOLiD) can have
-    comment lines. Format is assumed to conform to colorspace-FASTA
-    specifications (beginning with a nucleotide, followed by a string of
-    colors [0,1,2,3] or ambiguity codes [.]. For SOLiD data, the quality
-    values (_QV.qual files) are not usable as valid inputs.
+    N11: Possible mature miRNA had > 5 unpaired bases in predicted precursor
+    secondary structure.
 
-  Input .bam file
-    As of ShortStack 2.0.0, bam alignment files must have been created with
-    the program butter. Validation of bam files requires:
+    N12: Possible mature miRNA was not contained in a single predicted
+    hairpin
 
-    If you do make your own BAM alignments, outside of ShortStack, they must
-    pass the following validation steps that are performed by ShortStack:
+    N13: Possible miRNA/miRNA* duplex had >2 bulges and/or >3 bulged nts
 
-    1. The header must be present
+    N14: Imprecise processing: Reads for possible miRNA, miRNA-star, and
+    their 3p variants added up to less than 50% of the total reads at the
+    locus.
 
-    2. The sort order of the file must be 'coordinate', as indicated by the
-    SO: tag in the header
+    M: Maybe. Passed all tests EXCEPT that the miRNA-star was not sequenced.
+    INSUFFICIENT evidence to support a de novo annotation of a new miRNA
+    family, but if it can be shown to be a paralog/ortholog/homolog of an
+    already confidently identified miRNA family, than this is probably a
+    miRNA locus.
 
-    3. All of the chromosome names found in the header MUST also be found in
-    the genome.fasta file
+    Y: Yes. Passed all tests INCLUDING sequencing of the exact miRNA-star.
+    Can support a de novo annotation of a new miRNA family.
 
-    4. The data lines must contain the custom XX, XY, and XZ tags added by
-    butter.
+    For loci where MIRNA analysis returns a M (maybe) or Y (yes) result, a
+    plain-text summary of the locus and it's secondary structure is found in
+    the MIRNAs directory.
 
-    5. If the option --read_group is being used, the specified read_group
-    must be mentioned in the header in an @RG line.
+    Users should be aware that sometimes ShortStack will annotate known
+    miRNA-stars as miRNAs, if the abundance of the miRNA-star in the
+    analyzed library is higher.
 
-    The BAM file should be indexed and have the corresonding .bam.bai index
-    file in the same path as the bamfile. However, this is not required to
-    pass validation .. if the index is not found, it will be created during
-    the run.
+    * WARNING: Only loci with a MIRNA result of 'Y' have sufficient evidence
+    to support a de-novo annotation of a new miRNA family. Loci with a MIRNA
+    result of 'M' lack the miRNA-star. But, they may be considered valid IF
+    the locus is a homolog of a family that has been conclusively validated
+    elsehwere.
 
-    Each mapped read must have the CIGAR string set (column 6 in the SAM
-    specification) -- ShortStack determines the small RNA lengths by parsing
-    the CIGAR string .. if any mappings (except unmapped reads, which are
-    ignored) have "*" entered instead of a valid CIGAR string ShortStack
-    will exit and complain.
+    MIRNA analysis can be disabled with the --nohp option.
 
-  --count file
-    If running in --count mode, the user-provided file is expected to be a
-    simple text file containing a list of coordinates in the format :
-    [Chr]:[start]-[stop], where Chr is defined in the genome file AND in the
-    .bam file, and start and stop are one-based, inclusive. The same
-    requirement for short, non-whitespaced chromosome names as discussed
-    above holds true for input --count files. Comment lines, that begin with
-    '#', are ignored. Tab-delimited files are also accepted, provided the
-    first column has the coordinates. The second column in tab-delimted
-    files is assumed to be the names of the clusters, and will be used
-    accordingly. Any other columns in a tab-delimited input file are
-    ignored.
+    As of ShortStack version 3.x, MIRNA analysis is geared toward plant
+    MIRNAs. It probably is just fine for animal MIRNAs too, but has not been
+    tested on them.
 
-    Importantly, the 'Results.txt' file produced by a previous ShortStack
-    run can be used directly in subsequent runs in --count mode. This is
-    useful when comparing identical intervals across multiple samples.
+  Phasing
+    Phasing here refers to a signature of periodicity of small RNA abundance
+    that reflects dsRNA processing from a defined terminus. Phased siRNA
+    clusters often are triggered by an upstream small RNA-mediated clevage
+    event which causes RNA-dependent RNA polymerase activity and subsequent
+    siRNA production from the terminus defined by the cleavage event.
 
-    Note that count mode also forces nohp mode.
+    For valid loci, ShortStack 3.x uses the formula described by Guo et al.
+    (2015) (doi: 10.1093/bioinformatics/btu628), S = PR * PN * ln(PA), where
+    S is the phase score, PR is the phase ratio (see Axtell 2010 doi:
+    10.1007/978-1-60327-005-2_5), PN is the number of distinct sequences
+    that are phased, and PA is the abundance of the phased reads.
 
-  --flag_file
-    Optional. This is a list of genomic loci to scan for overlap with one or
-    more of the small RNA loci found/analyzed by ShortStack. Overlap of any
-    length is reported. The format of the file is similar to that of the
-    --count file: A tab-delimited text file with coordinates in the first
-    column, and names in the second column. Unlike for --count files, names
-    are required to be present in the second column for --flag_file.
-    Coordinates must be in the format [Chr]:[start]-[stop], where Chr is
-    defined in the genome file AND the .bam file, and start and stop are
-    one-based, inclusive.
+    ShortStack calculates the phase score in each possible phase size
+    contained within --dicermin and --dicermax, and returns the best score
+    along with the associated phase register. Higher phasing scores indicate
+    more phasing signature.
 
-OUTPUT
-  Results.txt
-    This is a simple tab-delimited text file. The first line begins with a
-    "#" (comment) sign, and then lists column headers. Each subsequent line
-    describes the key traits of a single cluster.
+    Not all loci are subject to phasing analysis. Like for MIRNA analysis,
+    there are defined codes that are returned for different outcomes:
 
-    To import this into R, here's a tip to deal with the first line, which
-    has the headers but begins with a "#" character.
+    N1: no reads at all aligned in locus
 
-        >results <- read.table("Results.txt", head=TRUE, sep="\t", comment.char="")
+    N2: DicerCall was N or NA (< 80% of reads in the Dicer size range
+    defined by --dicermin and --dicermax).
 
-    Column 1: Locus : The genome-browser-friendly coordinates of the
-    clusters. Coordinates are one-based, inclusive (e.g. Chr1:1-100 refers
-    to a 100 nt interval beginning with nt 1 and ending with nt 100).
+    N3: Locus size was < (3 * DicerCall)... to short to evaluate phasing
 
-    Column 2: Name : Name of cluster. Unless the run was in --count mode and
-    the input file of a priori clusters already had names, the names are
-    arbitrarily designated as "Cluster_1", "Cluster_2", etc.
+    N4: Locus is stranded (>= 80% of reads on top strand OR <= 20% of reads
+    on top strand).
 
-    Column 3: FlagOverlap : Name(s) of any loci from the flag_file that
-    overlap with the cluster are listed. If there are two or more, they are
-    comma-separated. If there were none, or no flag_file was provided, than
-    a "." is present in this column instead.
+    N5: General failure to calculate a phasing score (if occurs, possible
+    bug?).
 
-    Column 4: Size : Size in nts of the locus.
+OUTPUT FILES
+    All output files are in the directory created by ShortStack, whose name
+    is specified by option --outdir The exception is the .fai file (genome
+    index file) created if it is not present .. this is put in the same
+    location as the input genome file.
 
-    Column 5: MIRNA : Whether this cluster appears to be a MIRNA or not. If
-    not, a "." is present. If it is a hairpin, but NOT qualified as a MIRNA,
-    "HP" is indicated. MIRNAs are indicated by "MIRNA". If the run was in
-    "--nohp" mode, than all entries in the column will be ".".
+  Log file
+    A log of the run messages is created and written to Log.txt. It is the
+    same as the messages printed to STDERR during the run.
 
-    Column 6: MIRNA_Score : Score of the locus via MIRNA analysis by maple.
-    Ranges from 0-1, with 1 being the best. "NA" if locus was pre-excluded
-    from maple analysis (because of excessive length, not coming from a
-    clear single-strand, or DicerCall of N).
+  Stitched genome files
+    If the input genome was 'stitched' (see above), the stitiched genome
+    file will be put in the ShortStack outdir, along with it's fai index,
+    and the six bowtie indices (which end with .ebwt). Additionally, a guide
+    file will be written that describes the relationships between the input
+    genome and the stitched genome. This guide file is tab-delimited plain
+    text. The columns are:
 
-    Column 7: Strand : The predominant genomic strand from which the small
-    RNA emanate. If ".", no strand was called.
+    1. Original chromosome name
 
-    Column 8: Frac_Wat : Fraction of aligned reads to the Watson (e.g. +)
-    strand of the cluster. 1 means all were from Watson Strand (e.g. +), 0
-    means all were from Crick (e.g. -) strand.
+    2. Stitched chromosome name
 
-    Column 9: Total : Total aligned reads within the cluster.
+    3. Start of sequence in stitched
 
-    Column 10: Uniques : Total aligned reads derived from uniquely mapped
-    reads .. e.g., those with XX:i:1.
+    4. End of sequence in stitched.
 
-    Column 11: DicerCall : If "N", the cluster was not annotated as
-    dicer-derived, per options --dicermin, --dicermax, and --mindicerfrac.
-    Otherwise this is a number, within the --dicermin to --dicermax size
-    range, which indicates the most abundant small RNA size within the
-    mappings at that cluster.
+  Results file
+    The file Results.txt is a plain-text tab-delimited file that contains
+    the core results of the analysis. The columns are labeled in the first
+    row, and are:
 
-    Column 12: PhaseOffset : If "NA", phasing p-value was not calculated for
-    this cluster. Otherwise, the offset is the one-based genomic position
-    with which the cluster appears to be "in-phase" (based on the 5' nt of a
-    sense-mapped small RNA). Phasing is always in increments identicial to
-    the Dicer size call in column 9.
+    1. Locus: Coordinates of the locus in format Chr:Start-Stop
 
-    Column 13: Phase_pval : If "NA", phasing p-value was not calculated for
-    this cluster. Otherwise, the p-value is derived from a modified
-    hypergeometric distribution, as described below.
+    2. Name: Name of the locus
 
-    Column 14: Short : The total mappings from reads with lengths less than
-    --dicermin.
+    3. Length: Length of the locus (nts)
 
-    Column 15: Long : The total mappings from reads with lengths more than
-    --dicermax.
+    4. Reads: Total number of primary alignments in the locus
 
-    Columns 16 - the end : The total mappings from reads with the indicated
-    lengths. These are the sizes within the Dicer range.
+    5. MeanReads: Mean value of reads (average of ten re-samplings of
+    secondary alignments).
 
-  Log.txt
-    This is a simple log file which records the information that is also
-    sent to STDERR during the run.
+    6. StdevReads: Standard deviation of MeanReads (n=10).
 
-  gff3 files
-    Two gff3-formatted files are created, one for the 'DCL' loci (those with
-    a DicerCall that is NOT N), and the 'N' loci (those with a DicerCall of
-    'N'). There are NOT produced in a --count mode run.
+    7. UniqueReads: Number of uniquely aligned primary alignments in locus.
 
-  Hairpin and MIRNA detail files
-    Text-based and graphical files for each MIRNA and HP locus are created.
-    See the maple documentation for details.
+    8. FracTop: Fraction of primary alignments aligned to the top genomic
+    strand
 
-KEY METHODS
-  Adapter trimming and alignments
-    Adapter trimming and alignments are handled by butter. See the butter
-    documentation for details.
+    9. Strand: Strand call for the locus
 
-  Multiple libraries
-    ShortStack supports input of multiple small RNA-seq libraries through
-    the option --reads. Files are provided as a comma-delimited list. When
-    multiple small RNA-seq libraries are input, each one is first aligned
-    separately, creating temporary .bam files. When this is complete, they
-    are merged into a single alignment, which is given the name "outdir.bam"
-    in the working directory, where "outdir" is the string given in option
-    --outdir. During the merging, the read group information is stored, so
-    all alignments can be de-convoluted back to their parent libraries if
-    desired. The individual .bam alignments created intially are deleted.
+    10. MajorRNA: Most abundant RNA at locus. In cases of tie, MajorRNA is
+    arbitrarily chosen from the tied entries.
 
-  Read groups
-    As of version 1.1.0, ShortStack incorporates the option --read_group.
-    When specified, only the alignments from the read group specified by the
-    option will be used for analysis. Use of this option demands that the
-    indicated read group is specified in the header of the relevant bam
-    alignment file.
+    11. MajorRNAReads: Number of primary alignments for the MajorRNA.
 
-    When an analysis uses a bam alignment file that contains more than one
-    read group (based on the bam header), and the --read_group option was
-    NOT used in the run, the analysis will conclude with a --count mode
-    analysis of each read group separately. This is meant to be convenient
-    for analyses in which a de-novo small RNA gene annotation is performed
-    using a merger of multiple libraries, followed by quantification of each
-    locus for each small RNA-seq library separately .. this should
-    facilitate the downstream analysis of differential expression, for
-    instance.
+    12. Complexity: A number >0 and <= 1 that reflects the complexity of
+    small RNA production from the locus. Defined by
+    (n_distinct_read_sequences) / (abundance of all reads). Lower numbers
+    indicate loci that are more dominated by a single highly abundant RNA.
 
-  de novo Cluster Discovery
-    Cluster discovery proceeds in two simple steps:
+    13. DicerCall: If >= 80% of the primary alignments were reads >=
+    dicermin and <= dicermax, DicerCall is a number that indicates the
+    predominant size of the RNA population from the locus. If the 80%
+    threshold was not met, then DicerCall is N instead. Can also be NA if
+    the locus had no aligned reads.
 
-    1. The total depth of small RNA coverage at each occupied nucleotide in
-    the genome is examined, and initial 'islands' of coverage are defined as
-    continuous stretches of non-zero coverage where the read depth, at at
-    lest one point, is greater than or equal to the threshold depth
-    specified by option --mindepth. Note that this definition of islands is
-    different, and more inclusive, than that used by ShortStack versions
-    prior to 2.0.0.
+    14. MIRNA: Results of MIRNA analysis. Codes starting with N indicate not
+    a MIRNA, M means 'maybe' (lacks miRNA-star sequencing), and Y means yes.
+    See above for full description of codes.
 
-    2. The initial islands are then temporarily extended on both sides by
-    the distance specified by option --pad. Islands that overlap after
-    extension are merged. The "dangling pads" at the ends of the merged
-    clusters are then removed. After all extensions, resultant mergers, and
-    end trimmings are performed, the final result is the initial clusters.
-    If the run is performed in --nohp mode, these are the final clusters. If
-    hairpins and MIRNAs are being examined, some of the clusters may be
-    adjusted in position to reflect the extent of the apparent hairpin
-    precursor.
+    15. PhaseSize: Codes starting with N mean phasing was not analyzed, see
+    above for description of codes. Otherwise, a number reflecting the phase
+    register with the best score.
 
-  Hairpin and MIRNA analysis
-    MIRNA analysis is performed by maple. For speed, not all clusters are
-    subject to analysis by maple. Clusters that exceed 1kb in length, have a
-    DicerCall of "N", or that don't have a clear single-stranded pattern of
-    read alignments are not sent to maple for analysis. The miRType option
-    also limits queries based on kingdonm-specific requirement
-    (specifically, if the miRTtype is 'animal', than the query can't be
-    longer than 250 nts.).
+    16. PhaseScore: If NA, phasing was not analyzed. Otherwise, reports the
+    phasing score according to equation 3 of Guo et al (2015) doi:
+    10.1093/bioinformatics/btu628
 
-    See the maple documentation for details of how it works.
+    17. Short: Number of primary alignments that were shorter than
+    --dicermin
 
-  Quantification of clusters
-    All mappings with at lease one nt of overlap within the cluster are
-    tallied as being within the cluster. Thus, for a cluster located at
-    Chr1:1000-2000, reads mapped to 980-1000, 1100-1123, and 2000-2021 are
-    all counted as being within the cluster during quantification. Note that
-    it's possible to count the same mapping within non-overlapping clusters.
+    18. Long: Number of primary alignments that were longer than --dicermax
 
-  Analysis of Phasing
-    'Phasing' describes the periodic mapping of small RNAs to repeating
-    intervals equal to their size. It occurs when helical RNA is Diced
-    processively from a defined terminus; often the terminus is defined by a
-    prior small RNA slicing event followed by RDRP activity, although some
-    MIRNA hairpins are also phased. Nearly all documented examples of phased
-    small RNA production (in plants) occur for 21nt small RNAs in 21nt
-    increments, hence the default settings of ShortStack to examine only
-    21-dominated clusters. This can be changed with option --phasesize.
+    19-end: Number of primary alignments of the indicated RNA size.
 
-    ShortStack's basic method to identify phased small RNAs involves
-    calculation of a p-value based on the hypergeometric distribution --
-    this approach was inspired by Chen et al. (2007) PNAS 104: 3318-3323
-    PMID: 17360645. However, ShortStack's method modifies the Chen et al.
-    approach to make it more robust at detecting phasing in highly expressed
-    clusters with a background of non-phased noise; the method also allows
-    phasing analysis in any register within the dicer size range (controlled
-    by option --phasesize), and analyzes regions of arbitrary length.
-    Finally, ShortStack's analysis of phasing is "fuzzy" -- that it, exactly
-    phased reads, and those +1 and -1 phase are all counted as "phased".
+  Counts file
+    The Counts.txt file is plain text, tab-delimited. For each locus, it
+    shows the total read counts observed, the mean read counts (n=10 from
+    the resampling method described above), and the standard deviation (n=10
+    from the resampling method described above). Each read-group is broken
+    out seperately, and the sum of all read groups is also shown (termed
+    'main').
 
-    Phasing analysis proceeds as follows:
+  MIRNAs directory
+    This directory contains plain-text descriptions of each locus that was
+    judged 'M' or 'Y' in MIRNA analysis. The files show the sequence of the
+    locus, the predicted RNA secondary structure in dot-bracket notation,
+    and the locations of the miRNA and miRNA-star. If the miRNA-star was not
+    sequenced, it's sequence is shown as 'X's instead of the real sequence.
 
-    1. Clusters to be analyzed must be annotated as Dicer-derived and be
-    dominated by the size class indicated by option --phasesize. If
-    --phasesize is set to 'all', all clusters within the Dicer size range
-    will be analyzed. Conversely, phasing analysis is suppressed for all
-    clusters if option --phasesize is set to 'none'.
+    Below this top line, all other small RNAs aligned to the locus are
+    shown. Those aligned to the opposite strand have '<' as delimiters
+    instead of '.'.
 
-    2. Cluster must also have a length of more than 4 x the phase size in
-    question .. so, more than 84nts under the default --phasesize 21
-    setting. Clusters that are too short are never examined.
+    Lower-case nts in the displayed small RNA sequences indicate positions
+    where the small RNA sequence differs from the reference sequence. Note
+    that the reference sequence, not the small RNA sequences, are used to
+    compute predicted secondary structures.
 
-    3. Phasing is only analyzed with respect to the dominant size of the
-    cluster. So, for a cluster dominated by 21mers, only phasing in 21nt
-    increments will be examined.
+    l: length of RNA, a: number of alignments.
 
-    4. The 5' positions of all sense-mapped small RNAs are tallied as a
-    function of genomic position. The 3' positions of all antisense-mapped
-    small RNAs are also tallied, after adding 2nts to account for the 2nt,
-    3' overhangs left by Dicer processing. After this process, each genomic
-    position within the cluster has a number reflecting the number of small
-    RNA termini at that position. If the cluster is longer than 20 times the
-    phase (e.g. 20 x 21 for the default settings), reads mapped beyond the
-    20 x 21 mark are allocated to the beginning of the cluster, keeping it
-    in phase. For instance, assuming --phasesize of 21, reads in position
-    420 are assigned at 420, those at 421 get flipped back to 1, 422 back to
-    2, and so on. This is necessary because p-value calculation involved
-    calculation of binomial coefficents, which grow too large to calculate
-    (easily) with inputs of more than 500 or so.
+  GFF3 files
+    If the run was a de-novo analysis, two gff3 files are created to
+    indicate the positions of the discovered loci.
 
-    5. The average abundance of termini across the locus is calculated from
-    the above representation of the reads.
+    ShortStack_N.gff3 has the loci with DicerCalls of 'N' (e.g., those that
+    are unlikely RNAi-related).
 
-    6. The total abundance in each of the possible phasing registers (there
-    are 21 registers in the default mode of --phasesize 21) is calculated.
-    The register with the maximum total abundance is the used in p-value
-    determination. The offset of this register is also noted; the offset is
-    the 1st genomic position representing the 5'-sense position of a phased
-    small RNA.
+    ShortStack_D.gff3 has the loci with DicerCalls that were not 'N' (e.g.,
+    those that ARE likely RNAi-related).
 
-    7. The p-value within the chosen register is then calculated using the
-    cumulative distribution function (CDF) for the hypergeometric
-    distribution. Sorry, hard to show equations in plain-text -- see
-    Wikipedia's Hypergeometric distribution entry, under CDF. N (the
-    population size) is the number of nt positions in the locus. m (the
-    number of success states in the population) is the number of possible
-    positions in the phasing register of interest, INLCUDING POSITIONS +1
-    AND -1 RELATIVE TO THE REGISTER OF INTEREST. This means phasing is
-    "fuzzy", which is often seen in the known examples of this phenomenon. n
-    (the number of draws) is defined as the total number of positions with
-    ABOVE AVERAGE abundance. k (the number of successes) is the number of
-    phased positions (inlduing the fuzzy +1 and -1 positions) with ABOVE
-    AVERAGE abundance. The p-value is then calculated per the hypergeometric
-    distribution CDF. NOTE: The restriction of n and k to only above-average
-    abundance works well to eliminate low-level noise and focus on the
-    dominant small RNA pattern within the locus.
+  bam or cram alignment file
+    If aligment was performed, the final bam or cram formatted alignment
+    will also be in the ShortStack outdir. The ShortStack-specific tags of
+    these files are described above (section Alignment output format).
 
-    Note: P-values are not corrected for multiple-testing. Consider
-    adjustment of p-values to control for multiple testing (e.g. Bonferroni,
-    Benjamini-Hochberg FDR, etc) if you want a defensible set of phased loci
-    from a genome-wide analysis.
+FAQ
+    1. bowtie2 is newer than bowtie. Why do you still require bowtie but
+    disallow bowtie2? Answer: Two reasons. 1) unlike bowtie2, bowtie has
+    support for colorspace data, and 2) According to the manuals for both
+    programs, bowtie2 is optimized for longer (>50 nts) reads, while bowtie
+    is optimized for shorter reads.
 
