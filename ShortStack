@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0a1";
+my $version_num = "3.0a2";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -3378,7 +3378,7 @@ sub MIRNA {
     my $call;
 
     
-    # Fully validated if the star was sequenced. If not, gets an 'M' for maybe
+    # Fully validated if the star was sequenced. If not, gets an 'N15'
     if($star_count) {
 	# TEST
 	#print "result: Y\n\n";
@@ -3390,13 +3390,11 @@ sub MIRNA {
 	# TEST
 	#print "result: M\n\n";
 	# END TEST
-	$call = 'M';
-	plain_text($all,\$mirkey,\$star_key,$options,$strand,\$faidx_region,$coords,$loc_name,\$fold_seq,\$brax,\$call,\$real_star_key);
-	return 'M';
+	# NO MORE M
+        #$call = 'M';
+	#plain_text($all,\$mirkey,\$star_key,$options,$strand,\$faidx_region,$coords,$loc_name,\$fold_seq,\$brax,\$call,\$real_star_key);
+	return 'N15';
     }
-    
-
-	
 }
 
 sub check_mir_star {
@@ -3973,11 +3971,9 @@ sub summarize {
     my $i;
     for($i = $$options{'dicermin'}; $i <= $$options{'dicermax'}; ++$i) {
 	$tallies{'N'}{$i} = 0;
-	$tallies{'M'}{$i} = 0;
 	$tallies{'Y'}{$i} = 0;
     }
     $tallies{'N'}{'N'} = 0;
-    $tallies{'M'}{'N'} = 0;
     $tallies{'Y'}{'N'} = 0;
     
     my $res_file = "$$options{'outdir'}" . "\/" . "Results.txt";
@@ -4056,10 +4052,10 @@ sub summarize {
     log_it($$options{'logfile'}, "\nSummary of results:");
     
     my $report;
-    $report .= "DicerCall\tNotMIRNA\tMaybeMIRNA\tMIRNA\n";
-    $report .= "N or NA\t$tallies{'N'}{'N'}\t$tallies{'M'}{'N'}\t$tallies{'Y'}{'N'}\n";
+    $report .= "DicerCall\tNotMIRNA\tMIRNA\n";
+    $report .= "N or NA\t$tallies{'N'}{'N'}\t$tallies{'Y'}{'N'}\n";
     for($i = $$options{'dicermin'}; $i <= $$options{'dicermax'}; ++$i) {
-	$report .= "$i\t$tallies{'N'}{$i}\t$tallies{'M'}{$i}\t$tallies{'Y'}{$i}\n";
+	$report .= "$i\t$tallies{'N'}{$i}\t$tallies{'Y'}{$i}\n";
     
     }
     log_it($$options{'logfile'}, "$report");
@@ -4235,9 +4231,10 @@ size of the temporary alignment files and the final alignment file. Extreme sett
 --bowtie_m and --ran_max may cause creation of extremely huge files.
 
 The total time of analysis depends on several factors, including most prominently genome size, 
-number of reads analyzed, whether or not bowtie indices need to be created, and of course your equipment.
+number of reads analyzed, whether or not bowtie indices need to be created, whether or not
+MIRNAs are being analyzed, and of course your equipment.
 Excluding building bowtie indices, we generally have observed run times for alignment + analysis runs
-to take between 20 and about 200 minutes using deafult ShortStack settings.
+to take between 20 minutes and 10 hours using deafult ShortStack settings.
 
 =head1 ALIGNMENT METHODS
 
@@ -4525,22 +4522,17 @@ N13: Possible miRNA/miRNA* duplex had >2 bulges and/or >3 bulged nts
 
 N14: Imprecise processing: Reads for possible miRNA, miRNA-star, and their 3p variants added up to less than 50% of the total reads at the locus.
 
-M: Maybe. Passed all tests EXCEPT that the miRNA-star was not sequenced. INSUFFICIENT evidence to support a de novo annotation of a new miRNA family, but if it can be shown to be a paralog/ortholog/homolog of an already confidently identified miRNA family, than this is probably a miRNA locus.
+N15: Maybe. Passed all tests EXCEPT that the miRNA-star was not sequenced. INSUFFICIENT evidence to support a de novo annotation of a new miRNA family.
 
 Y: Yes. Passed all tests INCLUDING sequencing of the exact miRNA-star. Can support a de novo annotation of a new miRNA family.
 
-For loci where MIRNA analysis returns a M (maybe) or Y (yes) result, a plain-text summary of the locus and it's 
+For loci where MIRNA analysis returns a Y (yes) result, a plain-text summary of the locus and it's 
 secondary structure is found in the MIRNAs directory.
 
 Users should be aware that sometimes ShortStack will annotate known miRNA-stars as miRNAs, if the 
 abundance of the miRNA-star in the analyzed library is higher.
 
-* WARNING: Only loci with a MIRNA result of 'Y' have sufficient evidence to support a de-novo 
-annotation of a new miRNA family. Loci with a MIRNA result of 'M' lack the miRNA-star. But,
-they may be considered valid IF the locus is a homolog of a family that has been 
-conclusively validated elsehwere.
-
-MIRNA analysis can be disabled with the --nohp option.
+MIRNA analysis can be disabled with the --nohp option. This may save significant analysis time.
 
 As of ShortStack version 3.x, MIRNA analysis is geared toward plant MIRNAs. It probably is just
 fine for animal MIRNAs too, but has not been tested on them. 
@@ -4631,7 +4623,7 @@ the analysis. The columns are labeled in the first row, and are:
 
 13. DicerCall: If >= 80% of the primary alignments were reads >= dicermin and <= dicermax, DicerCall is a number that indicates the predominant size of the RNA population from the locus. If the 80% threshold was not met, then DicerCall is N instead. Can also be NA if the locus had no aligned reads.
 
-14. MIRNA: Results of MIRNA analysis. Codes starting with N indicate not a MIRNA, M means 'maybe' (lacks miRNA-star sequencing), and Y means yes. See above for full description of codes.
+14. MIRNA: Results of MIRNA analysis. Codes starting with N indicate not a MIRNA, Y means yes. See above for full description of codes.
 
 15. PhaseSize: Codes starting with N mean phasing was not analyzed, see above for description of codes. Otherwise, a number reflecting the phase register with the best score.
 
@@ -4680,5 +4672,11 @@ ShortStack-specific tags of these files are described above (section Alignment o
 
 =head1 FAQ
 
-1. bowtie2 is newer than bowtie. Why do you still require bowtie but disallow bowtie2?  Answer: Two reasons. 1) unlike bowtie2, bowtie has support for colorspace data, and 2) According to the manuals for both programs, bowtie2 is optimized for longer (>50 nts) reads, while bowtie is optimized for shorter reads.
+=head2 bowtie2 is newer than bowtie. Why do you still require bowtie but disallow bowtie2?  
+
+Answer: Two reasons. 1) unlike bowtie2, bowtie has support for colorspace data, and 2) According to the manuals for both programs, bowtie2 is optimized for longer (>50 nts) reads, while bowtie is optimized for shorter reads.
+
+=head2 Why does ShortStack say that known MIRNA loci are NOT MIRNAs?
+
+Answer: MIRNA annotation by ShortStack is, by desgin, meant to strongly reduce, perhaps eliminate, false positives. Any locus given a MIRNA result of 'Y' by ShortStack has sufficiently strong evidence to support it's annotation of a miRNA. However, reduction of false positives comes at a price .. there will be some false negatives .. true MIRNAs that are not reported as such by ShortStack. Users should consider a 'No' MIRNA result by ShortStack to mean that the evidence in that particular small RNA-seq run did not offer 100% proof that the locus was a MIRNA.
 

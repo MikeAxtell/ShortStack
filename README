@@ -185,10 +185,10 @@ SYSTEM RECOMMENDATIONS
 
     The total time of analysis depends on several factors, including most
     prominently genome size, number of reads analyzed, whether or not bowtie
-    indices need to be created, and of course your equipment. Excluding
-    building bowtie indices, we generally have observed run times for
-    alignment + analysis runs to take between 20 and about 200 minutes using
-    deafult ShortStack settings.
+    indices need to be created, whether or not MIRNAs are being analyzed,
+    and of course your equipment. Excluding building bowtie indices, we
+    generally have observed run times for alignment + analysis runs to take
+    between 20 minutes and 10 hours using deafult ShortStack settings.
 
 ALIGNMENT METHODS
     If ShortStack is given the --readfile option, alignments of the reads
@@ -523,30 +523,23 @@ ANALYSIS METHODS
     their 3p variants added up to less than 50% of the total reads at the
     locus.
 
-    M: Maybe. Passed all tests EXCEPT that the miRNA-star was not sequenced.
-    INSUFFICIENT evidence to support a de novo annotation of a new miRNA
-    family, but if it can be shown to be a paralog/ortholog/homolog of an
-    already confidently identified miRNA family, than this is probably a
-    miRNA locus.
+    N15: Maybe. Passed all tests EXCEPT that the miRNA-star was not
+    sequenced. INSUFFICIENT evidence to support a de novo annotation of a
+    new miRNA family.
 
     Y: Yes. Passed all tests INCLUDING sequencing of the exact miRNA-star.
     Can support a de novo annotation of a new miRNA family.
 
-    For loci where MIRNA analysis returns a M (maybe) or Y (yes) result, a
-    plain-text summary of the locus and it's secondary structure is found in
-    the MIRNAs directory.
+    For loci where MIRNA analysis returns a Y (yes) result, a plain-text
+    summary of the locus and it's secondary structure is found in the MIRNAs
+    directory.
 
     Users should be aware that sometimes ShortStack will annotate known
     miRNA-stars as miRNAs, if the abundance of the miRNA-star in the
     analyzed library is higher.
 
-    * WARNING: Only loci with a MIRNA result of 'Y' have sufficient evidence
-    to support a de-novo annotation of a new miRNA family. Loci with a MIRNA
-    result of 'M' lack the miRNA-star. But, they may be considered valid IF
-    the locus is a homolog of a family that has been conclusively validated
-    elsehwere.
-
-    MIRNA analysis can be disabled with the --nohp option.
+    MIRNA analysis can be disabled with the --nohp option. This may save
+    significant analysis time.
 
     As of ShortStack version 3.x, MIRNA analysis is geared toward plant
     MIRNAs. It probably is just fine for animal MIRNAs too, but has not been
@@ -654,8 +647,7 @@ OUTPUT FILES
     the locus had no aligned reads.
 
     14. MIRNA: Results of MIRNA analysis. Codes starting with N indicate not
-    a MIRNA, M means 'maybe' (lacks miRNA-star sequencing), and Y means yes.
-    See above for full description of codes.
+    a MIRNA, Y means yes. See above for full description of codes.
 
     15. PhaseSize: Codes starting with N mean phasing was not analyzed, see
     above for description of codes. Otherwise, a number reflecting the phase
@@ -714,9 +706,19 @@ OUTPUT FILES
     these files are described above (section Alignment output format).
 
 FAQ
-    1. bowtie2 is newer than bowtie. Why do you still require bowtie but
-    disallow bowtie2? Answer: Two reasons. 1) unlike bowtie2, bowtie has
-    support for colorspace data, and 2) According to the manuals for both
-    programs, bowtie2 is optimized for longer (>50 nts) reads, while bowtie
-    is optimized for shorter reads.
+  bowtie2 is newer than bowtie. Why do you still require bowtie but disallow bowtie2?
+    Answer: Two reasons. 1) unlike bowtie2, bowtie has support for
+    colorspace data, and 2) According to the manuals for both programs,
+    bowtie2 is optimized for longer (>50 nts) reads, while bowtie is
+    optimized for shorter reads.
+
+  Why does ShortStack say that known MIRNA loci are NOT MIRNAs?
+    Answer: MIRNA annotation by ShortStack is, by desgin, meant to strongly
+    reduce, perhaps eliminate, false positives. Any locus given a MIRNA
+    result of 'Y' by ShortStack has sufficiently strong evidence to support
+    it's annotation of a miRNA. However, reduction of false positives comes
+    at a price .. there will be some false negatives .. true MIRNAs that are
+    not reported as such by ShortStack. Users should consider a 'No' MIRNA
+    result by ShortStack to mean that the evidence in that particular small
+    RNA-seq run did not offer 100% proof that the locus was a MIRNA.
 
