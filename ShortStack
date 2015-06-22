@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0a2";
+my $version_num = "3.0a3";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -2611,7 +2611,7 @@ sub analyze_locus {
     my $dicer_ok = 0;
     my $dicer_n = 0;
     if(exists($$all{'main'})) {
-	foreach my $mk (keys $$all{'main'}) {
+	foreach my $mk (keys %{$$all{'main'}}) {
 	    my @kf = split (":", $mk);
 	    $len = length($kf[2]);
 	    if($len < $$options{'dicermin'}) {
@@ -2716,7 +2716,7 @@ sub phaser {
 	%abun = ();
 	%distinct = ();
 	$sum = 0;
-	foreach $k (keys $$all{'main'}) {
+	foreach $k (keys %{$$all{'main'}}) {
 	    @kf = split (":", $k);
 	    if($kf[3] eq '+') {
 		$fivep_corrected = $kf[1];
@@ -2764,7 +2764,7 @@ sub get_big_seq {
     my $n_seqs = 0;
     my $complexity = 'NA';
     if(exists($$all{'main'})) {
-	foreach my $key (keys $$all{'main'}) {
+	foreach my $key (keys %{$$all{'main'}}) {
 	    $sum += $$all{'main'}{$key};
 	    ++$n_seqs;
 	    if($$all{'main'}{$key} > $max_n) {
@@ -2793,7 +2793,7 @@ sub get_strand {
     my $sum = 0;
     my @keys = ();
     if(exists($$all{'main'})) {
-	@keys = keys $$all{'main'};
+	@keys = keys %{$$all{'main'}};
     }
     my $strand = 'NA';
     my $frac = 'NA';
@@ -2820,8 +2820,8 @@ sub get_obs_from_all {
     my($all, $rg) = @_;
     my $sum = 0;
     if(exists($$all{$$rg})) {
-	my @keys = keys $$all{$$rg};
-	foreach my $key (@keys) {
+	#my @keys = keys $$all{$$rg};
+	foreach my $key (keys %{$$all{$$rg}}) {
 	    $sum += $$all{$$rg}{$key};
 	}
     }
@@ -2864,7 +2864,7 @@ sub get_coords {
     my $max;
     my $chr;
     my $key;
-    my @keys = keys $$all{'main'};
+    my @keys = keys %{$$all{'main'}};
     my $left;
     my $right;
     foreach $key (@keys) {
@@ -3330,7 +3330,7 @@ sub MIRNA {
     
     my $this_fivep;
     
-    foreach my $ak (keys $$all{'main'}) {
+    foreach my $ak (keys %{$$all{'main'}}) {
 	# has to match chr, left, strand, and have the SEQ be same length as in mdz of star_key
 	@as = split (":", $ak);
 	if(($sk[0] eq $as[0]) and
@@ -3343,7 +3343,7 @@ sub MIRNA {
 	    }
 	}
     }
-    foreach my $ak (keys $$all{'main'}) {
+    foreach my $ak (keys %{$$all{'main'}}) {
 	# has to match chr, left, strand, and have the SEQ be same length as in mdz of star_key
 	if($ak eq $mirkey) {
 	    next;
@@ -3579,7 +3579,7 @@ sub get_lr {
 
 sub get_mir_key {
     my($all,$folded_strand) = @_; ## references to hash, scalar
-    my @keys = keys $$all{'main'};
+    my @keys = keys %{$$all{'main'}};
     my $max_n = 0;
     my $max_key;
     my $sum = 0;
@@ -3755,7 +3755,7 @@ sub plain_text {
     print PT "\n";
     ## Now, all other reads that are not the miRNA or the star.
 
-    foreach my $k (keys $$all{'main'}) {
+    foreach my $k (keys %{$$all{'main'}}) {
 	if($k eq $$mirkey) {
 	    next;
 	}
@@ -3859,7 +3859,7 @@ sub get_trim_region {
     my $smallest;
     my $largest;
     my @kf = ();
-    foreach my $k (keys $$all{'main'}) {
+    foreach my $k (keys %{$$all{'main'}}) {
 	@kf = split (":", $k);
 	if($smallest) {
 	    if($kf[1] < $smallest) {
