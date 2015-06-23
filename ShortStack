@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0a3";
+my $version_num = "3.0a4";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -622,8 +622,10 @@ sub validate_bowtie_m {
 	    }
 	}
     } elsif (exists($$options{'readfile'})) {
-	# if it was unset by the user, set it to default of 50, unless mmap is set to none
-	unless($$options{'mmap'} eq 'n') {
+	# if it was unset by the user, set it to default of 50, unless mmap is set to none, in which case it is set to 1
+	if($$options{'mmap'} eq 'n') {
+	    $$options{'bowtie_m'} = 1;
+	} else {
 	    $$options{'bowtie_m'} = 50;
 	}
     }
@@ -1555,7 +1557,7 @@ sub align_master {
 	if(@$cqualfiles) {
 	    if($$options{'adapter'}) {
 		# parse the filepath of the readfile ... the ShortStack-trimmed cqual file will the same, just with suffix .qual
-		$cqualfile = $path . "\/" . $base . ".qual";
+		$cqualfile = $path . $base . '.qual';
 	    } else {
 		$cqualfile = $$cqualfiles[$i];
 	    }
@@ -1652,6 +1654,10 @@ sub get_read_s_aln {
     if ($$cqual) {
 	$bowtie_cl .= " -Q $$cqual";
     }
+    if($format =~ /C/) {
+	$bowtie_cl .= " --col-keepends";
+    }
+
     $bowtie_cl .= " --sam-RG ID:$base";
     $bowtie_cl .= " $ebwt_base -";
     if ($gz) {
@@ -4568,7 +4574,8 @@ N5: General failure to calculate a phasing score (if occurs, possible bug?).
 =head1 OUTPUT FILES
 
 All output files are in the directory created by ShortStack, whose name is specified by option --outdir
-The exception is the .fai file (genome index file) created if it is not present .. this is put in the
+The exceptions are the .fai file (genome index file) created if it is not present and the six ebwt 
+bowtie index files that are created if not present ... these are all put in the
 same location as the input genome file.
 
 =head2 Log file
