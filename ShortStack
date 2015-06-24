@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0a5";
+my $version_num = "3.0a6";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -277,7 +277,7 @@ Analysis Options:
   less than or equal to the value of pad. Must be an integer between 0 and 50000. Default: 50.
 
 --mincov [integer] : Clusters of small RNAs must have at least this many alignments. Must be an
-integer between 1 and 50000. Default: 50.
+integer between 1 and 50000. Default: 5.
 
 Type perldoc ShortStack for documentation, or see README
 
@@ -822,7 +822,7 @@ sub stitch_genome {
     # report
     log_it($$options{'logfile'}, "Genome has more than 50 segments and one or more of them are less then 5MB. Stitching short references to improve performance during MIRNA search...");
     log_it($$options{'logfile'}, "\tNOTE: This will require building a new bowtie index for the stitched genome, which can be time-consuming. To avoid genome stitching, abort");
-    log_it($$options{'logfile'}, "\tthis run, and start a new one with option --no_stitch");
+    log_it($$options{'logfile'}, "\tthis run, and start a new one with option --nostitch");
     
     # Create a file for the new, stitched genome
     my($og,$og_path,$og_suffix) = fileparse($$options{'genomefile'}, qr/\.\S+$/);
@@ -4242,7 +4242,7 @@ Usage: ShortStack [options] {--readfile <r> | {--bamfile <b> | --cramfile <c>}} 
   less than or equal to the value of pad. Must be an integer between 0 and 50000. Default: 50.
 
 --mincov [integer] : Clusters of small RNAs must have at least this many alignments. Must be an
-integer between 1 and 50000. Default: 50.
+integer between 1 and 50000. Default: 5.
 
 =head1 SYSTEM RECOMMENDATIONS
 
@@ -4286,7 +4286,7 @@ to be analyzed (e.g., --nohp was NOT specified), then ShortStack will 'stitch' t
 fewer but larger chromosomes. This can drastically improve performance during MIRNA searching for highly fragmented
 genome assemblies. BUT, if the genome is stitched, the coordinates for stitched references are changed (there is a
 guide produced), and the bowtie indices will need to be built, which can be time-consuming. Genome stitching can be
-disabled with the option --no_stitch.
+disabled with the option --nostitch.
 
 =head3 Genome indexing
 

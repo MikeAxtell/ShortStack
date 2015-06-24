@@ -164,7 +164,7 @@ OPTIONS
     Must be an integer between 0 and 50000. Default: 50.
 
     --mincov [integer] : Clusters of small RNAs must have at least this many
-    alignments. Must be an integer between 1 and 50000. Default: 50.
+    alignments. Must be an integer between 1 and 50000. Default: 5.
 
 SYSTEM RECOMMENDATIONS
     ShortStack was developed on Apple Mac OSX devices running 10.9 or 10.10.
@@ -211,7 +211,7 @@ ALIGNMENT METHODS
     assemblies. BUT, if the genome is stitched, the coordinates for stitched
     references are changed (there is a guide produced), and the bowtie
     indices will need to be built, which can be time-consuming. Genome
-    stitching can be disabled with the option --no_stitch.
+    stitching can be disabled with the option --nostitch.
 
     Genome indexing
     If not detected, an index of the genome will be created using samtools
