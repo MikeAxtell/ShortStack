@@ -4,12 +4,13 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0a4";
+my $version_num = "3.0a5";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
 ###### Get ye options ###############
 my %options = get_ShortStack_options($version_num);
+
 
 ##########  Version or Help  Requested ? #########
 # version ... just print version to STDOUT
@@ -22,6 +23,11 @@ if(exists($options{'version'})) {
 if(exists($options{'help'})) {
     help_message($version_num); 
     exit;
+}
+
+# If there are any extraneous arguments, quit and complain
+if($ARGV[0]) {
+    die "\nUnknown arguments: @ARGV\n$usage_message";
 }
 
 ######## Input file_path validations ########
@@ -89,6 +95,7 @@ if(@readfiles) {
 my $RNAfold_which;
 unless($options{'nohp'}) {
     $RNAfold_which = install_check('RNAfold',$usage_message);
+    $options{'RNAfold_version'} = check_RNAfold_version();
 }
 ###### Initiate log file ########
 initiate_log(\%options, \$version_num);
@@ -208,7 +215,8 @@ Alignment Options:
 
 --readfile [string] : path to readfile(s) to be aligned. valid formats: .fasta, .fa, .fasta.gz,
   .fa.gz, .fastq, .fq, .fastq.gz, .fq.gz, .csfasta, .csfasta.gz. Multiple files, separated by
-  commas, can be specified. Mutually exclusive with --bamfile or --cramfile.
+  commas, can be specified. No spaces allowed in comma-delimited lists. 
+  Mutually exclusive with --bamfile or --cramfile.
 
 --adapter [string] : sequence of 3' adapter to trim off during read-pre processing. Must be at least 
   8 bases, with only ATCG characters. If not specified, reads are assumed to be already trimmed.
@@ -225,7 +233,8 @@ Alignment Options:
   highly fragmented reference genomes.
 
 --cquals [string] : path(s) to color-space quality value file(s). Used only in conjunction with .csfasta 
-  or .csfasta.gz formatted files in --readfile. Compressed format for cquals is NOT allowed. 
+  or .csfasta.gz formatted files in --readfile. Compressed format for cquals is NOT allowed. Like --readfile, 
+  --cquals can take a comma-delimited list of multiple files. No spaces allowed in comma-delimited lists.
 
 --cram : When aligning, convert final alignment to cram format instead of the default bam format.
 
@@ -3277,7 +3286,7 @@ sub MIRNA {
     # END TEST
     
     # fold the query
-    my $brax = get_brax($fold_seq);
+    my $brax = get_brax(\$fold_seq, $options);
     unless($brax) {
 	# TEST
 	#print "failed get_brax\n\n";
@@ -3643,8 +3652,12 @@ sub check_illegal_CIGAR {
 }
 
 sub get_brax {
-    my($seq) = @_;
-    open(RNAF, "echo $seq | RNAfold --noPS |");
+    my($seq, $options) = @_;  ## references to scalar, hash
+    if($$options{'RNAfold_version'} == 1) {
+	open(RNAF, "echo $$seq | RNAfold -noPS |");
+    } else {
+	open(RNAF, "echo $$seq | RNAfold --noPS |");
+    }
     my @rnaf = <RNAF>;
     close RNAF;
     if($rnaf[1]) {
@@ -4069,6 +4082,17 @@ sub summarize {
     my $date = `date`;
     chomp $date;
     log_it($$options{'logfile'}, "$date");
+}
+
+sub check_RNAfold_version {
+    open(V, "RNAfold --version 2> /dev/null |");
+    my $line = <V>;
+    close V;
+    if($line) {
+	return '2';
+    } else {
+	return '1';
+    }
 }
 
 __END__

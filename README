@@ -581,8 +581,9 @@ ANALYSIS METHODS
 
 OUTPUT FILES
     All output files are in the directory created by ShortStack, whose name
-    is specified by option --outdir The exception is the .fai file (genome
-    index file) created if it is not present .. this is put in the same
+    is specified by option --outdir The exceptions are the .fai file (genome
+    index file) created if it is not present and the six ebwt bowtie index
+    files that are created if not present ... these are all put in the same
     location as the input genome file.
 
   Log file
