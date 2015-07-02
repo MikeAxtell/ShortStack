@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0a6";
+my $version_num = "3.0b1";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -41,9 +41,8 @@ if(exists($options{'cramfile'})) {
     validate_cramfile1(\%options,\$usage_message);
 }
 
-my @readfiles = ();
 if(exists($options{'readfile'})) {
-    @readfiles = validate_readfile1(\%options,\$usage_message);
+    validate_readfile1(\%options,\$usage_message);
 }
 
 if(exists($options{'locifile'})) {
@@ -55,15 +54,14 @@ if(exists($options{'locifile'})) {
     }
 }
 
-my @cqualfiles = ();
 if(exists($options{'cquals'})) {
-    @cqualfiles = validate_cquals(\%options,\$usage_message,\@readfiles);
+    validate_cquals(\%options,\$usage_message);
 }
 
 ######### check for invalid combinations of input file_paths
-if((@readfiles) and
+if((${$options{'readfile'}}[0]) and
    ((exists($options{'bamfile'})) or (exists($options{'cramfile'})))) {
-    die "Invalid option combination: readfiles is mutually exclusive with bamfile and/or cramfile\n\n$usage_message\n";
+    die "Invalid option combination: readfile is mutually exclusive with bamfile and/or cramfile\n\n$usage_message\n";
 }
 
 if((exists($options{'bamfile'})) and (exists($options{'cramfile'}))) {
@@ -72,7 +70,7 @@ if((exists($options{'bamfile'})) and (exists($options{'cramfile'}))) {
 
 ######### Validate the other options #####
 validate_outdir(\%options,\$usage_message);
-my @adapters = validate_adapter(\%options,\$usage_message,\@readfiles);
+my @adapters = validate_adapter(\%options,\$usage_message);
 validate_bowtie_cores(\%options,\$usage_message);
 validate_mismatches(\%options,\$usage_message);
 validate_dicerminmax(\%options,\$usage_message);
@@ -88,7 +86,7 @@ my $samtools_which = install_check('samtools',$usage_message);
 my $samtools_version = samtools_version1_check($usage_message);
 my $bowtie_which;
 my $gzip_which;
-if(@readfiles) {
+if(exists($options{'readfile'})) {
     $bowtie_which = install_check('bowtie', $usage_message);
     $gzip_which = install_check('gzip',$usage_message);
 }
@@ -106,7 +104,7 @@ initiate_log(\%options, \$version_num);
 my $fai_file = fai(\%options);
 
 # genome stitching, if warranted
-if(@readfiles) {
+if(exists($options{'readfile'})) {
     unless((exists($options{'nostitch'})) or (exists($options{'nohp'}))) {
 	my $need2 = need_to_stitch(\%options);
 	if($need2) {
@@ -118,21 +116,21 @@ if(@readfiles) {
 $options{'fai_file'} = $fai_file;
 
 # check and build .ebwt indices, if warranted
-if(@readfiles) {
-    ebwt(\%options,\@readfiles);
+if(exists($options{'readfile'})) {
+    ebwt(\%options);
 }
 
 # trim 3' adapters, if warranted
 my @t_readfiles = ();
-if((@adapters) and (@readfiles)) {
-    @t_readfiles = trim_master(\%options,\@adapters,\@readfiles,\@cqualfiles);
-} elsif (@readfiles) {
-    @t_readfiles = @readfiles;
+if((@adapters) and (exists($options{'readfile'}))) {
+    @t_readfiles = trim_master(\%options,\@adapters);
+} elsif (exists($options{'readfile'})) {
+    @t_readfiles = @{$options{'readfile'}};
 }
 
 # align, if warranted
 if(@t_readfiles) {
-    align_master(\%options,\@t_readfiles,\@cqualfiles,\$version_num,\$command_line);
+    align_master(\%options,\@t_readfiles,\$version_num,\$command_line);
     # After this, options{'bamfile'} or options{'cramfile'} will be set. 
 }
 
@@ -214,8 +212,8 @@ General Options:
 Alignment Options:
 
 --readfile [string] : path to readfile(s) to be aligned. valid formats: .fasta, .fa, .fasta.gz,
-  .fa.gz, .fastq, .fq, .fastq.gz, .fq.gz, .csfasta, .csfasta.gz. Multiple files, separated by
-  commas, can be specified. No spaces allowed in comma-delimited lists. 
+  .fa.gz, .fastq, .fq, .fastq.gz, .fq.gz, .csfasta, .csfasta.gz. Multiple files, can be specified as 
+  separate arguments to --readfile ... e.g. --readfile file1.fastq file2.fastq file3.fastq
   Mutually exclusive with --bamfile or --cramfile.
 
 --adapter [string] : sequence of 3' adapter to trim off during read-pre processing. Must be at least 
@@ -234,7 +232,7 @@ Alignment Options:
 
 --cquals [string] : path(s) to color-space quality value file(s). Used only in conjunction with .csfasta 
   or .csfasta.gz formatted files in --readfile. Compressed format for cquals is NOT allowed. Like --readfile, 
-  --cquals can take a comma-delimited list of multiple files. No spaces allowed in comma-delimited lists.
+  cquals can take multiple arguments for multiple files, e.g. --cquals file1.qual file2.qual file3.qual
 
 --cram : When aligning, convert final alignment to cram format instead of the default bam format.
 
@@ -294,7 +292,7 @@ sub get_ShortStack_options {
     GetOptions(\%options,
 	       'help',
 	       'version',
-	       'readfile=s',
+	       'readfile=s@{,}',
 	       'bamfile=s',
 	       'cramfile=s',
 	       'genomefile=s',
@@ -310,7 +308,7 @@ sub get_ShortStack_options {
 	       'nostitch',
 	       'pad=i',
 	       'mincov=i',
-	       'cquals=s',
+	       'cquals=s@{,}',
 	       'cram',
 	       'mmap=s',
 	       'bowtie_m=s',
@@ -425,8 +423,14 @@ sub initiate_log {
     }
 
     my @opt_keys = sort ( keys %$options);
+    my $report;
     foreach my $opt_name (@opt_keys) {
-	my $report = "$opt_name" . ":" . " $$options{$opt_name}";
+	if(($opt_name eq 'readfile') or
+	   ($opt_name eq 'cquals')) {
+	    $report = "$opt_name" . ":" . " @{$$options{$opt_name}}";
+	} else {
+	    $report = "$opt_name" . ":" . " $$options{$opt_name}";
+	}
 	log_it($logfile, "$report");
     }
     log_it($logfile, "\nRun Progress and Messages:");
@@ -513,7 +517,6 @@ sub validate_cramfile1 {
 sub validate_readfile1 {
     ## Validate the readability and file suffix(es) of the input readfile(s).
     ## Input is a reference to %options and a reference to the usage message
-    ## Output is an array of the vaildated filepath(s)
     ## method fileparse is from File::Basename
     ## It is assumed that $$options{'readfile'} exists
     ## valid file suffixes are .fa, .fasta, .fastq, .fq, .csfasta,
@@ -521,13 +524,12 @@ sub validate_readfile1 {
     
     my($options,$usage) = @_;
     
-    my @files = split (',',$$options{'readfile'});
+    my @files = @{$$options{'readfile'}};
     
     foreach my $file (@files) {
 	# must be readable
-	unless(-r $file) {
-	    die "\nreadfile $file was not readable\n\n$$usage\n";
-	}
+	(open(FILE, "$file")) || die "\nreadfile $file was not readable\n\n$$usage\n";
+	close FILE;
 	# suffix check
 	my($file,$path,$suffix) = fileparse($file, qr/\.\S+$/);
 	unless(($suffix eq '.fasta') or
@@ -543,11 +545,10 @@ sub validate_readfile1 {
 	    die "\nreadfile $file does not end in a valid file suffix  suffix was $suffix file was $file path was $path \n\n$$usage\n";
 	}
     }
-    return @files;
 }
 
 sub validate_adapter {
-    my($options,$usage,$readfiles) = @_; ## passed by reference as a hash and string and array
+    my($options,$usage) = @_; ## passed by reference as a hash and string 
     my @adapters = ();
     if($$options{'adapter'}) {
 	# Adapter is pointless unless readfile is specified
@@ -563,7 +564,7 @@ sub validate_adapter {
 	}
 	# If more than one adapter was provided, the number of adapters must match the number of readfiles
 	if((scalar @adapters) > 1) {
-	    unless((scalar @adapters) == (scalar @$readfiles)) {
+	    unless((scalar @adapters) == (scalar @{$$options{'readfile'}})) {
 		die "\nThe number of adapters provided must be either one, or match the number of read files\n\n$$usage\n";
 	    }
 	}
@@ -1017,13 +1018,13 @@ sub stitch_genome {
 }
 
 sub ebwt {
-    # Input is a reference to the options hash, and a reference to the readfiles array
+    # Input is a reference to the options hash
     # This sub-routine checks if the .ebwt indices for the genomefile exist,
     # and if not, tries to create them with bowtie-build
-    my($options,$readfiles) = @_;
+    my($options) = @_;
     
     # do we need regular indices, colorspace indices, or both? check readfiles.
-    my($basespace,$colorspace) = readfile_space_check($readfiles);
+    my($basespace,$colorspace) = readfile_space_check($options);
     unless(($basespace) or ($colorspace)) {
 	log_it($$options{'logfile'}, "\nFATAL in sub-routine ebwt .. file types of readfiles unknown");
 	exit;
@@ -1077,12 +1078,12 @@ sub ebwt {
 }
 
 sub readfile_space_check {
-    # Input is a reference to the array of readfiles
+    # Input is a reference to the options hash
     # Checks whether readfiles are in base space, color-space, or if there is a mixture of both
-    my($readfiles) = @_;
+    my($options) = @_;
     my $basespace;
     my $colorspace;
-    foreach my $file_entry (@$readfiles) {
+    foreach my $file_entry (@{$$options{'readfile'}}) {
 	my ($file,$path,$suffix) = fileparse($file_entry, qr/\.\S+$/);
 	if($suffix =~ /csfasta/) {
 	    ++$colorspace;
@@ -1094,21 +1095,21 @@ sub readfile_space_check {
 }
 
 sub trim_master {
-    # Input: references to options hash, adapters array, readfiles array, and cqualfiles array
+    # Input: references to options hash, adapters array
     # Output: Array containing the filepaths to the trimmed files
-    my($options,$adapters,$readfiles,$cqualfiles) = @_;
+    my($options,$adapters) = @_;
     my @trimmed_files = ();
     my $trimmed;
     my $cqualfile;
     my $i = 0;
-    foreach my $readfile (@$readfiles) {
+    foreach my $readfile (@{$$options{'readfile'}}) {
 	my($readfilebase,$readfilepath,$readfilesuffix) = fileparse($readfile, qr/\.\S+$/);
 	
 	# use reg-ex's for these checks, since the whole suffix could end in .gz or not
 	
 	if($readfilesuffix =~ /.csfasta/) {
-	    if(@$cqualfiles) {
-		$cqualfile = $$cqualfiles[$i];
+	    if(exists($$options{'cquals'})) {
+		$cqualfile = ${$$options{'cquals'}}[$i];
 		++$i;
 		$trimmed = trim_csfasta_and_qual(\$readfile,$adapters,$options,\$cqualfile);
 		push(@trimmed_files, $trimmed);
@@ -1505,17 +1506,17 @@ sub base2color {
 }
 
 sub validate_cquals {
-    # Input is three references .. to options hash, usage message scalar, and array of validated readfiles
-    # If validation is successful, returns array of Cqual file paths
-    my($options,$usage,$readfiles) = @_;
+    # Input is two references .. to options hash, usage message scalar
+
+    my($options,$usage) = @_;
     
     # If user provides cquals, readfile must also be used
-    unless($$options{'readfile'}) {
+    unless(exists($$options{'readfile'})) {
 	die "\nIf option --cquals is used, option --readfile must also be used\n$$usage\n";
     }
     
     # If user provided cquals, ALL of the read files must be .csfasta or .csfasta.gz
-    foreach my $readfile (@$readfiles) {
+    foreach my $readfile (@{$$options{'readfile'}}) {
 	my($rname,$rpath,$rsuffix) = fileparse($readfile, qr/\.\S+$/);
 	unless(($rsuffix eq ".csfasta") or
 	       ($rsuffix eq ".csfasta.gz")) {
@@ -1524,30 +1525,26 @@ sub validate_cquals {
     }
     
     # Check if each qual file is readable and has suffix .qual (NO .gz allowed!)
-    my @qualfiles = split (",", $$options{'cquals'});
-    foreach my $qf (@qualfiles) {
+    foreach my $qf (@{$$options{'cquals'}}) {
 	my($qname,$qpath,$qsuffix) = fileparse($qf, qr/\.\S+$/);
-	unless(-r $qf) {
-	    die "\nColor-space quality file $qf from option --cquals was not readable\n$$usage\n";
-	}
+	(open(FILE, "$qf")) || die "\nColor-space quality file $qf from option --cquals was not readable\n$$usage\n";
+	close FILE;
 	unless($qsuffix eq ".qual") {
 	    die "\nColor-space quality file $qf did not end with required suffix, .qual\n\n$$usage\n";
 	}
     }
     
     # readfiles and cquals must be the same number when cquals is set
-    unless((scalar @$readfiles) == (scalar @qualfiles)) {
+    unless((scalar @{$$options{'readfile'}}) == (scalar @{$$options{'cquals'}})) {
 	die "\nWhen option --cquals is used, the number of readfiles from --readfile must be the same as the number of quality files from --cquals\n$$usage\n";
     }
-    
-    return @qualfiles;
 }
 
 sub align_master {
     # Master controlling sub-routine for alignments
-    # Input: references to options hash, trimmed readfiles, and cqualfiles, and version number and command line
+    # Input: references to options hash, trimmed readfiles, version number and command line
     # End result .. $$options{'bamfile'} or $$options{'cramfile'} is set, and the file itself is also indexed
-    my($options,$t_readfiles,$cqualfiles,$version_num,$command_line) = @_;
+    my($options,$t_readfiles,$version_num,$command_line) = @_;
     
     my @read_sorted = ();  # These are the initial read-sorted BAM files before the selection of primary alignments and merging
     
@@ -1563,18 +1560,19 @@ sub align_master {
 
         # Check about cqualfiles ... 
         #   if the array is not empty, then, if options{'adapter'} exists, ShortStack trimmed them .. if not, they were already trimmed by user
-	if(@$cqualfiles) {
+	if(exists($$options{'cquals'})) {
 	    if($$options{'adapter'}) {
 		# parse the filepath of the readfile ... the ShortStack-trimmed cqual file will the same, just with suffix .qual
 		$cqualfile = $path . $base . '.qual';
 	    } else {
-		$cqualfile = $$cqualfiles[$i];
+		$cqualfile = ${$$options{'cquals'}}[$i];
 	    }
 	    # Verify qualfile
-	    unless(-r $cqualfile) {
+	    unless(open(FILE, "$cqualfile")) {
 		log_it($$options{'logfile'}, "\nFATAL in sub-routine align_master: Failed to find expected color-space quality file $cqualfile\n");
 		exit;
 	    }
+	    close FILE;
 	    ++$i;
 	    # double-check that the trimmmed reads are .csfasta format (or .csfasta.gz).
 	    unless($suffix =~ /\.csfasta/) {
@@ -1837,6 +1835,7 @@ sub get_read_s_aln {
 	    }
 	}
     }
+    close OUT;
     
     # Squawk to user
     log_it($$options{'logfile'}, "\tCompleted. Results are in temporary file $outfile pending final processing");
@@ -1916,16 +1915,19 @@ sub decider {
 	my @sam_fields = ();
 	my $new_out;
 	my @XZs = ();
+	
+
 	while (<IN>) {
 	    chomp;
 	    # headers pass through
 	    if($_ =~ /^\@/) {
 		print OUT $_, "\n"; 
-	    } elsif ($needPG) {
-		print OUT "\@PG\tID:ShortStack\tVN:$$version_num\tCL:\"";
-		print OUT "$$command_line\"\n";
-		$needPG = 0;
-	    } else {
+	    } else { 
+		if ($needPG) {
+		    print OUT "\@PG\tID:ShortStack\tVN:$$version_num\tCL:\"";
+		    print OUT "$$command_line\"\n";
+		    $needPG = 0;
+		}
 		if($_ =~ /^(\S+)\t/) {
 		    $this_read = $1;
 		    if(($this_read ne $last_read) and ($last_read ne 'NULL')) {
@@ -1983,6 +1985,7 @@ sub decider {
 	    }
 	}
 	
+	close IN;
 	# Process the final read bucket
 	# process read_bucket begins here
 	if((scalar @read_bucket) == 1) {
@@ -2029,7 +2032,6 @@ sub decider {
 	@read_bucket = ();
 	# process read bucket ends here
 	
-	close IN;
 	close OUT;
 	push(@bam_files, $bam_file);
 	# uncomment the line below after testing!
@@ -2683,13 +2685,13 @@ sub analyze_locus {
     
     # Phasing
     if($observed_main == 0) {
-	print $res_fh "\tN1\tNA";
+	print $res_fh "\tNP1\tNA";
     } elsif ($dicer_call =~ /[^\d]/) {
-	print $res_fh "\tN2\tNA";
+	print $res_fh "\tNP2\tNA";
     } elsif ($$loc_size < (3 * $dicer_call)) {
-	print $res_fh "\tN3\tNA";
+	print $res_fh "\tNP3\tNA";
     } elsif ($strand_call =~ /[\-\+]/) {
-	print $res_fh "\tN4\tNA";
+	print $res_fh "\tNP4\tNA";
     } else {
 	my($phase_size,$phase_score) = phaser($all,$options,$coords);
 	print $res_fh "\t$phase_size\t$phase_score";
@@ -2765,7 +2767,7 @@ sub phaser {
 	my $rounded = sprintf("%.1f", $best_score);
 	return($best_size,$rounded);
     } else {
-	return('N5','NA');
+	return('NP5','NA');
     }
 }
 	
@@ -3434,6 +3436,10 @@ sub check_mir_star {
     } else {
 	$offset = $fold_stop - $mk[1] - (length $mk[2]) + 1;
     }
+    unless (($offset + (length $mk[2])) < (length $brax)) {
+	return 'N10';
+    }
+    
     my $mir_brax = substr($brax,$offset,(length $mk[2]));
     
     my $n_mir_up = 0;
@@ -4122,7 +4128,7 @@ Alignment of small RNA-seq data and annotation of small RNA-producing genes
 
 =head1 CITATIONS
 
-If you use ShortStack in you work, please cite:
+If you use ShortStack in your work, please cite:
 
 Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  RNA 19:740-751. doi:10.1261/rna.035279.112
 
@@ -4181,8 +4187,9 @@ Usage: ShortStack [options] {--readfile <r> | {--bamfile <b> | --cramfile <c>}} 
 =head2 Alignment Options:
 
 --readfile [string] : path to readfile(s) to be aligned. valid formats: .fasta, .fa, .fasta.gz,
-  .fa.gz, .fastq, .fq, .fastq.gz, .fq.gz, .csfasta, .csfasta.gz. Multiple files, separated by
-  commas, can be specified. Mutually exclusive with --bamfile or --cramfile.
+  .fa.gz, .fastq, .fq, .fastq.gz, .fq.gz, .csfasta, .csfasta.gz. Multiple files, can be specified as 
+  separate arguments to --readfile ... e.g. --readfile file1.fastq file2.fastq file3.fastq
+  Mutually exclusive with --bamfile or --cramfile.
 
 --adapter [string] : sequence of 3' adapter to trim off during read-pre processing. Must be at least 
   8 bases, with only ATCG characters. If not specified, reads are assumed to be already trimmed.
@@ -4199,7 +4206,8 @@ Usage: ShortStack [options] {--readfile <r> | {--bamfile <b> | --cramfile <c>}} 
   highly fragmented reference genomes.
 
 --cquals [string] : path(s) to color-space quality value file(s). Used only in conjunction with .csfasta 
-  or .csfasta.gz formatted files in --readfile. Compressed format for cquals is NOT allowed. 
+  or .csfasta.gz formatted files in --readfile. Compressed format for cquals is NOT allowed. Like --readfile, 
+  cquals can take multiple arguments for multiple files, e.g. --cquals file1.qual file2.qual file3.qual
 
 --cram : When aligning, convert final alignment to cram format instead of the default bam format.
 
@@ -4556,7 +4564,7 @@ N15: Maybe. Passed all tests EXCEPT that the miRNA-star was not sequenced. INSUF
 
 Y: Yes. Passed all tests INCLUDING sequencing of the exact miRNA-star. Can support a de novo annotation of a new miRNA family.
 
-For loci where MIRNA analysis returns a Y (yes) result, a plain-text summary of the locus and it's 
+For loci where MIRNA analysis returns a Y (yes) result, a plain-text summary of the locus and its 
 secondary structure is found in the MIRNAs directory.
 
 Users should be aware that sometimes ShortStack will annotate known miRNA-stars as miRNAs, if the 
@@ -4585,15 +4593,15 @@ more phasing signature.
 Not all loci are subject to phasing analysis. Like for MIRNA analysis, there are defined codes that are 
 returned for different outcomes:
 
-N1: no reads at all aligned in locus
+NP1: no reads at all aligned in locus
 
-N2: DicerCall was N or NA (< 80% of reads in the Dicer size range defined by --dicermin and --dicermax).
+NP2: DicerCall was N or NA (< 80% of reads in the Dicer size range defined by --dicermin and --dicermax).
 
-N3: Locus size was < (3 * DicerCall)... to short to evaluate phasing
+NP3: Locus size was < (3 * DicerCall)... to short to evaluate phasing
 
-N4: Locus is stranded (>= 80% of reads on top strand OR <= 20% of reads on top strand).
+NP4: Locus is stranded (>= 80% of reads on top strand OR <= 20% of reads on top strand).
 
-N5: General failure to calculate a phasing score (if occurs, possible bug?).
+NP5: General failure to calculate a phasing score.
 
 =head1 OUTPUT FILES
 
@@ -4609,8 +4617,8 @@ messages printed to STDERR during the run.
 
 =head2 Stitched genome files
 
-If the input genome was 'stitched' (see above), the stitiched genome file will be 
-put in the ShortStack outdir, along with it's fai index, and the six bowtie indices 
+If the input genome was 'stitched' (see above), the stitched genome file will be 
+put in the ShortStack outdir, along with its fai index, and the six bowtie indices 
 (which end with .ebwt). Additionally, a guide file will be written that describes the
 relationships between the input genome and the stitched genome. This guide file is 
 tab-delimited plain text. The columns are:
@@ -4676,7 +4684,7 @@ above). Each read-group is broken out seperately, and the sum of all read groups
 
 This directory contains plain-text descriptions of each locus that was judged 'M' or 'Y' in MIRNA analysis. The files 
 show the sequence of the locus, the predicted RNA secondary structure in dot-bracket notation, and the locations of
-the miRNA and miRNA-star. If the miRNA-star was not sequenced, it's sequence is shown as 'X's instead of the real
+the miRNA and miRNA-star. If the miRNA-star was not sequenced, its sequence is shown as 'X's instead of the real
 sequence.
 
 Below this top line, all other small RNAs aligned to the locus are shown. Those aligned to the opposite strand have
@@ -4709,5 +4717,9 @@ Answer: Two reasons. 1) unlike bowtie2, bowtie has support for colorspace data, 
 
 =head2 Why does ShortStack say that known MIRNA loci are NOT MIRNAs?
 
-Answer: MIRNA annotation by ShortStack is, by desgin, meant to strongly reduce, perhaps eliminate, false positives. Any locus given a MIRNA result of 'Y' by ShortStack has sufficiently strong evidence to support it's annotation of a miRNA. However, reduction of false positives comes at a price .. there will be some false negatives .. true MIRNAs that are not reported as such by ShortStack. Users should consider a 'No' MIRNA result by ShortStack to mean that the evidence in that particular small RNA-seq run did not offer 100% proof that the locus was a MIRNA.
+Answer: MIRNA annotation by ShortStack is, by design, meant to strongly reduce, perhaps eliminate, false positives. Any locus given a MIRNA result of 'Y' by ShortStack has sufficiently strong evidence to support its annotation of a miRNA. However, reduction of false positives comes at a price .. there will be some false negatives .. true MIRNAs that are not reported as such by ShortStack. Users should consider a 'No' MIRNA result by ShortStack to mean that the evidence in that particular small RNA-seq run did not offer 100% proof that the locus was a MIRNA.
+
+=head2 For phasing analysis, why does the PhaseSize often conflict with the DicerCall?
+
+Answer: ShortStack's PhaseSize is the phasing register that gave the best phasing score. It is independent of the DicerCall. There will even be cases where there are no actual small RNAs of the PhaseSize at the locus. In most cases, such cases are likely to be low phasing scores anyway. But there are known cases with 21nt phasing but yet a single dominant 22nt siRNA in the locus that would cause the PhaseSize and the DicerCall to differ.
 

@@ -21,7 +21,7 @@ SYNOPSIS
     genes
 
 CITATIONS
-    If you use ShortStack in you work, please cite:
+    If you use ShortStack in your work, please cite:
 
     Axtell MJ. (2013) ShortStack: Comprehensive annotation and
     quantification of small RNA genes. RNA 19:740-751.
@@ -89,8 +89,9 @@ OPTIONS
   Alignment Options:
     --readfile [string] : path to readfile(s) to be aligned. valid formats:
     .fasta, .fa, .fasta.gz, .fa.gz, .fastq, .fq, .fastq.gz, .fq.gz,
-    .csfasta, .csfasta.gz. Multiple files, separated by commas, can be
-    specified. Mutually exclusive with --bamfile or --cramfile.
+    .csfasta, .csfasta.gz. Multiple files, can be specified as separate
+    arguments to --readfile ... e.g. --readfile file1.fastq file2.fastq
+    file3.fastq Mutually exclusive with --bamfile or --cramfile.
 
     --adapter [string] : sequence of 3' adapter to trim off during read-pre
     processing. Must be at least 8 bases, with only ATCG characters. If not
@@ -112,7 +113,9 @@ OPTIONS
 
     --cquals [string] : path(s) to color-space quality value file(s). Used
     only in conjunction with .csfasta or .csfasta.gz formatted files in
-    --readfile. Compressed format for cquals is NOT allowed.
+    --readfile. Compressed format for cquals is NOT allowed. Like
+    --readfile, cquals can take multiple arguments for multiple files, e.g.
+    --cquals file1.qual file2.qual file3.qual
 
     --cram : When aligning, convert final alignment to cram format instead
     of the default bam format.
@@ -531,7 +534,7 @@ ANALYSIS METHODS
     Can support a de novo annotation of a new miRNA family.
 
     For loci where MIRNA analysis returns a Y (yes) result, a plain-text
-    summary of the locus and it's secondary structure is found in the MIRNAs
+    summary of the locus and its secondary structure is found in the MIRNAs
     directory.
 
     Users should be aware that sometimes ShortStack will annotate known
@@ -566,18 +569,17 @@ ANALYSIS METHODS
     Not all loci are subject to phasing analysis. Like for MIRNA analysis,
     there are defined codes that are returned for different outcomes:
 
-    N1: no reads at all aligned in locus
+    NP1: no reads at all aligned in locus
 
-    N2: DicerCall was N or NA (< 80% of reads in the Dicer size range
+    NP2: DicerCall was N or NA (< 80% of reads in the Dicer size range
     defined by --dicermin and --dicermax).
 
-    N3: Locus size was < (3 * DicerCall)... to short to evaluate phasing
+    NP3: Locus size was < (3 * DicerCall)... to short to evaluate phasing
 
-    N4: Locus is stranded (>= 80% of reads on top strand OR <= 20% of reads
+    NP4: Locus is stranded (>= 80% of reads on top strand OR <= 20% of reads
     on top strand).
 
-    N5: General failure to calculate a phasing score (if occurs, possible
-    bug?).
+    NP5: General failure to calculate a phasing score.
 
 OUTPUT FILES
     All output files are in the directory created by ShortStack, whose name
@@ -591,10 +593,10 @@ OUTPUT FILES
     same as the messages printed to STDERR during the run.
 
   Stitched genome files
-    If the input genome was 'stitched' (see above), the stitiched genome
-    file will be put in the ShortStack outdir, along with it's fai index,
-    and the six bowtie indices (which end with .ebwt). Additionally, a guide
-    file will be written that describes the relationships between the input
+    If the input genome was 'stitched' (see above), the stitched genome file
+    will be put in the ShortStack outdir, along with its fai index, and the
+    six bowtie indices (which end with .ebwt). Additionally, a guide file
+    will be written that describes the relationships between the input
     genome and the stitched genome. This guide file is tab-delimited plain
     text. The columns are:
 
@@ -678,7 +680,7 @@ OUTPUT FILES
     judged 'M' or 'Y' in MIRNA analysis. The files show the sequence of the
     locus, the predicted RNA secondary structure in dot-bracket notation,
     and the locations of the miRNA and miRNA-star. If the miRNA-star was not
-    sequenced, it's sequence is shown as 'X's instead of the real sequence.
+    sequenced, its sequence is shown as 'X's instead of the real sequence.
 
     Below this top line, all other small RNAs aligned to the locus are
     shown. Those aligned to the opposite strand have '<' as delimiters
@@ -714,12 +716,21 @@ FAQ
     optimized for shorter reads.
 
   Why does ShortStack say that known MIRNA loci are NOT MIRNAs?
-    Answer: MIRNA annotation by ShortStack is, by desgin, meant to strongly
+    Answer: MIRNA annotation by ShortStack is, by design, meant to strongly
     reduce, perhaps eliminate, false positives. Any locus given a MIRNA
     result of 'Y' by ShortStack has sufficiently strong evidence to support
-    it's annotation of a miRNA. However, reduction of false positives comes
+    its annotation of a miRNA. However, reduction of false positives comes
     at a price .. there will be some false negatives .. true MIRNAs that are
     not reported as such by ShortStack. Users should consider a 'No' MIRNA
     result by ShortStack to mean that the evidence in that particular small
     RNA-seq run did not offer 100% proof that the locus was a MIRNA.
+
+  For phasing analysis, why does the PhaseSize often conflict with the DicerCall?
+    Answer: ShortStack's PhaseSize is the phasing register that gave the
+    best phasing score. It is independent of the DicerCall. There will even
+    be cases where there are no actual small RNAs of the PhaseSize at the
+    locus. In most cases, such cases are likely to be low phasing scores
+    anyway. But there are known cases with 21nt phasing but yet a single
+    dominant 22nt siRNA in the locus that would cause the PhaseSize and the
+    DicerCall to differ.
 
