@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0b1";
+my $version_num = "3.0b2";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -2597,7 +2597,8 @@ sub analyze_locus {
     print $cou_fh "\t$observed_main\t$mean\t$sd";
     
     # Now get observed, mean, and stdevs from the read groups separately
-    while(($rg) = each %$read_groups) {
+    my @rg_sorted = sort {$$read_groups{$a} <=> $$read_groups{$b}} keys %$read_groups;
+    foreach $rg (@rg_sorted) {
 	unless($rg eq 'main') {
 	    $observed = get_obs_from_all($all, \$rg);
 	    ($mean,$sd) = get_mean_sd_from_resamples($resamples,\$rg);
@@ -2934,26 +2935,25 @@ sub get_read_groups {
     } elsif (exists($$options{'cramfile'})) {
 	open(HEAD, "samtools view -H $$options{'cramfile'} |");
     }
+    my $i = 1;
     while (<HEAD>) {
 	chomp;
 	if($_ =~ /^\@RG.*ID:(\S+)/) {
-	    $RG{$1} = 1;
+	    ++$i;
+	    $RG{$1} = $i;
 	}
     }
     close HEAD;
-    return %RG;
+    return %RG;  ## main has value of 1, others start at 2 and ascend (in order given by the header)
 }
 
 sub initialize_rg_count_file {
     my($read_groups, $fh) = @_; # references to hash and a file-handle
     print $fh "Locus\tName";
     my $i;
-    print $fh "\tmain_obs\tmain_mean\tmain_stdev";
-    my @sorted = sort (keys %$read_groups);
+    my @sorted = sort {$$read_groups{$a} <=> $$read_groups{$b}} keys %$read_groups;
     foreach my $rg (@sorted) {
-	unless($rg eq 'main') {
-	    print $fh "\t$rg", "_obs", "\t$rg", "_mean", "\t$rg", "_stdev";
-	}
+	print $fh "\t$rg", "_obs", "\t$rg", "_mean", "\t$rg", "_stdev";
     }
     print $fh "\n";
 }
