@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0b2";
+my $version_num = "3.0";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -106,9 +106,9 @@ my $fai_file = fai(\%options);
 # genome stitching, if warranted
 if(exists($options{'readfile'})) {
     unless((exists($options{'nostitch'})) or (exists($options{'nohp'}))) {
-	my $need2 = need_to_stitch(\%options);
+	my $need2 = need_to_stitch(\%options);  ## $need2 is the size of N's to be added when stitching
 	if($need2) {
-	    $fai_file = stitch_genome(\%options);
+	    $fai_file = stitch_genome(\%options,\$need2);
 	}
     }
 }
@@ -226,9 +226,9 @@ Alignment Options:
   to be tolerated in a valid alignment. Must be either 0, 1, or 2. In cases of multiple hits, only hits
   with lowest number of mismatches kept. Default: 1.
 
---nostitch : Disable 'stitching' of fragmented genomes. By default, ShortStack stitches chromosomes
-  shorter than 5E6 nts into larger assemblies. This drastically improves performance when working with
-  highly fragmented reference genomes.
+--nostitch : Disable 'stitching' of fragmented genomes. By default, when there are more than 50 chromosomes 
+  and the N50 length is < 1Mb, ShortStack stitches chromosomes shorter than 5E6 nts into larger assemblies. 
+  This drastically improves performance when working with highly fragmented reference genomes.
 
 --cquals [string] : path(s) to color-space quality value file(s). Used only in conjunction with .csfasta 
   or .csfasta.gz formatted files in --readfile. Compressed format for cquals is NOT allowed. Like --readfile, 
@@ -244,8 +244,8 @@ Alignment Options:
   to disable suppression of highly multi-mapped reads. Default: 50
 
 --ranmax [string] : Reads with more than this number of possible alignment positions where the 
-    choice can't be guided by unequal  will be reported as unmapped. Irrelevant if option mmap is set
-    to n or r. Must be integer of 2 or greater or set to 'none' to disable. Default: 3.
+  choice can't be guided by unequal  will be reported as unmapped. Irrelevant if option mmap is set
+  to n or r. Must be integer of 2 or greater or set to 'none' to disable. Default: 3.
 
 Analysis Options:
 
@@ -272,10 +272,10 @@ Analysis Options:
 --nohp : Disable MIRNA search.
 
 --pad [integer] : Initially found clusters of small RNAs will be merged if the distance between them is
-  less than or equal to the value of pad. Must be an integer between 0 and 50000. Default: 50.
+  less than or equal to the value of pad. Must be an integer between 0 and 50000. Default: 75.
 
 --mincov [integer] : Clusters of small RNAs must have at least this many alignments. Must be an
-integer between 1 and 50000. Default: 5.
+  integer between 1 and 50000. Default: 5.
 
 Type perldoc ShortStack for documentation, or see README
 
@@ -693,9 +693,9 @@ sub validate_dicerminmax {
 
 sub validate_pad {
     my ($options,$usage) = @_; ## references to a hash and a scalar
-    # if not provided by user, set pad to default value of 50
+    # if not provided by user, set pad to default value of 75
     unless($$options{'pad'}) {
-	$$options{'pad'} = 50;
+	$$options{'pad'} = 75;
     }
     # verify that pad is an integer
     unless($$options{'pad'} =~ /^\d+$/) {
@@ -773,6 +773,9 @@ sub fai {
     if(-r $expected_fai) {
 	return $expected_fai;
     } else {
+	my $time = `date`;
+	chomp $time;
+	log_it($$options{'logfile'}, "\n$time");
 	log_it($$options{'logfile'}, "Expected fai file $expected_fai not found. Attempting to create using samtools faidx ...");
 	system "samtools faidx $$options{'genomefile'}";
 	if(-r $expected_fai) {
@@ -788,8 +791,9 @@ sub fai {
 sub need_to_stitch {
     # Input is a reference to the options hash
     # Checks the genome's fai file, and determines whether stitching is warranted
-    # Stitching warranted if there is > 1 reference of length < 5E6 nts AND there are more than 50 references
-    # Once it finds two entries of length < 5E6, and more than 50 entries, returns a 1. If not, returns a 0
+    # This is based on the N50 length of the reference genome
+    # Stitching happens if there are > 50 chromosomes AND the n50 length is < 1Mb
+    
     my($options) = @_;
     
     my $fai = "$$options{'genomefile'}" . ".fai";
@@ -801,27 +805,56 @@ sub need_to_stitch {
     }
     
     my $n = 0; ## count of references
-    my $n_small = 0;
+    my $total_len = 0; ## total length of genome
+    
+    my %fai_sizes = (); ## key: name, value: length
+    
     open(FAI, "$fai");
     while (<FAI>) {
 	my @fai_fields = split ("\t", $_);
 	++$n;
-	if($fai_fields[1] < 5E6) {
-	    ++$n_small;
-	}
+	$total_len += $fai_fields[1];
+	$fai_sizes{$fai_fields[0]} = $fai_fields[1];
     }
     close FAI;
-    if(($n > 50) and ($n_small)) {
-	return 1;
+    
+    if($n <= 50) {
+	return 0; ## never stitch if there are 50 or fewer chromosomes
+    } else {
+    
+	# sort in descending order
+	my @sorted = sort {$fai_sizes{$b} <=> $fai_sizes{$a}} keys %fai_sizes;
+	
+	my $so_far = 0;
+	my $n50_length;
+
+	foreach my $key (@sorted) {
+	    $so_far += $fai_sizes{$key};
+	    if($so_far >= (0.5 * $total_len)) {
+		$n50_length = $fai_sizes{$key};
+		last;
+	    }
+	}
+	if($n50_length < 1E6) {
+	    # determine stitch-gap size to be used.
+	    my $st_size = $$options{'pad'} + 25;
+	    return $st_size;
+	} else {
+	    return 0;
+	}
     }
 }
 
+
 sub stitch_genome {
     ## Input is a reference to the options hash.
-    my($options) = @_;
+    my($options,$gap_size) = @_;  ## references to hash, scalar
     
     # report
-    log_it($$options{'logfile'}, "Genome has more than 50 segments and one or more of them are less then 5MB. Stitching short references to improve performance during MIRNA search...");
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
+    log_it($$options{'logfile'}, "Genome has more than 50 segments and the N50 length is < 1Mb. Stitching short references to improve performance ...");
     log_it($$options{'logfile'}, "\tNOTE: This will require building a new bowtie index for the stitched genome, which can be time-consuming. To avoid genome stitching, abort");
     log_it($$options{'logfile'}, "\tthis run, and start a new one with option --nostitch");
     
@@ -842,10 +875,10 @@ sub stitch_genome {
     my $start;
     my $stop;
     
-    # get the 120 N's to be added all over the place
-    my $N_120;
-    for(my $k = 1; $k <= 120; ++$k) {
-	$N_120 .= "N";
+    # get the strings of N's to be added all over the place
+    my $Ns;
+    for(my $k = 1; $k <= $$gap_size; ++$k) {
+	$Ns .= "N";
     }
     
     # TEST
@@ -888,7 +921,7 @@ sub stitch_genome {
 		    } else {
 			## Add to the current stitch seq, update SGG, and
 			## then check to see if it exceeds 5E6
-			$stitch_seq .= "$N_120";
+			$stitch_seq .= "$Ns";
 			$start = (length $stitch_seq) + 1;
 			$stitch_seq .= $current_seq;
 			$stop = length $stitch_seq;
@@ -973,7 +1006,7 @@ sub stitch_genome {
 	} else {
 	    ## Add to the current stitch seq, update SGG, and
 	    #### Output the stitch seq cause it's the last one
-	    $stitch_seq .= "$N_120";
+	    $stitch_seq .= "$Ns";
 	    $start = (length $stitch_seq) + 1;
 	    $stitch_seq .= $current_seq;
 	    $stop = length $stitch_seq;
@@ -1044,6 +1077,9 @@ sub ebwt {
 	my $rev2 = $gen_path . $gen_file . ".rev.2.ebwt";
 	
 	unless((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) {
+	    my $time = `date`;
+	    chomp $time;
+	    log_it($$options{'logfile'}, "\n$time");
 	    log_it ($$options{'logfile'}, "Expected bowtie indices not found. Attempting to make them with bowtie-build...");
 	    my $base = $gen_path . $gen_file;
 	    system "bowtie-build $$options{'genomefile'} $base > /dev/null";
@@ -1065,6 +1101,9 @@ sub ebwt {
 	my $rev2 = $gen_path . $gen_file . ".cs.rev.2.ebwt";
 	
 	unless((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) {
+	    my $time = `date`;
+	    chomp $time;
+	    log_it($$options{'logfile'}, "\n$time");
 	    log_it ($$options{'logfile'}, "Expected color-space bowtie indices not found. Attempting to make them with bowtie-build...");
 	    my $base = $gen_path . $gen_file . ".cs";
 	    system "bowtie-build -C $$options{'genomefile'} $base > /dev/null";
@@ -1163,6 +1202,9 @@ sub trim_fasta {
     }
     
     # Talk to user
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Adapter trimming input reads file $$reads with adapter $adapter");
     
     # Some variables
@@ -1244,6 +1286,9 @@ sub trim_fastq {
     }
 
     # Talk to user
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Adapter trimming input reads file $$reads with adapter $adapter");
     
     # Some variables
@@ -1332,6 +1377,9 @@ sub trim_csfasta {
     }
     
     # Talk to user
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Adapter trimming input reads file $$reads with adapter $adapter");
     
     # Translate the adapter to colorspace
@@ -1415,6 +1463,9 @@ sub trim_csfasta_and_qual {
     }
     
     # Talk to user
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Adapter trimming input reads file $$reads and qual file $$quals with adapter $adapter");
     
     # Translate the adapter to colorspace
@@ -1674,6 +1725,9 @@ sub get_read_s_aln {
     }
     
     # Talk to user
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Starting alignment of $$reads with bowtie command:\n\t$bowtie_cl");
     
     # Open file handles
@@ -1880,6 +1934,9 @@ sub validate_mmap {
 
 sub decider {
     my($options, $read_sorted_files, $density, $version_num, $command_line) = @_; ## passed by reference .. hash, array, hash, scalar, scalar
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Processing and sorting alignments");
     # Initialize counters of XY calls
     my %XYs = ();
@@ -2230,6 +2287,9 @@ sub merge_bams {
     foreach $bam (@$bams) {
 	$merge_command .= " $bam";
     }
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Merging files using the following samtools merge command:");
     log_it($$options{'logfile'}, "\t$merge_command");
     system "$merge_command 2> /dev/null";
@@ -2253,6 +2313,9 @@ sub bam2cram {
     my $cramfile = $$bam;
     $cramfile =~ s/\.bam$/\.cram/;
     my $bam2cram_command = "samtools view -C -T $$options{'genomefile'} $$bam > $cramfile";
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Converting alignment to cram format using samtools view command:");
     log_it($$options{'logfile'}, "\t$bam2cram_command");
     system "$bam2cram_command";   ## after testing, consider diercting STDERR to dev/null
@@ -2273,6 +2336,9 @@ sub ensure_aln_idx {
     if(exists($$options{'bamfile'})) {
 	$expected_idx = "$$options{'bamfile'}" . ".bai";
 	unless (-r $expected_idx) {
+	    my $time = `date`;
+	    chomp $time;
+	    log_it($$options{'logfile'}, "\n$time");
 	    log_it($$options{'logfile'}, "Required bamfile index $expected_idx not found. Attempting to create with samtools index.");
 	    system "samtools index $$options{'bamfile'}";
 	    unless (-r $expected_idx) {
@@ -2283,6 +2349,9 @@ sub ensure_aln_idx {
     } elsif (exists($$options{'cramfile'})) {
 	$expected_idx = "$$options{'cramfile'}" . ".crai";
 	unless (-r $expected_idx) {
+	    my $time = `date`;
+	    chomp $time;
+	    log_it($$options{'logfile'}, "\n$time");
 	    log_it($$options{'logfile'}, "Required cramfile index $expected_idx not found. Attempting to create with samtools index.");
 	    system "samtools index $$options{'cramfile'}";
 	    unless (-r $expected_idx) {
@@ -2296,6 +2365,9 @@ sub ensure_aln_idx {
 sub denovo {
     my($options) = @_; ## reference to options hash
     # Master controller for de novo cluster ID and parsing
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Performing de-novo cluster identification and analyses.");
     
     # Task 1: Output f
@@ -2351,7 +2423,7 @@ sub denovo {
     
     ### my @primaries = ();
     
-    my %all = (); ## primary reads ... {readgroup}{Chr:left:SEQ:strand:MDZ}
+    my %all = (); ## primary reads ... {readgroup}{Chr\tleft\tSEQ\tstrand\tMDZ}
     my $all_tally = 0; ## total number of primaries across all read groups
     my $unq = 0; ## simple count of uniquely aligned primary reads across all read groups
     my %resamples = ();  ## simple counts of re-sampled tallies by readgroup. {readgroup}{n} => tally
@@ -2444,9 +2516,9 @@ sub denovo {
 		$open = 1;
 		$last_right = $right;
 		if($fields[1] & 16) {
-		    $all_key = "$fields[2]" . ":" . "$fields[3]" . ":" . "$fields[9]" . ":" . "\-" . ":" . "$mdz";
+		    $all_key = "$fields[2]" . "\t" . "$fields[3]" . "\t" . "$fields[9]" . "\t" . "\-" . "\t" . "$mdz";
 		} else {
-		    $all_key = "$fields[2]" . ":" . "$fields[3]" . ":" . "$fields[9]" . ":" . "\+" . ":" . "$mdz";
+		    $all_key = "$fields[2]" . "\t" . "$fields[3]" . "\t" . "$fields[9]" . "\t" . "\+" . "\t" . "$mdz";
 		}
 		++$all{$rg}{$all_key};
 		unless($rg eq 'main') {
@@ -2498,9 +2570,9 @@ sub denovo {
 		}
 		unless($fields[1] & 256) {
 		    if($fields[1] & 16) {
-			$all_key = "$fields[2]" . ":" . "$fields[3]" . ":" . "$fields[9]" . ":" . "\-" . ":" . "$mdz";
+			$all_key = "$fields[2]" . "\t" . "$fields[3]" . "\t" . "$fields[9]" . "\t" . "\-" . "\t" . "$mdz";
 		    } else {
-			$all_key = "$fields[2]" . ":" . "$fields[3]" . ":" . "$fields[9]" . ":" . "\+" . ":" . "$mdz";
+			$all_key = "$fields[2]" . "\t" . "$fields[3]" . "\t" . "$fields[9]" . "\t" . "\+" . "\t" . "$mdz";
 		    }
 		    ++$all{$rg}{$all_key};
 		    unless($rg eq 'main') {
@@ -2521,9 +2593,9 @@ sub denovo {
 		    $open = 1;
 		    $last_right = $right;
 		    if($fields[1] & 16) {
-			$all_key = "$fields[2]" . ":" . "$fields[3]" . ":" . "$fields[9]" . ":" . "\-" . ":" . "$mdz";
+			$all_key = "$fields[2]" . "\t" . "$fields[3]" . "\t" . "$fields[9]" . "\t" . "\-" . "\t" . "$mdz";
 		    } else {
-			$all_key = "$fields[2]" . ":" . "$fields[3]" . ":" . "$fields[9]" . ":" . "\+" . ":" . "$mdz";
+			$all_key = "$fields[2]" . "\t" . "$fields[3]" . "\t" . "$fields[9]" . "\t" . "\+" . "\t" . "$mdz";
 		    }
 		    ++$all{$rg}{$all_key};
 		    unless($rg eq 'main') {
@@ -2630,7 +2702,7 @@ sub analyze_locus {
     my $dicer_n = 0;
     if(exists($$all{'main'})) {
 	foreach my $mk (keys %{$$all{'main'}}) {
-	    my @kf = split (":", $mk);
+	    my @kf = split ("\t", $mk);
 	    $len = length($kf[2]);
 	    if($len < $$options{'dicermin'}) {
 		$by_length{'short'} += $$all{'main'}{$mk};
@@ -2735,7 +2807,7 @@ sub phaser {
 	%distinct = ();
 	$sum = 0;
 	foreach $k (keys %{$$all{'main'}}) {
-	    @kf = split (":", $k);
+	    @kf = split ("\t", $k);
 	    if($kf[3] eq '+') {
 		$fivep_corrected = $kf[1];
 	    } else {
@@ -2787,7 +2859,7 @@ sub get_big_seq {
 	    ++$n_seqs;
 	    if($$all{'main'}{$key} > $max_n) {
 		$max_n = $$all{'main'}{$key};
-		my @kf = split (":", $key);
+		my @kf = split ("\t", $key);
 		if($kf[3] eq '-') {
 		    $max_seq = reverse (uc $kf[2]);
 		    $max_seq =~ tr/ATUCG/UAAGC/;
@@ -2817,7 +2889,7 @@ sub get_strand {
     my $frac = 'NA';
     foreach my $key (@keys) {
 	$sum += $$all{'main'}{$key};
-	if($key =~ /:\+:/) {
+	if($key =~ /\t\+\t/) {
 	    $top += $$all{'main'}{$key};
 	}
     }
@@ -2886,7 +2958,7 @@ sub get_coords {
     my $left;
     my $right;
     foreach $key (@keys) {
-	my @kf = split (":", $key);
+	my @kf = split ("\t", $key);
 	$left = $kf[1];
 	$right = (length $kf[2]) + $left - 1;
 	if($min) {
@@ -3025,6 +3097,9 @@ sub resample {
 
 sub countmode {
     my($options) = @_;
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Performing analysis of user indicated locus or loci.");
     
     # Task 1: Output f
@@ -3113,7 +3188,7 @@ sub countmode {
 	    
 	    ## Analysis
 	    ## Initialize data structures
-	    my %all = (); ## primary reads ... {readgroup}{Chr:left:SEQ:strand:mdz} => frequency. main is always defined.
+	    my %all = (); ## primary reads ... {readgroup}{Chr\tleft\tSEQ\tstrand\tmdz} => frequency. main is always defined.
 	    my $all_tally = 0; ## total number of primaries across all read groups
 	    my $unq = 0; ## simple count of uniquely aligned primary reads across all read groups
 	    my %resamples = ();  ## simple counts of re-sampled tallies by readgroup. {readgroup}{n} => tally
@@ -3189,9 +3264,9 @@ sub countmode {
 		}
 		unless($fields[1] & 256) {
 		    if($fields[1] & 16) {
-			$all_key = "$fields[2]" . ":" . "$fields[3]" . ":" . "$fields[9]" . ":" . "\-" . ":" . "$mdz";
+			$all_key = "$fields[2]" . "\t" . "$fields[3]" . "\t" . "$fields[9]" . "\t" . "\-" . "\t" . "$mdz";
 		    } else {
-			$all_key = "$fields[2]" . ":" . "$fields[3]" . ":" . "$fields[9]" . ":" . "\+" . ":" . "$mdz";
+			$all_key = "$fields[2]" . "\t" . "$fields[3]" . "\t" . "$fields[9]" . "\t" . "\+" . "\t" . "$mdz";
 		    }
 		    ++$all{$rg}{$all_key};
 		    unless($rg eq 'main') {
@@ -3315,7 +3390,7 @@ sub MIRNA {
     
     # mature miRNA pairing .. all 'one way', 4 or fewer unpaired bases
     # no more than one bulge containing no more than 2 bulged nts.
-    my $star_key = check_mir_star($brax,$mirkey,$faidx_region);  ## returns 0 if fail, or key in form Chr:left:x:strand:length
+    my $star_key = check_mir_star($brax,$mirkey,$faidx_region);  ## returns 0 if fail, or key in form Chr\tleft\tx\tstrand\tlength
     if ($star_key =~ /^N\d+$/) {
 	# TEST
 	#print "failed check_mir_star\n\n";
@@ -3337,7 +3412,7 @@ sub MIRNA {
     # Along the way, count the miRNA 3p variants and star-3p variants
     my $star_count = 0;
     my $real_star_key;
-    my @sk = split (":", $star_key);
+    my @sk = split ("\t", $star_key);
     my @as = ();
     my $mir_3pv = 0;
     my $star_3pv = 0;
@@ -3349,7 +3424,7 @@ sub MIRNA {
     
     foreach my $ak (keys %{$$all{'main'}}) {
 	# has to match chr, left, strand, and have the SEQ be same length as in mdz of star_key
-	@as = split (":", $ak);
+	@as = split ("\t", $ak);
 	if(($sk[0] eq $as[0]) and
 	   ($sk[1] == $as[1]) and
 	   ($sk[3] eq $as[3]) and
@@ -3417,7 +3492,7 @@ sub MIRNA {
 sub check_mir_star {
     my($brax,$mirkey,$fold_locus) = @_;
     # parse strand
-    my @mk = split (":", $mirkey);
+    my @mk = split ("\t", $mirkey);
     my $strand = $mk[3];
     # find corresponding brax
     my $offset;
@@ -3492,6 +3567,9 @@ sub check_mir_star {
 	if(($n_bulges > 2) or ($bulged_nts > 3)) {
 	    return 'N13';
 	} else {
+	    unless($last_left) {
+		return 'N10';
+	    }
 	    # Calculate the star 5p position, relative to brax
 	    $star_brax_start = $left_right{$last_left} - (($mir_brax_end - 2) - $last_left); 
 	    # above, the right-hand term is 0 if the last position analyzed of the mature miRNA was paired.
@@ -3531,6 +3609,9 @@ sub check_mir_star {
 	if(($n_bulges > 2) or ($bulged_nts > 3)) {
 	    return 'N13';
 	} else {
+	    unless($last_right) {
+		return 'N10';
+	    }
 	    # Calculate the star 5p position, relative to brax
 	    $star_brax_start = $right_left{$last_right} - (($mir_brax_end - 2) - $last_right);
 	    # above, the right-hand term is 0 if the last position of the mature miRNA was paired.
@@ -3546,14 +3627,14 @@ sub check_mir_star {
 	    return 'N10';
 	} else {
 	    # encode
-	    my $star_key = "$mk[0]" . ":";
+	    my $star_key = "$mk[0]" . "\t";
 	    my $star_left;
 	    if($strand eq '+') {
 		$star_left = $star_brax_start + $fold_start - 1;
 	    } else {
 		$star_left = $fold_stop - $star_brax_end + 1;
 	    }
-	    $star_key .= "$star_left" . ":" . "x" . ":" . "$strand" . ":";
+	    $star_key .= "$star_left" . "\t" . "x" . "\t" . "$strand" . "\t";
 	    my $mdz = $star_brax_end - $star_brax_start + 1;  ## just the length
 	    $star_key .= "$mdz";
 	    return $star_key;
@@ -3612,7 +3693,7 @@ sub get_mir_key {
         $sum += $$all{'main'}{$key};
     }
     if($max_key) {
-	my @mk = split (":", $max_key);
+	my @mk = split ("\t", $max_key);
 	if($mk[3] eq $$folded_strand) {
 	    return ($max_key, $sum);
 	} else {
@@ -3682,19 +3763,17 @@ sub plain_text {
     
     # trim the displayed region, if possible.
     # 20nts flanking all expressed reads, and the computed miR*
-    my ($trim_region,$trim_seq,$trim_brax) = get_trim_region($all,$star_key,$strand,$fold_region,$fold_seq,$brax);
-    
-    
+    my ($trim_region,$trim_seq,$trim_brax) = get_trim_region($mirkey,$star_key,$strand,$fold_region,$fold_seq,$brax);
     
     # open file
     my $pt_file = "$$options{'outdir'}" . "\/MIRNAs\/$$loc_name" . "_$$call" . "\.txt";
     open(PT, ">$pt_file");
     print PT "$$loc_name Original Location: $$loc_region Displayed Location: $trim_region Strand: $$strand\n";
-    if($$call eq 'M') {
-	print PT "WARNING: miRNA-star NOT observed. These data alone do NOT support a de-novo annotation of this locus as a MIRNA.\n\n";
-    } else {
-	print PT "\n";
-    }
+    #if($$call eq 'M') {
+	#print PT "WARNING: miRNA-star NOT observed. These data alone do NOT support a de-novo annotation of this locus as a MIRNA.\n\n";
+    #} else {
+    print PT "\n";
+    #}
     print PT "$trim_seq\n";
     print PT "$trim_brax\n";
     
@@ -3719,7 +3798,7 @@ sub plain_text {
     
 
     ## Begin with the mature miRNA and the star
-    @kf = split (":", $$mirkey);
+    @kf = split ("\t", $$mirkey);
     for($i = $fold_start; $i < $kf[1]; ++$i) {
 	$line .= '.';
     }
@@ -3741,9 +3820,9 @@ sub plain_text {
     $line = '';
     
     if($$real_star_key) {
-	@kf = split (":", $$real_star_key);
+	@kf = split ("\t", $$real_star_key);
     } else {
-	@kf = split (":", $$star_key);
+	@kf = split ("\t", $$star_key);
     }
     for($i = $fold_start; $i < $kf[1]; ++$i) {
 	$line .= '.';
@@ -3778,7 +3857,7 @@ sub plain_text {
     }
     print PT "$line";
     print PT "\n";
-    ## Now, all other reads that are not the miRNA or the star.
+    ## Now, all other reads that are not the miRNA or the star. PROVIDED that they are fully within the displayed interval.
 
     foreach my $k (keys %{$$all{'main'}}) {
 	if($k eq $$mirkey) {
@@ -3790,7 +3869,13 @@ sub plain_text {
 	    }
 	}
 	$line = '';
-	@kf = split (":", $k);
+	@kf = split ("\t", $k);
+	
+	# kf[1] must be >= fold_start and kf[1] + length kf[2] - 1 must be <= fold_stop
+	if(($kf[1] < $fold_start) or
+	   (($kf[1] + (length $kf[2])) > $fold_stop)) {
+	    next;
+	}
 	for($i = $fold_start; $i < $kf[1]; ++$i) {
 	    if($$strand ne $kf[3]) {
 		$line .= '<';
@@ -3869,8 +3954,8 @@ sub lc_from_mdz {
 }
 
 sub get_trim_region {
-    my($all,$star_key,$strand,$fold_region,$fold_seq,$brax) = @_; 
-    # references to hash and the rest are scalars
+    my($mirkey,$star_key,$strand,$fold_region,$fold_seq,$brax) = @_; 
+    # references to scalars
     my $fold_chr;
     my $fold_start;
     my $fold_stop;
@@ -3884,27 +3969,9 @@ sub get_trim_region {
     my $smallest;
     my $largest;
     my @kf = ();
-    foreach my $k (keys %{$$all{'main'}}) {
-	@kf = split (":", $k);
-	if($smallest) {
-	    if($kf[1] < $smallest) {
-		$smallest = $kf[1];
-	    }
-	} else {
-	    $smallest = $kf[1];
-	}
-	my $end = (length $kf[2]) + $kf[1] - 1;
-	if($largest) {
-	    if($end > $largest) {
-		$largest = $end;
-	    }
-	} else {
-	    $largest = $end;
-	}
-    }
     
-    # the computed star key also gets considered here.
-    @kf = split (":", $$star_key);
+    # mirkey
+    @kf = split ("\t", $$mirkey);
     if($smallest) {
 	if($kf[1] < $smallest) {
 	    $smallest = $kf[1];
@@ -3913,6 +3980,24 @@ sub get_trim_region {
 	$smallest = $kf[1];
     }
     my $end = $kf[-1] + $kf[1] - 1;
+    if($largest) {
+	if($end > $largest) {
+	    $largest = $end;
+	}
+    } else {
+	$largest = $end;
+    }
+
+    # the computed star key also gets considered here.
+    @kf = split ("\t", $$star_key);
+    if($smallest) {
+	if($kf[1] < $smallest) {
+	    $smallest = $kf[1];
+	}
+    } else {
+	$smallest = $kf[1];
+    }
+    $end = $kf[-1] + $kf[1] - 1;
     if($largest) {
 	if($end > $largest) {
 	    $largest = $end;
@@ -3974,7 +4059,7 @@ sub get_trim_region {
 
 sub get_fivep {
     my($key) = @_;
-    my @fields = split (":", $key);
+    my @fields = split ("\t", $key);
     if($fields[3] eq '+') {
 	return $fields[1];
     } else {
@@ -4074,7 +4159,10 @@ sub summarize {
     
     
     # report to user
-    log_it($$options{'logfile'}, "\nSummary of results:");
+    my $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "\n$time");
+    log_it($$options{'logfile'}, "Tally of loci by predominant RNA size (DicerCall):\n");
     
     my $report;
     $report .= "DicerCall\tNotMIRNA\tMIRNA\n";
@@ -4084,10 +4172,7 @@ sub summarize {
     
     }
     log_it($$options{'logfile'}, "$report");
-    log_it($$options{'logfile'}, "Completed at ");
-    my $date = `date`;
-    chomp $date;
-    log_it($$options{'logfile'}, "$date");
+
 }
 
 sub check_RNAfold_version {
@@ -4171,6 +4256,10 @@ Usage: ShortStack [options] {--readfile <r> | {--bamfile <b> | --cramfile <c>}} 
 
 <g> : FASTA formatted (.fa or .fasta) genome file.
 
+=head1 TEST
+
+Test data and brief instructions are available at http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
+
 =head1 OPTIONS
 
 =head2 General Options:
@@ -4201,7 +4290,7 @@ Usage: ShortStack [options] {--readfile <r> | {--bamfile <b> | --cramfile <c>}} 
   to be tolerated in a valid alignment. Must be either 0, 1, or 2. In cases of multiple hits, only hits
   with lowest number of mismatches kept. Default: 1.
 
---nostitch : Disable 'stitching' of fragmented genomes. By default, ShortStack stitches chromosomes
+--nostitch : Disable 'stitching' of fragmented genomes. By default, when there are more than 50 chromosomes and the N50 length is < 1Mb, ShortStack stitches chromosomes
   shorter than 5E6 nts into larger assemblies. This drastically improves performance when working with
   highly fragmented reference genomes.
 
@@ -4247,7 +4336,7 @@ Usage: ShortStack [options] {--readfile <r> | {--bamfile <b> | --cramfile <c>}} 
 --nohp : Disable MIRNA search.
 
 --pad [integer] : Initially found clusters of small RNAs will be merged if the distance between them is
-  less than or equal to the value of pad. Must be an integer between 0 and 50000. Default: 50.
+  less than or equal to the value of pad. Must be an integer between 0 and 50000. Default: 75.
 
 --mincov [integer] : Clusters of small RNAs must have at least this many alignments. Must be an
 integer between 1 and 50000. Default: 5.
@@ -4287,9 +4376,11 @@ All runs require a reference genome in FASTA format, specified with the --genome
 have a valid suffix .. either .fa or .fasta. Remove any other . characters from the file name of the reference
 genome before using ShortStack.
 
+Within the genome, if the name of a chromosome has whitespace characters, the name will be trimmed at the first whitespace character.
+
 =head3 Genome stitching
 
-If the reference genome has > 50 chromosomes/scaffolds/contigs, and at least one is < 5MB in size, and MIRNAs are
+If the reference genome has > 50 chromosomes/scaffolds/contigs, and the genome N50 length is < 1Mb, and MIRNAs are
 to be analyzed (e.g., --nohp was NOT specified), then ShortStack will 'stitch' the small chromosomes together to make
 fewer but larger chromosomes. This can drastically improve performance during MIRNA searching for highly fragmented
 genome assemblies. BUT, if the genome is stitched, the coordinates for stitched references are changed (there is a
@@ -4448,7 +4539,7 @@ when estimating the abundance uncertainty due to multi-mapping reads (see below)
 Unless options --locus or --locifile are used (see below), ShortStack will de-novo identify
 clusters of small RNA accumulation genome-wide. Cluster definition is simple: 
 First, all regions containing at least one primary alignment are found where the maximum
-distance between the ends of the alignments is <= option --pad (default: 50). Second,
+distance between the ends of the alignments is <= option --pad (default: 75). Second,
 if the number of alignments in the cluster is >= option --mincov (default: 5), the cluster
 is kept.
 
@@ -4723,3 +4814,18 @@ Answer: MIRNA annotation by ShortStack is, by design, meant to strongly reduce, 
 
 Answer: ShortStack's PhaseSize is the phasing register that gave the best phasing score. It is independent of the DicerCall. There will even be cases where there are no actual small RNAs of the PhaseSize at the locus. In most cases, such cases are likely to be low phasing scores anyway. But there are known cases with 21nt phasing but yet a single dominant 22nt siRNA in the locus that would cause the PhaseSize and the DicerCall to differ.
 
+=head2 I ran the same analysis, with the same reads, and the same settings a second time, and received slightly different results. Is this a bug?
+
+Answer: No. This is caused by the treatment of multi-mapped reads. Because the decisions on which of the possible alignment positions are probabilistic, some small number of the reads will be differ in their selected primary positions when alignments are repeated. This is normal, and typically the differences are minor.
+
+=head2 I get different numbers of MIRNAs with ShortStack 3 relative to earlier versions. Why?
+
+Answer: The MIRNA detection methods have changed significantly. You may find ShortStack 3 to be more strict (find fewer MIRNAs) relative to earlier versions. This is because false positives are really minimized with ShortStack 3, potentially at the expense of some false negatives.
+
+=head2 What happened to the flagfile option from earlier versions of ShortStack?
+
+Answer: It is gone. This was a rather crude way to assess overlaps between ShortStack-discovered clusters and loci of a user's interest. Use bedtools instead (using the gff3 output from ShortStack).
+
+=head2 Are the read counts reported by ShortStack normalized in any way?
+
+Answer: No. This is because there are many slight variants for normalization in use. It's better to leave this to the user to decide on. The counts are all raw numbers of reads from the loci in question.
