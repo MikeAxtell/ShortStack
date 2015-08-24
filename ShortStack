@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0";
+my $version_num = "3.0.1ur";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -3979,7 +3979,13 @@ sub get_trim_region {
     } else {
 	$smallest = $kf[1];
     }
-    my $end = $kf[-1] + $kf[1] - 1;
+    my $mir_length;
+    if($kf[-1] =~ /^\d+$/) {
+	$mir_length = $kf[-1];
+    } else {
+	$mir_length = get_len_from_mdz($kf[-1]);
+    }
+    my $end = $mir_length + $kf[1] - 1;
     if($largest) {
 	if($end > $largest) {
 	    $largest = $end;
@@ -3997,7 +4003,13 @@ sub get_trim_region {
     } else {
 	$smallest = $kf[1];
     }
-    $end = $kf[-1] + $kf[1] - 1;
+    my $star_len;
+    if($kf[-1] =~ /^\d+$/) {
+	$star_len = $kf[-1];
+    } else {
+	$star_len = get_len_from_mdz($kf[-1]);
+    }
+    $end = $star_len + $kf[1] - 1;
     if($largest) {
 	if($end > $largest) {
 	    $largest = $end;
@@ -4056,6 +4068,19 @@ sub get_trim_region {
 	return($trim_region,$o3_seq,$o3_brax);
     }
 }
+
+sub get_len_from_mdz {
+    my($mdz) = @_;
+    my $len = 0;
+    my $i;
+    while($mdz =~ /([0-9]+)([A-Z]+)/g) {
+	for($i = 1; $i <= $1; ++$i) {
+	    ++$len;
+	}
+    }
+    return $len;
+}
+
 
 sub get_fivep {
     my($key) = @_;
