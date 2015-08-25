@@ -140,6 +140,9 @@ OPTIONS
     reported as unmapped. Irrelevant if option mmap is set to n or r. Must
     be integer of 2 or greater or set to 'none' to disable. Default: 3.
 
+    --align_only : If this switch is present, the ShortStack run will
+    terminate after the alignment phase with no analysis performed.
+
   Analysis Options:
     --bamfile [string] : path to input .bam alignment file of small RNAs.
     Only lines with bits 4 and 256 unset will be used. Mutually exclusive

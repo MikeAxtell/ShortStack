@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0.1ur";
+my $version_num = "3.0.2ur";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -66,6 +66,11 @@ if((${$options{'readfile'}}[0]) and
 
 if((exists($options{'bamfile'})) and (exists($options{'cramfile'}))) {
     die "Invalid option combination: bamfile is mutually exclusive with cramfile\n\n$usage_message\n";
+}
+
+if(((exists($options{'bamfile'})) or (exists($options{'cramfile'}))) and
+   (exists($options{'align_only'}))) {
+    die "Invalid option combination: align_only can't be specified if a bamfile or cramfile is provided\n\n$usage_message\n";
 }
 
 ######### Validate the other options #####
@@ -132,6 +137,13 @@ if((@adapters) and (exists($options{'readfile'}))) {
 if(@t_readfiles) {
     align_master(\%options,\@t_readfiles,\$version_num,\$command_line);
     # After this, options{'bamfile'} or options{'cramfile'} will be set. 
+    # Abort if align_only was specified
+    if((exists($options{'align_only'}))) {
+	log_it($options{'logfile'}, "\nRun was set to align_only - terminating");
+	my $ao_time = `date`;
+	log_it($options{'logfile'}, "Completed at $ao_time");
+	exit;
+    }
 }
 
 # analyze
@@ -247,6 +259,9 @@ Alignment Options:
   choice can't be guided by unequal  will be reported as unmapped. Irrelevant if option mmap is set
   to n or r. Must be integer of 2 or greater or set to 'none' to disable. Default: 3.
 
+--align_only : If this switch is present, the ShortStack run will terminate after the alignment phase
+  with no analysis performed.
+
 Analysis Options:
 
 --bamfile [string] : path to input .bam alignment file of small RNAs. Only lines with bits 4 and 256
@@ -312,7 +327,8 @@ sub get_ShortStack_options {
 	       'cram',
 	       'mmap=s',
 	       'bowtie_m=s',
-	       'ranmax=s'
+	       'ranmax=s',
+	       'align_only'
 	);
     
     # If no options were passed, just print help and walk away
@@ -421,7 +437,31 @@ sub initiate_log {
 	    delete $$options{'pad'};
 	}
     }
-
+    if($$options{'align_only'}) {
+	# clear all analysis options
+	if(exists($$options{'dicermin'})) {
+	    delete $$options{'dicermin'};
+	}
+	if(exists($$options{'dicermax'})) {
+	    delete $$options{'dicermax'};
+	}
+	if(exists($$options{'locifile'})) {
+	    delete $$options{'locifile'};
+	}
+	if(exists($$options{'locus'})) {
+	    delete $$options{'locus'};
+	}
+	if(exists($$options{'nohp'})) {
+	    delete $$options{'nohp'};
+	}
+	if(exists($$options{'pad'})) {
+	    delete $$options{'pad'};
+	}
+	if(exists($$options{'mincov'})) {
+	    delete $$options{'mincov'};
+	}
+    }
+    
     my @opt_keys = sort ( keys %$options);
     my $report;
     foreach my $opt_name (@opt_keys) {
@@ -4333,8 +4373,11 @@ Test data and brief instructions are available at http://axtelldata.bio.psu.edu/
   to disable suppression of highly multi-mapped reads. Default: 50
 
 --ranmax [string] : Reads with more than this number of possible alignment positions where the 
-    choice can't be guided by unequal  will be reported as unmapped. Irrelevant if option mmap is set
-    to n or r. Must be integer of 2 or greater or set to 'none' to disable. Default: 3.
+  choice can't be guided by unequal  will be reported as unmapped. Irrelevant if option mmap is set
+  to n or r. Must be integer of 2 or greater or set to 'none' to disable. Default: 3.
+
+--align_only : If this switch is present, the ShortStack run will terminate after the alignment phase
+  with no analysis performed.
 
 =head2 Analysis Options:
 
