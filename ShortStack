@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.0.2ur";
+my $version_num = "3.1";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -289,8 +289,11 @@ Analysis Options:
 --pad [integer] : Initially found clusters of small RNAs will be merged if the distance between them is
   less than or equal to the value of pad. Must be an integer between 0 and 50000. Default: 75.
 
---mincov [integer] : Clusters of small RNAs must have at least this many alignments. Must be an
-  integer between 1 and 50000. Default: 5.
+--mincov [string] : Clusters of small RNAs must have at least this many alignments. Supply an
+  integer between 1 and 50000. Can also be a normalized value in reads per million. When specifying mincov in 
+  reads per million, the mincov value must be a floating point number > 0 and < 500,000 followed
+  by the string 'rpm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
+  3.2 reads per million mapped. Deafult: 5 (raw reads).
 
 Type perldoc ShortStack for documentation, or see README
 
@@ -322,7 +325,7 @@ sub get_ShortStack_options {
 	       'nohp',
 	       'nostitch',
 	       'pad=i',
-	       'mincov=i',
+	       'mincov=s',
 	       'cquals=s@{,}',
 	       'cram',
 	       'mmap=s',
@@ -750,18 +753,33 @@ sub validate_pad {
 
 sub validate_mincov {
     my ($options,$usage) = @_; ## references to a hash and a scalar
+    my $float;
     # if not provided by user, set mincov to default value of 5
     unless($$options{'mincov'}) {
 	$$options{'mincov'} = 5;
     }
-    # verify that mincov is an integer
-    unless($$options{'mincov'} =~ /^\d+$/) {
-	die "\noption mincov is invalid. It must be an integer between 1 and 50000.\n\n$$usage\n";
+    # verify that mincov is an integer or a float followed by 'rpm'
+    unless(($$options{'mincov'} =~ /^\d+$/) or
+	   ($$options{'mincov'} =~ /^[0-9]*\.[0-9]+|[0-9]+rpm$/)) {
+	die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\'.\n\n$$usage\n";
     }
-    # verify that mincov is between 0 and 50000
-    unless(($$options{'mincov'} >= 1) and 
-	   ($$options{'mincov'} <= 50000)) {
-	die "\noption mincov is invalid. It must be an integer between 0 and 50000.\n\n$$usage\n";
+    # If integer, verify that mincov is between 0 and 50000
+    if ($$options{'mincov'} =~ /^\d+$/) {
+	unless(($$options{'mincov'} >= 1) and 
+	       ($$options{'mincov'} <= 50000)) {
+	    die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\'.\n\n$$usage\n";
+	    
+	}
+    } else {
+	# is a float followed by rpm. 
+	if($$options{'mincov'} =~ /^([0-9]*\.[0-9]+|[0-9]+)rpm$/) {
+	    $float = $1;
+	    unless(($float > 0) and ($float < 500000)) {
+		die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\'.\n\n$$usage\n";
+	    }
+	} else { 
+	    die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\'.\n\n$$usage\n";
+	}
     }
 }
 
@@ -2424,11 +2442,22 @@ sub denovo {
     
     # get the names of the read-groups in the file (if any)
     my %read_groups = get_read_groups($options);  ## 'main' is ALWAYS defined.
+    my %rg_primaries = get_rg_primaries($options,\%read_groups);
     my $rg_count_file = "$$options{'outdir'}" . "\/Counts.txt";
     open(COUNTS, ">$rg_count_file");
     # Initialize the header of this file
     # If bam/cram has no read groups, rg is called 'main' by ShortStack
     initialize_rg_count_file(\%read_groups, \*COUNTS);
+    
+    # Determine threshold for discovery, converting to raw reads if necessary
+    my $threshold;
+    if($$options{'mincov'} =~ /^\d+$/) {
+	$threshold = $&;
+    } elsif ($$options{'mincov'} =~ /^([0-9]*\.[0-9]+|[0-9]+)rpm$/) {
+	$threshold = 1 + int(($1 * $rg_primaries{'main'}) / 1E6);
+	log_it($$options{'logfile'}, "\n\tAt specified mincov of $$options{'mincov'} with $rg_primaries{'main'} mapped reads,");
+	log_it($$options{'logfile'}, "\tmincov is $threshold raw alignments");
+    }
     
     # If we are doing MIRNA finding, make a directory for those results.
     my $MIR_dir = "$$options{'outdir'}" . "\/MIRNAs";
@@ -2532,7 +2561,7 @@ sub denovo {
 		#}
 		# END TEST
 		##### Initiate analysis block
-		if($all_tally >= $$options{'mincov'}) {
+		if($all_tally >= $threshold) {
 		    ++$cluster_n;
 		    $cluster_name = "Cluster_$cluster_n";
 		    my($coords,$loc_size) = get_coords(\%all); ## based on 'main'
@@ -2680,7 +2709,7 @@ sub denovo {
     # final bucket
     if($open) {
 	##### Initiate analysis block
-	if($all_tally >= $$options{'mincov'}) {
+	if($all_tally >= $threshold) {
 	    ++$cluster_n;
 	    $cluster_name = "Cluster_$cluster_n";
 	    my($coords,$loc_size) = get_coords(\%all);
@@ -3156,6 +3185,7 @@ sub countmode {
     
     # get the names of the read-groups in the file (if any)
     my %read_groups = get_read_groups($options);  ## 'main' is ALWAYS defined.
+    my %rg_primaries = get_rg_primaries($options,\%read_groups);
     my $rg_count_file = "$$options{'outdir'}" . "\/Counts.txt";
     open(COUNTS, ">$rg_count_file");
     # Initialize the header of this file
@@ -4251,6 +4281,49 @@ sub check_RNAfold_version {
     }
 }
 
+sub get_rg_primaries {
+    my($options,$rgs) = @_;  ## references to hashes
+    my %primaries = (); ## keys: read-group names (including main), values: count of primary alignments
+    my $tally = 0;
+    log_it($$options{'logfile'}, "\nTally of primary alignments (exlcudes unmapped, secondary, duplicate,");
+    log_it($$options{'logfile'}, "failed QC, and supplementary alignments):");
+    if((scalar(keys %$rgs)) > 1) {
+	# there is at least one read-group besides main
+	my $rg;
+	my $x;
+	my @rg_sorted = sort {$$rgs{$a} <=> $$rgs{$b}} keys %$rgs;
+	for(my $i = 1; $i < (scalar @rg_sorted); ++$i) {  ## skips main, which has a value of 1 in the rgs hash
+	    if(exists($$options{'bamfile'})) {
+		open(X, "samtools view -F 3844 -c -r $rg_sorted[$i] $$options{'bamfile'} |");
+	    } elsif (exists($$options{'cramfile'})) {
+		open(X, "samtools view -F 3844 -c -r $rg_sorted[$i] $$options{'cramfile'} |");
+	    }
+	    $x = <X>;
+	    close X;
+	    chomp $x;
+	    $x =~ s/\s//g;
+	    $tally += $x;
+	    $primaries{$rg_sorted[$i]} = $x;
+	    log_it($$options{'logfile'}, "\tRead Group $rg_sorted[$i] : $x");
+	}
+    } else {
+	# no read-group but main
+	if(exists($$options{'bamfile'})) {
+	    open(X, "samtools view -F 3844 -c $$options{'bamfile'} |");
+	} elsif (exists($$options{'cramfile'})) {
+	    open(X, "samtools view -F 3844 -c $$options{'cramfile'} |");
+	}
+	$tally = <X>;
+	close X;
+	chomp $tally;
+	$tally =~ s/\s//g;
+    }
+    $primaries{'main'} = $tally;
+    log_it($$options{'logfile'}, "\tTOTAL: $tally");
+    return %primaries;
+}
+	    
+	
 __END__
 
 =head1 LICENSE
@@ -4406,8 +4479,11 @@ Test data and brief instructions are available at http://axtelldata.bio.psu.edu/
 --pad [integer] : Initially found clusters of small RNAs will be merged if the distance between them is
   less than or equal to the value of pad. Must be an integer between 0 and 50000. Default: 75.
 
---mincov [integer] : Clusters of small RNAs must have at least this many alignments. Must be an
-integer between 1 and 50000. Default: 5.
+--mincov [string] : Clusters of small RNAs must have at least this many alignments. Supply an
+  integer between 1 and 50000. Can also be a normalized value in reads per million. When specifying mincov in 
+  reads per million, the mincov value must be a floating point number > 0 and < 500,000 followed
+  by the string 'rpm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
+  3.2 reads per million mapped. Deafult: 5 (raw reads).
 
 =head1 SYSTEM RECOMMENDATIONS
 
@@ -4429,7 +4505,7 @@ The total time of analysis depends on several factors, including most prominentl
 number of reads analyzed, whether or not bowtie indices need to be created, whether or not
 MIRNAs are being analyzed, and of course your equipment.
 Excluding building bowtie indices, we generally have observed run times for alignment + analysis runs
-to take between 20 minutes and 10 hours using deafult ShortStack settings.
+to take between 20 minutes and 10 hours using default ShortStack settings.
 
 =head1 ALIGNMENT METHODS
 
@@ -4609,7 +4685,10 @@ clusters of small RNA accumulation genome-wide. Cluster definition is simple:
 First, all regions containing at least one primary alignment are found where the maximum
 distance between the ends of the alignments is <= option --pad (default: 75). Second,
 if the number of alignments in the cluster is >= option --mincov (default: 5), the cluster
-is kept.
+is kept. The mincov threshold can also be specified in terms of reads per million mapped
+by using a value such as 3.2rpm (which specifies the threshold to be 3.2 reads per million).
+Using a rpm threshold allows the sensitivity of cluster discovery to be normalized between
+libraries of different sizes.
 
 =head1 USER-SPECIFIED CLUSTERS
 

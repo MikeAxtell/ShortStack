@@ -174,8 +174,13 @@ OPTIONS
     if the distance between them is less than or equal to the value of pad.
     Must be an integer between 0 and 50000. Default: 75.
 
-    --mincov [integer] : Clusters of small RNAs must have at least this many
-    alignments. Must be an integer between 1 and 50000. Default: 5.
+    --mincov [string] : Clusters of small RNAs must have at least this many
+    alignments. Supply an integer between 1 and 50000. Can also be a
+    normalized value in reads per million. When specifying mincov in reads
+    per million, the mincov value must be a floating point number > 0 and <
+    500,000 followed by the string 'rpm'. Examples: '5' --> threshold is 5
+    raw reads. '3.2rpm' --> threshold is 3.2 reads per million mapped.
+    Deafult: 5 (raw reads).
 
 SYSTEM RECOMMENDATIONS
     ShortStack was developed on Apple Mac OSX devices running 10.9 or 10.10.
@@ -199,7 +204,7 @@ SYSTEM RECOMMENDATIONS
     indices need to be created, whether or not MIRNAs are being analyzed,
     and of course your equipment. Excluding building bowtie indices, we
     generally have observed run times for alignment + analysis runs to take
-    between 20 minutes and 10 hours using deafult ShortStack settings.
+    between 20 minutes and 10 hours using default ShortStack settings.
 
 ALIGNMENT METHODS
     If ShortStack is given the --readfile option, alignments of the reads
@@ -407,7 +412,11 @@ DE-NOVO CLUSTER FINDING
     primary alignment are found where the maximum distance between the ends
     of the alignments is <= option --pad (default: 75). Second, if the
     number of alignments in the cluster is >= option --mincov (default: 5),
-    the cluster is kept.
+    the cluster is kept. The mincov threshold can also be specified in terms
+    of reads per million mapped by using a value such as 3.2rpm (which
+    specifies the threshold to be 3.2 reads per million). Using a rpm
+    threshold allows the sensitivity of cluster discovery to be normalized
+    between libraries of different sizes.
 
 USER-SPECIFIED CLUSTERS
     Users can supply specific loci to analyze in two ways. For just one or a
