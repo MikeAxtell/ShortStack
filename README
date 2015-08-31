@@ -110,11 +110,11 @@ OPTIONS
     Must be either 0, 1, or 2. In cases of multiple hits, only hits with
     lowest number of mismatches kept. Default: 1.
 
-    --nostitch : Disable 'stitching' of fragmented genomes. By default, when
-    there are more than 50 chromosomes and the N50 length is < 1Mb,
-    ShortStack stitches chromosomes shorter than 5E6 nts into larger
-    assemblies. This drastically improves performance when working with
-    highly fragmented reference genomes.
+    --nostitch : Disable 'stitching' of fragmented genomes. By default, if
+    the genomefile has more than 50 chromosomes and two or more of them are
+    < 1Mb, ShortStack stitches chromosomes shorter than 1Mb into larger
+    (>5Mb) assemblies. This drastically improves performance when working
+    with highly fragmented reference genomes.
 
     --cquals [string] : path(s) to color-space quality value file(s). Used
     only in conjunction with .csfasta or .csfasta.gz formatted files in
@@ -267,6 +267,11 @@ ALIGNMENT METHODS
     with a different header name, in the input readfile. In other words,
     ShortStack is designed to take reads right off the sequencer without any
     other pre-processing (except perhaps adapter trimming .. see below).
+
+    Unique read names required
+    The small RNA reads must all have unique names within a given file. If
+    this requirement is not met, alignments will be completely unreliable
+    due to errors in interpreting and handling of multi-mapped reads.
 
     Adapter trimming
     ShortStack has a primitive 3'-adapter capability. Specify an adapter of

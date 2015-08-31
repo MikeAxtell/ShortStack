@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.1";
+my $version_num = "3.2";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -238,8 +238,8 @@ Alignment Options:
   to be tolerated in a valid alignment. Must be either 0, 1, or 2. In cases of multiple hits, only hits
   with lowest number of mismatches kept. Default: 1.
 
---nostitch : Disable 'stitching' of fragmented genomes. By default, when there are more than 50 chromosomes 
-  and the N50 length is < 1Mb, ShortStack stitches chromosomes shorter than 5E6 nts into larger assemblies. 
+--nostitch : Disable 'stitching' of fragmented genomes. By default, if the genomefile has more than 50 chromosomes 
+  and two or more of them are < 1Mb, ShortStack stitches chromosomes shorter than 1Mb into larger (>5Mb) assemblies. 
   This drastically improves performance when working with highly fragmented reference genomes.
 
 --cquals [string] : path(s) to color-space quality value file(s). Used only in conjunction with .csfasta 
@@ -849,8 +849,7 @@ sub fai {
 sub need_to_stitch {
     # Input is a reference to the options hash
     # Checks the genome's fai file, and determines whether stitching is warranted
-    # This is based on the N50 length of the reference genome
-    # Stitching happens if there are > 50 chromosomes AND the n50 length is < 1Mb
+    # Stitching for chunks less than 1Mb if there are > 50 chunks in the assembly
     
     my($options) = @_;
     
@@ -863,43 +862,27 @@ sub need_to_stitch {
     }
     
     my $n = 0; ## count of references
-    my $total_len = 0; ## total length of genome
     
-    my %fai_sizes = (); ## key: name, value: length
+    my $small = 0; ## tally of references that are < 1Mb in length
     
     open(FAI, "$fai");
     while (<FAI>) {
 	my @fai_fields = split ("\t", $_);
 	++$n;
-	$total_len += $fai_fields[1];
-	$fai_sizes{$fai_fields[0]} = $fai_fields[1];
+	if($fai_fields[1] < 1E6) {
+	    ++$small;
+	}
     }
     close FAI;
     
     if($n <= 50) {
 	return 0; ## never stitch if there are 50 or fewer chromosomes
+    } elsif ($small >= 2) {
+	# if there are 2 or more chromosomes of < 1Mb in size, stitch is turned on
+	my $st_size = $$options{'pad'} + 25;
+	return $st_size;
     } else {
-    
-	# sort in descending order
-	my @sorted = sort {$fai_sizes{$b} <=> $fai_sizes{$a}} keys %fai_sizes;
-	
-	my $so_far = 0;
-	my $n50_length;
-
-	foreach my $key (@sorted) {
-	    $so_far += $fai_sizes{$key};
-	    if($so_far >= (0.5 * $total_len)) {
-		$n50_length = $fai_sizes{$key};
-		last;
-	    }
-	}
-	if($n50_length < 1E6) {
-	    # determine stitch-gap size to be used.
-	    my $st_size = $$options{'pad'} + 25;
-	    return $st_size;
-	} else {
-	    return 0;
-	}
+	return 0; ## was more than 50 chromosomes, but no more than 1 were < 1Mb in length, so no stitching
     }
 }
 
@@ -912,8 +895,8 @@ sub stitch_genome {
     my $time = `date`;
     chomp $time;
     log_it($$options{'logfile'}, "\n$time");
-    log_it($$options{'logfile'}, "Genome has more than 50 segments and the N50 length is < 1Mb. Stitching short references to improve performance ...");
-    log_it($$options{'logfile'}, "\tNOTE: This will require building a new bowtie index for the stitched genome, which can be time-consuming. To avoid genome stitching, abort");
+    log_it($$options{'logfile'}, "Genome has more than 50 segments and more than two of them are < 1Mb. Stitching short references to improve performance ...");
+    log_it($$options{'logfile'}, "\tNOTE: This will make a modified version of your genome. To avoid genome stitching, abort");
     log_it($$options{'logfile'}, "\tthis run, and start a new one with option --nostitch");
     
     # Create a file for the new, stitched genome
@@ -972,7 +955,7 @@ sub stitch_genome {
 			$current_seq =~ s/(.{60})/$1\n/g;
 			print SG ">$orig_head\n";
 			if($current_seq =~ /\n$/) {
-			    print "$current_seq";
+			    print SG "$current_seq";
 			} else {
 			    print SG "$current_seq\n";
 			}
@@ -1014,7 +997,7 @@ sub stitch_genome {
 			$current_seq =~ s/(.{60})/$1\n/g;
 			print SG ">$orig_head\n";
 			if($current_seq =~ /\n$/) {
-			    print "$current_seq";
+			    print SG "$current_seq";
 			} else {
 			    print SG "$current_seq\n";
 			}
@@ -1057,7 +1040,7 @@ sub stitch_genome {
 	    $current_seq =~ s/(.{60})/$1\n/g;
 	    print SG ">$orig_head\n";
 	    if($current_seq =~ /\n$/) {
-		print "$current_seq";
+		print SG "$current_seq";
 	    } else {
 		print SG "$current_seq\n";
 	    }
@@ -1090,7 +1073,7 @@ sub stitch_genome {
 	$current_seq =~ s/(.{60})/$1\n/g;
 	print SG ">$orig_head\n";
 	if($current_seq =~ /\n$/) {
-	    print "$current_seq";
+	    print SG "$current_seq";
 	} else {
 	    print SG "$current_seq\n";
 	}
@@ -4428,9 +4411,9 @@ Test data and brief instructions are available at http://axtelldata.bio.psu.edu/
   to be tolerated in a valid alignment. Must be either 0, 1, or 2. In cases of multiple hits, only hits
   with lowest number of mismatches kept. Default: 1.
 
---nostitch : Disable 'stitching' of fragmented genomes. By default, when there are more than 50 chromosomes and the N50 length is < 1Mb, ShortStack stitches chromosomes
-  shorter than 5E6 nts into larger assemblies. This drastically improves performance when working with
-  highly fragmented reference genomes.
+--nostitch : Disable 'stitching' of fragmented genomes. By default, if the genomefile has more than 50 chromosomes 
+  and two or more of them are < 1Mb, ShortStack stitches chromosomes shorter than 1Mb into larger (>5Mb) assemblies. 
+  This drastically improves performance when working with highly fragmented reference genomes.
 
 --cquals [string] : path(s) to color-space quality value file(s). Used only in conjunction with .csfasta 
   or .csfasta.gz formatted files in --readfile. Compressed format for cquals is NOT allowed. Like --readfile, 
@@ -4564,6 +4547,11 @@ There is no support for paired-end reads in ShortStack. Small RNA data are assum
 Input reads are expected to be de-condensed. That is, if a small RNA was sequenced 10,000 times in a run, there should be 
 10,000 entries, each with a different header name, in the input readfile. In other words, ShortStack is designed
 to take reads right off the sequencer without any other pre-processing (except perhaps adapter trimming .. see below).
+
+=head3 Unique read names required
+
+The small RNA reads must all have unique names within a given file. If this requirement is not met, alignments will be
+completely unreliable due to errors in interpreting and handling of multi-mapped reads.
 
 =head3 Adapter trimming
 
