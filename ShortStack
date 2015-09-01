@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.2";
+my $version_num = "3.2.1";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -120,7 +120,7 @@ if(exists($options{'readfile'})) {
 # Add final genome .fai file to the options hash, for convenience later
 $options{'fai_file'} = $fai_file;
 
-# check and build .ebwt indices, if warranted
+# check and build .ebwt (or ebwtl) indices, if warranted
 if(exists($options{'readfile'})) {
     ebwt(\%options);
 }
@@ -1093,7 +1093,7 @@ sub stitch_genome {
 
 sub ebwt {
     # Input is a reference to the options hash
-    # This sub-routine checks if the .ebwt indices for the genomefile exist,
+    # This sub-routine checks if the .ebwt(l) indices for the genomefile exist,
     # and if not, tries to create them with bowtie-build
     my($options) = @_;
     
@@ -1117,7 +1117,16 @@ sub ebwt {
 	my $rev1 = $gen_path . $gen_file . ".rev.1.ebwt";
 	my $rev2 = $gen_path . $gen_file . ".rev.2.ebwt";
 	
-	unless((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) {
+	my $onel = "$one" . "l";
+	my $twol = "$two" . "l";
+	my $threel = "$three" . "l";
+	my $fourl = "$four" . "l";
+	my $rev1l = "$rev1" . "l";
+	my $rev2l = "$rev2" . "l";
+	
+	unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
+	       ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) { 
+	    
 	    my $time = `date`;
 	    chomp $time;
 	    log_it($$options{'logfile'}, "\n$time");
@@ -1141,7 +1150,15 @@ sub ebwt {
 	my $rev1 = $gen_path . $gen_file . ".cs.rev.1.ebwt";
 	my $rev2 = $gen_path . $gen_file . ".cs.rev.2.ebwt";
 	
-	unless((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) {
+	my $onel = "$one" . "l";
+	my $twol = "$two" . "l";
+	my $threel = "$three" . "l";
+	my $fourl = "$four" . "l";
+	my $rev1l = "$rev1" . "l";
+	my $rev2l = "$rev2" . "l";
+
+	unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
+	       ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) {
 	    my $time = `date`;
 	    chomp $time;
 	    log_it($$options{'logfile'}, "\n$time");
