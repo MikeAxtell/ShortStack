@@ -719,7 +719,7 @@ OUTPUT FILES
     l: length of RNA, a: number of alignments.
 
   GFF3 files
-    If the run was a de-novo analysis, two gff3 files are created to
+    If the run was a de-novo analysis, three gff3 files are created to
     indicate the positions of the discovered loci.
 
     ShortStack_N.gff3 has the loci with DicerCalls of 'N' (e.g., those that
@@ -727,6 +727,9 @@ OUTPUT FILES
 
     ShortStack_D.gff3 has the loci with DicerCalls that were not 'N' (e.g.,
     those that ARE likely RNAi-related).
+
+    ShortStack_All.gff3 has ALL loci (it is the merger of the other two gff3
+    files).
 
   bam or cram alignment file
     If aligment was performed, the final bam or cram formatted alignment

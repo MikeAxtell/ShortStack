@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.2.1";
+my $version_num = "3.2.2";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -4187,15 +4187,21 @@ sub summarize {
     open(N3, ">$Ngff3");
     my $Dgff3 = "$$options{'outdir'}" . "\/" . "ShortStack_D.gff3";
     open(D3, ">$Dgff3");
+    my $Agff3 = "$$options{'outdir'}" . "\/" . "ShortStack_All.gff3";
+    open(A3, ">$Agff3");
     
-    print N3 "\#\#gff-version3\n";
-    print D3 "\#\#gff-version3\n";
+
+
+    print N3 "\#\#gff-version 3\n";
+    print D3 "\#\#gff-version 3\n";
+    print A3 "\#\#gff-version 3\n";
     
     my $chr;
     my $start;
     my $stop;
     
     my $simple_MIR;
+    my $out_line;
     
     while (<RES>) {
 	if($_ =~ /^\#/) {
@@ -4208,48 +4214,39 @@ sub summarize {
 	    $stop = $3;
 	    $simple_MIR = $fields[13];
 	    $simple_MIR =~ s/\d+//g;
+	    $out_line = "$chr\t";
+	    $out_line .= "ShortStack\t";
+	    $out_line .= "nc_RNA\t"; 
+	    $out_line .= "$start\t";
+	    $out_line .= "$stop\t";
+	    $out_line .= "\.\t";  ## score
+	    $out_line .= "$fields[8]\t";
+	    $out_line .= "\.\t"; ## ORF phase
+	    $out_line .= "ID=$fields[1]\;";
+	    $out_line .= "DicerCall=$fields[12]\;";
+	    $out_line .= "MIRNA=$simple_MIR\;";
+	    $out_line .= "\n";
+	    
+	    print A3 "$out_line";
+	    
 	    if($fields[12] =~ /[^\d]/) {
-		print N3 "$chr\t";
-		print N3 "ShortStack\t";
-		print N3 "gene\t"; 
-		print N3 "$start\t";
-		print N3 "$stop\t";
-		print N3 "\.\t";  ## score
-		print N3 "$fields[8]\t";
-		print N3 "\.\t"; ## ORF phase
-		print N3 "ID=$fields[1]\;";
-		print N3 "DicerCall=$fields[12]\;";
-		print N3 "MIRNA=$simple_MIR\;";
-		print N3 "\n";
-		
 		++$tallies{$simple_MIR}{'N'};
-		
+		print N3 "$out_line";
 	    } else {
-		print D3 "$chr\t";
-		print D3 "ShortStack\t";
-		print D3 "gene\t";  
-		print D3 "$start\t";
-		print D3 "$stop\t";
-		print D3 "\.\t";  ## score
-		print D3 "$fields[8]\t";
-		print D3 "\.\t"; ## ORF phase
-		print D3 "ID=$fields[1]\;";
-		print D3 "DicerCall=$fields[12]\;";
-		print D3 "MIRNA=$simple_MIR\;";
-		print D3 "\n";
-		
 		++$tallies{$simple_MIR}{$fields[12]};
-		
+		print D3 "$out_line";
 	    }
 	}
     }
     close RES;
     close N3;
     close D3;
+    close A3;
     
     if(($$options{'locus'}) or ($$options{'locifile'})) {
-	system "rm -f Ngff3";
-	system "rm -f Dgff3";
+	system "rm -f $Ngff3";
+	system "rm -f $Dgff3";
+	system "rm -f $Agff3";
     }
     
     
@@ -4941,11 +4938,13 @@ l: length of RNA, a: number of alignments.
 
 =head2 GFF3 files
 
-If the run was a de-novo analysis, two gff3 files are created to indicate the positions of the discovered loci.
+If the run was a de-novo analysis, three gff3 files are created to indicate the positions of the discovered loci.
 
 ShortStack_N.gff3 has the loci with DicerCalls of 'N' (e.g., those that are unlikely RNAi-related).
 
 ShortStack_D.gff3 has the loci with DicerCalls that were not 'N' (e.g., those that ARE likely RNAi-related).
+
+ShortStack_All.gff3 has ALL loci (it is the merger of the other two gff3 files).
 
 =head2 bam or cram alignment file
 
