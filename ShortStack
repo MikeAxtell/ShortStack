@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.2.3";
+my $version_num = "3.3";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -4524,6 +4524,9 @@ size, but not as much with the number of small RNAs.
 Alignments benefit from multiple processing cores, via the --bowtie_cores option. All other
 portions are single-threaded.
 
+Alignment speed may also be increased using the --sort_mem option to increase the memory used
+for bam file sorting.
+
 At least 50G of hard disk space is recommended to be available, due to the sometimes large
 size of the temporary alignment files and the final alignment file. Extreme settings for options
 --bowtie_m and --ran_max may cause creation of extremely huge files.
@@ -5010,3 +5013,8 @@ Answer: It is gone. This was a rather crude way to assess overlaps between Short
 =head2 Are the read counts reported by ShortStack normalized in any way?
 
 Answer: No. This is because there are many slight variants for normalization in use. It's better to leave this to the user to decide on. The counts are all raw numbers of reads from the loci in question.
+
+=head2 ShortStack seems to be slow. Why? And how to make it go faster?
+
+Answer: To make alignments go faster, use the --bowtie_cores and --sort_mem options to make full use of your system. Their default settings (1 core, and sort_mem of 768M) are quite low to ensure success on low-powered machines, but if you have more cores and memory available, raising these will speed alignments along quite a bit. Another way to make alignments go faster is to specifiy r or n for option --mmap. But there is a trade-off there .. r causes multi-mapped reads to be just placed randomly instead of more intelligently, while n causes all multi-mappers to be marked as unmapped. So, if you use --mmap of r or n, you will get a much faster alignment, but a much less sensitive and precise one.  There are also some tricks to increase the speed of analysis, but they all also involve some down-side. You can set option --nohp, which means that MIRNAs will not be tested for. This will increase the speed of analysis but of course you won't be able to annotate MIRNAs. You can also adjust the option --mincov to have a higher threshold. This will cause fewer loci to be discovered (only those with higher expression levels), so analysis time will be reduced. But of course the trade-off there is that you will not discovery loci with lower expression levels.
+
