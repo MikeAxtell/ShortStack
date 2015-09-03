@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.2.2";
+my $version_num = "3.2.3";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -85,6 +85,7 @@ validate_mincov(\%options,\$usage_message);
 validate_bowtie_m(\%options,\$usage_message);
 validate_ranmax(\%options,\$usage_message);
 validate_locus(\%options,\$usage_message);
+validate_sort_mem(\%options,\$usage_message);
 
 ######## Check for required dependencies
 my $samtools_which = install_check('samtools',$usage_message);
@@ -234,6 +235,11 @@ Alignment Options:
 --bowtie_cores [integer] : Argument to be passed to bowtie's -p option, specifying number of processor
   cores to request during alignment. Defaults to 1. Must be an integer of 1 or more.
 
+--sort_mem [string] : Argument to be passed to samtools sort -m option, which sets the maximum memory
+  usage during bam file sorting. If not set, samtools sort defaults it to 768M. Higher settings will
+  reduce the overall time spent in alignment phase, at cost of more memory usage. Use K/M/G suffixes to 
+  specify kilobytes, megabytes, and gigabytes, respectively.
+
 --mismatches [integer] : Argument to be passed to bowtie's -v option, specifying number of mismatches
   to be tolerated in a valid alignment. Must be either 0, 1, or 2. In cases of multiple hits, only hits
   with lowest number of mismatches kept. Default: 1.
@@ -331,7 +337,8 @@ sub get_ShortStack_options {
 	       'mmap=s',
 	       'bowtie_m=s',
 	       'ranmax=s',
-	       'align_only'
+	       'align_only',
+	       'sort_mem=s'
 	);
     
     # If no options were passed, just print help and walk away
@@ -2019,7 +2026,11 @@ sub decider {
 	my $tempfile = "$path" . "$file" . "_temp";
 	# open streams
 	open(IN, "gzip -d -c $rs_file |");
-	open(OUT, "| samtools view -u - | samtools sort -O bam -T $tempfile 2> /dev/null > $bam_file");
+	if(exists($$options{'sort_mem'})) {
+	    open(OUT, "| samtools view -u - | samtools sort -m $$options{'sort_mem'} -O bam -T $tempfile 2> /dev/null > $bam_file");
+	} else {
+	    open(OUT, "| samtools view -u - | samtools sort -O bam -T $tempfile 2> /dev/null > $bam_file");
+	}
 	# go line by line
 	my $last_read = 'NULL';
 	my $this_read;
@@ -4320,6 +4331,20 @@ sub get_rg_primaries {
     return %primaries;
 }
 	    
+sub validate_sort_mem {
+    my($options,$usage) = @_; ## references to hash, scalar
+    # sort_mem is invalid unless aligning something
+    if(exists($$options{'sort_mem'})) {
+	unless(exists($$options{'readfile'})) {
+	    die "\nOption --sort_mem is invalid unless you are aligning reads.\n\n$$usage\n";
+	}
+	# check format
+	unless($$options{'sort_mem'} =~ /^\d+$|^\d+[KMG]$/) {
+	    die "\nOption --sort_mem is not valid. It must be an integer (implies bytes as units) or end in K/M/G\n\n$$usage\n";
+	}
+    }
+}
+
 	
 __END__
 
@@ -4420,6 +4445,11 @@ Test data and brief instructions are available at http://axtelldata.bio.psu.edu/
 
 --bowtie_cores [integer] : Argument to be passed to bowtie's -p option, specifying number of processor
   cores to request during alignment. Defaults to 1. Must be an integer of 1 or more.
+
+--sort_mem [string] : Argument to be passed to samtools sort -m option, which sets the maximum memory
+  usage during bam file sorting. If not set, samtools sort defaults it to 768M. Higher settings will
+  reduce the overall time spent in alignment phase, at cost of more memory usage. Use K/M/G suffixes to 
+  specify kilobytes, megabytes, and gigabytes, respectively.
 
 --mismatches [integer] : Argument to be passed to bowtie's -v option, specifying number of mismatches
   to be tolerated in a valid alignment. Must be either 0, 1, or 2. In cases of multiple hits, only hits
