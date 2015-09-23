@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.3";
+my $version_num = "3.3.1";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -171,7 +171,7 @@ Usage: ShortStack [options] {--readfile <r> | {--bamfile <b> | --cramfile <c>}} 
 <r> : readfile must be in fasta (.fasta or .fa), colorspace-fasta (.csfasta), 
       or fastq (.fastq or .fq) format, or their gzip-compressed versions
       (.fasta.gz, .fa.gz, .csfasta.gz, .fastq.gz, or .fq.gz)
-      Can also be a comma-separated list of several read files.
+      Can also be a list (seperated by spaces) of several read files.
 <b> : BAM formatted alignment file (.bam).
 <c> : CRAM formatted alignment file (.cram).
 <g> : FASTA formatted (.fa or .fasta) genome file.
@@ -198,7 +198,7 @@ Usage: ShortStack [options] {--readfile <r> | {--bamfile <b> | --cramfile <c>}} 
 <r> : readfile must be in fasta (.fasta or .fa), colorspace-fasta (.csfasta), 
       or fastq (.fastq or .fq) format, or their gzip-compressed versions
       (.fasta.gz, .fa.gz, .csfasta.gz, .fastq.gz, or .fq.gz)
-      Can also be a comma-separated list of several read files.
+      Can also be a list (seperated by spaces) of several read files.
 <b> : BAM formatted alignment file (.bam).
 <c> : CRAM formatted alignment file (.cram).
 <g> : FASTA formatted (.fa or .fasta) genome file.
@@ -4408,7 +4408,7 @@ Usage: ShortStack [options] {--readfile <r> | {--bamfile <b> | --cramfile <c>}} 
 <r> : readfile must be in fasta (.fasta or .fa), colorspace-fasta (.csfasta), 
       or fastq (.fastq or .fq) format, or their gzip-compressed versions
       (.fasta.gz, .fa.gz, .csfasta.gz, .fastq.gz, or .fq.gz)
-      Can also be a comma-separated list of several read files.
+      Can also be a list (seperated by spaces) of several read files.
 
 <b> : BAM formatted alignment file (.bam).
 

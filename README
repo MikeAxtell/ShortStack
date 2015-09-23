@@ -65,7 +65,7 @@ USAGE
     <r> : readfile must be in fasta (.fasta or .fa), colorspace-fasta
     (.csfasta), or fastq (.fastq or .fq) format, or their gzip-compressed
     versions (.fasta.gz, .fa.gz, .csfasta.gz, .fastq.gz, or .fq.gz) Can also
-    be a comma-separated list of several read files.
+    be a list (seperated by spaces) of several read files.
 
     <b> : BAM formatted alignment file (.bam).
 
