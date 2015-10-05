@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.3.2";
+my $version_num = "3.3.3";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -239,7 +239,9 @@ Alignment Options:
 --sort_mem [string] : Argument to be passed to samtools sort -m option, which sets the maximum memory
   usage during bam file sorting. If not set, samtools sort defaults it to 768M. Higher settings will
   reduce the overall time spent in alignment phase, at cost of more memory usage. Use K/M/G suffixes to 
-  specify kilobytes, megabytes, and gigabytes, respectively.
+  specify kilobytes, megabytes, and gigabytes, respectively. Extremely large alignment jobs will
+  crash (due to crash of samtools sort operation) if --sort_mem is not set high enough. However, alignment
+  jobs will also crash if sort_mem is set too high, and all physical memory on your machine is exahusted.
 
 --mismatches [integer] : Argument to be passed to bowtie's -v option, specifying number of mismatches
   to be tolerated in a valid alignment. Must be either 0, 1, or 2. In cases of multiple hits, only hits
@@ -421,9 +423,11 @@ sub initiate_log {
     system "mkdir $$options{'outdir'}";
     
     my $logfile = "$$options{'outdir'}" . '/' . 'Log.txt';
+    my $error_logfile = "$$options{'outdir'}" . '/' . 'ErrorLogs.txt';
     
     $$options{'logfile'} = $logfile;
-    
+    $$options{'error_logfile'} = $error_logfile;
+
     log_it($logfile, "\nShortStack version $$v_num");
     my $date = `date`;
     chomp $date;
@@ -1167,7 +1171,7 @@ sub ebwt {
 	    log_it($$options{'logfile'}, "\n$time");
 	    log_it ($$options{'logfile'}, "Expected bowtie indices not found. Attempting to make them with bowtie-build...");
 	    my $base = $gen_path . $gen_file;
-	    system "bowtie-build $$options{'genomefile'} $base > /dev/null";
+	    system "bowtie-build $$options{'genomefile'} $base >> $$options{'error_logfile'}";
 	    unless((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) {
 		log_it ($$options{'logfile'}, "\tFAILED. Aborting.");
 		exit;
@@ -1199,7 +1203,7 @@ sub ebwt {
 	    log_it($$options{'logfile'}, "\n$time");
 	    log_it ($$options{'logfile'}, "Expected color-space bowtie indices not found. Attempting to make them with bowtie-build...");
 	    my $base = $gen_path . $gen_file . ".cs";
-	    system "bowtie-build -C $$options{'genomefile'} $base > /dev/null";
+	    system "bowtie-build -C $$options{'genomefile'} $base >> $$options{'error_logfile'}";
 	    unless((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) {
 		log_it ($$options{'logfile'}, "\tFAILED. Aborting.");
 		exit;
@@ -1824,7 +1828,7 @@ sub get_read_s_aln {
     log_it($$options{'logfile'}, "Starting alignment of $$reads with bowtie command:\n\t$bowtie_cl");
     
     # Open file handles
-    open (SAM, "$bowtie_cl 2> /dev/null |");
+    open (SAM, "$bowtie_cl 2>> $$options{'error_logfile'} |");
     open (OUT, "| gzip > $outfile");
     
     my $last_read = 'NULL';
@@ -2055,10 +2059,11 @@ sub decider {
 	# open streams
 	open(IN, "gzip -d -c $rs_file |");
 	if(exists($$options{'sort_mem'})) {
-	    open(OUT, "| samtools view -u - | samtools sort -m $$options{'sort_mem'} -O bam -T $tempfile 2> /dev/null > $bam_file");
+	    open(OUT, "| samtools view -u - | samtools sort -m $$options{'sort_mem'} -O bam -T $tempfile 2>> $$options{'error_logfile'} > $bam_file");
 	} else {
-	    open(OUT, "| samtools view -u - | samtools sort -O bam -T $tempfile 2> /dev/null > $bam_file");
+	    open(OUT, "| samtools view -u - | samtools sort -O bam -T $tempfile 2>> $$options{'error_logfile'} > $bam_file");
 	}
+	
 	# go line by line
 	my $last_read = 'NULL';
 	my $this_read;
@@ -2187,6 +2192,13 @@ sub decider {
 	# process read bucket ends here
 	
 	close OUT;
+
+	# ensure file is not empty
+	unless (-s $bam_file) {
+	    log_it($$options{'logfile'}, "\nERROR - ABORTING. Processing and sorting of $rs_file failed. Check ErrorLog and settings of option --sort_mem");
+	    exit;
+	}
+
 	push(@bam_files, $bam_file);
 	# uncomment the line below after testing!
 	system "rm -f $rs_file";
@@ -2389,7 +2401,7 @@ sub merge_bams {
     log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Merging files using the following samtools merge command:");
     log_it($$options{'logfile'}, "\t$merge_command");
-    system "$merge_command 2> /dev/null";
+    system "$merge_command 2>> $$options{'error_logfile'}";
     # verify file's existence at least
     unless(-r $merged_bam) {
 	log_it($$options{'logfile'}, "\tABORT: after merging, expected file $merged_bam was not found.");
@@ -4479,7 +4491,9 @@ Note that we have done our best to set default settings for all options that are
 --sort_mem [string] : Argument to be passed to samtools sort -m option, which sets the maximum memory
   usage during bam file sorting. If not set, samtools sort defaults it to 768M. Higher settings will
   reduce the overall time spent in alignment phase, at cost of more memory usage. Use K/M/G suffixes to 
-  specify kilobytes, megabytes, and gigabytes, respectively.
+  specify kilobytes, megabytes, and gigabytes, respectively. Extremely large alignment jobs will
+  crash (due to crash of samtools sort operation) if --sort_mem is not set high enough. However, alignment
+  jobs will also crash if sort_mem is set too high, and all physical memory on your machine is exahusted.
 
 --mismatches [integer] : Argument to be passed to bowtie's -v option, specifying number of mismatches
   to be tolerated in a valid alignment. Must be either 0, 1, or 2. In cases of multiple hits, only hits
@@ -4560,7 +4574,8 @@ Alignments benefit from multiple processing cores, via the --bowtie_cores option
 portions are single-threaded.
 
 Alignment speed may also be increased using the --sort_mem option to increase the memory used
-for bam file sorting.
+for bam file sorting. Setting a higher --sort_mem will be REQUIRED for very large alignment
+runs to avoid samtools sort crashes due to too many open files. 
 
 At least 50G of hard disk space is recommended to be available, due to the sometimes large
 size of the temporary alignment files and the final alignment file. Extreme settings for options
@@ -4928,6 +4943,12 @@ same location as the input genome file.
 
 A log of the run messages is created and written to Log.txt. It is the same as the 
 messages printed to STDERR during the run.
+
+=head2 ErrorLogs
+
+For debugging. Most users won't need to look at this. It stores the verbose outputs of bowtie-build, 
+bowtie, samtools sort, and samtools merge commands that are not kep in the main Log. Sometimes these are
+helpful in diagnosing bugs, particularly samtools sort and merge bugs due to memory issues.
 
 =head2 Stitched genome files
 

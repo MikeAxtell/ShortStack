@@ -113,7 +113,10 @@ OPTIONS
     samtools sort defaults it to 768M. Higher settings will reduce the
     overall time spent in alignment phase, at cost of more memory usage. Use
     K/M/G suffixes to specify kilobytes, megabytes, and gigabytes,
-    respectively.
+    respectively. Extremely large alignment jobs will crash (due to crash of
+    samtools sort operation) if --sort_mem is not set high enough. However,
+    alignment jobs will also crash if sort_mem is set too high, and all
+    physical memory on your machine is exahusted.
 
     --mismatches [integer] : Argument to be passed to bowtie's -v option,
     specifying number of mismatches to be tolerated in a valid alignment.
@@ -211,7 +214,9 @@ SYSTEM RECOMMENDATIONS
     --bowtie_cores option. All other portions are single-threaded.
 
     Alignment speed may also be increased using the --sort_mem option to
-    increase the memory used for bam file sorting.
+    increase the memory used for bam file sorting. Setting a higher
+    --sort_mem will be REQUIRED for very large alignment runs to avoid
+    samtools sort crashes due to too many open files.
 
     At least 50G of hard disk space is recommended to be available, due to
     the sometimes large size of the temporary alignment files and the final
@@ -643,6 +648,13 @@ OUTPUT FILES
   Log file
     A log of the run messages is created and written to Log.txt. It is the
     same as the messages printed to STDERR during the run.
+
+  ErrorLogs
+    For debugging. Most users won't need to look at this. It stores the
+    verbose outputs of bowtie-build, bowtie, samtools sort, and samtools
+    merge commands that are not kep in the main Log. Sometimes these are
+    helpful in diagnosing bugs, particularly samtools sort and merge bugs
+    due to memory issues.
 
   Stitched genome files
     If the input genome was 'stitched' (see above), the stitched genome file
