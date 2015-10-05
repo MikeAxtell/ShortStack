@@ -78,6 +78,9 @@ TEST
     http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
 
 OPTIONS
+    Note that we have done our best to set default settings for all options
+    that are best for most users.
+
   General Options:
     --help : print a help message listing all options and quit
 
@@ -164,6 +167,12 @@ OPTIONS
 
     --dicermax [integer] : Maximum size of a Dicer-processed small RNA. Must
     be an integer of at least 15 and >= dicermin. Deafult: 24.
+
+    --foldsize [integer] : Size of genomic RNA segments for folding during
+    MIRNA search. Any loci larger than this size will not be analyzed with
+    respect for MIRNA features. Must be an integer of at least 200 and no
+    larger than 1,000. Default: 300. Note that increasing this setting may
+    drastically increase runtimes.
 
     --locifile [string] : Path to a tab-delimited plain-text file listing
     intervals to analyze. Lines starting with # are ignored. First column is
@@ -523,6 +532,13 @@ ANALYSIS METHODS
     The Major RNA is always hypothesized to be the mature miRNA in the
     locus.
 
+    Note that MIRNA analysis is limited to loci that are <= the length
+    specified by option --foldsize ... the default setting is 300 nts.
+    Increasing this size may allow you to find more MIRNAs, but will also
+    slow down the runtime of the process.
+
+    MIRNA analysis codes:
+
     N0: not analyzed due to run in --nohp mode.
 
     N1: no reads at all aligned in locus
@@ -535,7 +551,8 @@ ANALYSIS METHODS
     N4: Major RNA length is not in the Dicer size range defined by
     --dicermin and --dicermax.
 
-    N5: Locus size is > 300 nts.
+    N5: Locus size is > than maximum allowed for RNA folding per option
+    --foldsize (default is 300 nts).
 
     N6: Locus is not stranded (>20% and <80% of reads aligned to top strand)
 

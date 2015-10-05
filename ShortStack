@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.3.1";
+my $version_num = "3.3.2";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -86,6 +86,7 @@ validate_bowtie_m(\%options,\$usage_message);
 validate_ranmax(\%options,\$usage_message);
 validate_locus(\%options,\$usage_message);
 validate_sort_mem(\%options,\$usage_message);
+validate_foldsize(\%options,\$usage_message);
 
 ######## Check for required dependencies
 my $samtools_which = install_check('samtools',$usage_message);
@@ -282,6 +283,11 @@ Analysis Options:
 --dicermax [integer] : Maximum size of a Dicer-processed small RNA. Must be an integer of at least 15
   and >= dicermin. Deafult: 24.
 
+--foldsize [integer] : Size of genomic RNA segments for folding during MIRNA search. Any loci larger
+  than this size will not be analyzed with respect for MIRNA features. Must be an integer of at 
+  least 200 and no larger than 1,000. Default: 300. Note that increasing this setting may drastically
+  increase runtimes.
+
 --locifile [string] : Path to a tab-delimited plain-text file listing intervals to analyze. Lines
   starting with # are ignored. First column is coordinate in format Chr:start-stop, second column
   is names (optional), and any other columns are ignored. Mutually exclusive with option --locus.
@@ -338,7 +344,8 @@ sub get_ShortStack_options {
 	       'bowtie_m=s',
 	       'ranmax=s',
 	       'align_only',
-	       'sort_mem=s'
+	       'sort_mem=s',
+	       'foldsize=i'
 	);
     
     # If no options were passed, just print help and walk away
@@ -358,6 +365,27 @@ sub validate_locus {
 		die "\nentry $entry for option --locus is invalid. Must be in format Chr:Start-Stop\n\n$$usage\n";
 	    }
 	}
+    }
+}
+
+sub validate_foldsize {
+    my($options,$usage) = @_; ## references to hash, scalar
+    if((exists($$options{'nohp'})) or (exists($$options{'align_only'}))) {
+	if(exists($$options{'foldsize'})) {
+	    delete $$options{'foldsize'};
+	}
+    } elsif (exists($$options{'foldsize'})) {
+	# must be an integer
+	unless($$options{'foldsize'} =~ /^\d+$/) {
+	    die "\noption foldsize is invalid. Must be an integer between 200 and 1000\n\n$$usage\n";
+	}
+	# must be >= 200 and <= 1000
+	unless(($$options{'foldsize'} >= 200) and ($$options{'foldsize'} <= 1000)) {
+	    die "\noption foldsize is invalid. Must be an integer between 200 and 1000\n\n$$usage\n";
+	}
+    } else {
+	# default is 300
+	$$options{'foldsize'} = 300;
     }
 }
 
@@ -2825,7 +2853,7 @@ sub analyze_locus {
 	print $res_fh "\tN3";
     } elsif (((length $big_seq) < $$options{'dicermin'}) or ((length $big_seq) > $$options{'dicermax'})) {
 	print $res_fh "\tN4";
-    } elsif ($$loc_size > 300) {
+    } elsif ($$loc_size > $$options{'foldsize'}) {
 	print $res_fh "\tN5";
     } elsif ($strand_call =~ /[^\-\+]/) {
 	print $res_fh "\tN6";
@@ -3416,7 +3444,7 @@ sub MIRNA {
     my($options,$all,$coords,$strand,$loc_name) = @_; 
     # references to hash, hash, scalar, scalar, and scalar
     
-    # parse locus size, expand to 300 nts. for the folding region
+    # parse locus size, expand to the specified size for the folding region
     my $loc_size;
     my $loc_center;
     my $chr;
@@ -3425,8 +3453,8 @@ sub MIRNA {
 	$loc_size = $3 - $2 + 1;
 	$loc_center = $2 + int (0.5 * $loc_size);
     }
-    my $fold_start = $loc_center - 149;
-    my $fold_stop = $loc_center + 150;
+    my $fold_start = $loc_center - (int(0.5 * $$options{'foldsize'}));
+    my $fold_stop = $loc_center + (int(0.5 * $$options{'foldsize'}));
     if($fold_start < 1) {
 	$fold_start = 1;
     }
@@ -4422,6 +4450,8 @@ Test data and brief instructions are available at http://axtelldata.bio.psu.edu/
 
 =head1 OPTIONS
 
+Note that we have done our best to set default settings for all options that are best for most users.
+
 =head2 General Options:
 
 --help : print a help message listing all options and quit
@@ -4492,6 +4522,11 @@ Test data and brief instructions are available at http://axtelldata.bio.psu.edu/
 
 --dicermax [integer] : Maximum size of a Dicer-processed small RNA. Must be an integer of at least 15
   and >= dicermin. Deafult: 24.
+
+--foldsize [integer] : Size of genomic RNA segments for folding during MIRNA search. Any loci larger
+  than this size will not be analyzed with respect for MIRNA features. Must be an integer of at 
+  least 200 and no larger than 1,000. Default: 300. Note that increasing this setting may drastically
+  increase runtimes.
 
 --locifile [string] : Path to a tab-delimited plain-text file listing intervals to analyze. Lines
   starting with # are ignored. First column is coordinate in format Chr:start-stop, second column
@@ -4803,6 +4838,12 @@ certain step, it is removed from consideration and given a specific code indicat
 it failed.  The codes are below in step-wise order. The Major RNA is always hypothesized to
 be the mature miRNA in the locus.
 
+Note that MIRNA analysis is limited to loci that are <= the length specified by option 
+--foldsize ... the default setting is 300 nts. Increasing this size may allow you to find 
+more MIRNAs, but will also slow down the runtime of the process.
+
+MIRNA analysis codes:
+
 N0: not analyzed due to run in --nohp mode.
 
 N1: no reads at all aligned in locus
@@ -4813,7 +4854,7 @@ N3: Major RNA abundance was less than 2 reads.
 
 N4: Major RNA length is not in the Dicer size range defined by --dicermin and --dicermax.
 
-N5: Locus size is > 300 nts.
+N5: Locus size is > than maximum allowed for RNA folding per option --foldsize (default is 300 nts).
 
 N6: Locus is not stranded (>20% and <80% of reads aligned to top strand)
 
