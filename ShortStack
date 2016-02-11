@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.3.3";
+my $version_num = "3.3.4nr1";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -123,8 +123,9 @@ if(exists($options{'readfile'})) {
 $options{'fai_file'} = $fai_file;
 
 # check and build .ebwt (or ebwtl) indices, if warranted
+my $g_type;
 if(exists($options{'readfile'})) {
-    ebwt(\%options);
+    $g_type = ebwt(\%options);
 }
 
 # trim 3' adapters, if warranted
@@ -137,6 +138,14 @@ if((@adapters) and (exists($options{'readfile'}))) {
 
 # align, if warranted
 if(@t_readfiles) {
+    # If aligning, and indices are the large type, --mismatches must be set to 0 to 
+    #  avoid bad bowtie bug
+    if(($options{'mismatches'} != 0 ) and
+       ($g_type eq 'l')) {
+	$options{'mismatches'} = 0;
+	log_it($options{'logfile'}, "\n\*\*\* WARNING: mismatches is being set to 0 to work around a bad bowtie bug specific to large genomes \*\*\*");
+    }
+    
     align_master(\%options,\@t_readfiles,\$version_num,\$command_line);
     # After this, options{'bamfile'} or options{'cramfile'} will be set. 
     # Abort if align_only was specified
@@ -1146,6 +1155,9 @@ sub ebwt {
     # get file basename for genome
     my($gen_file,$gen_path,$gen_suffix) = fileparse($$options{'genomefile'}, qr/\.\S+$/);
     
+    # variable to store type .. large or small
+    my $itype;
+    
     
     # check and build base-space indices
     if($basespace) {
@@ -1172,11 +1184,18 @@ sub ebwt {
 	    log_it ($$options{'logfile'}, "Expected bowtie indices not found. Attempting to make them with bowtie-build...");
 	    my $base = $gen_path . $gen_file;
 	    system "bowtie-build $$options{'genomefile'} $base >> $$options{'error_logfile'}";
-	    unless((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) {
+	    unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
+		   ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) {
 		log_it ($$options{'logfile'}, "\tFAILED. Aborting.");
 		exit;
 	    }
 	    log_it ($$options{'logfile'}, "\tSuccessful");
+	    if(-r $one) {
+		$itype = 's';
+	    } elsif (-r $onel) {
+		$itype = 'l';
+	    }
+	    return $itype;
 	}
     }
 
@@ -1204,11 +1223,18 @@ sub ebwt {
 	    log_it ($$options{'logfile'}, "Expected color-space bowtie indices not found. Attempting to make them with bowtie-build...");
 	    my $base = $gen_path . $gen_file . ".cs";
 	    system "bowtie-build -C $$options{'genomefile'} $base >> $$options{'error_logfile'}";
-	    unless((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) {
+	    unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
+		   ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) {
 		log_it ($$options{'logfile'}, "\tFAILED. Aborting.");
 		exit;
 	    }
 	    log_it ($$options{'logfile'}, "\tSuccessful");
+	    if(-r $one) {
+		$itype = 's';
+	    } elsif (-r $onel) {
+		$itype = 'l';
+	    }
+	    return $itype;
 	}
     }
 }
@@ -4672,6 +4698,10 @@ By default, ShortStack allows up to 1 mismatch for a valid alignment. This helps
 has some alignments with 0 mismatches, and some with 1, only those with 0 mismatches are kept. The option --mismatches
 controls this threshold, and can be set to 0, 1, or 2.
 
+*** WARNING : If the genome is large (.ebwtl bowtie indices are made, instead of .ebwt), there is a serious bowtie bug
+that has yet to be resolved involving the --best option. http://sourceforge.net/p/bowtie-bio/bugs/343/ . 
+To get around this, when aligning to a 'large' reference, ShortStack forces the number of allowed mismatches to be 0.
+
 =head3 Control of multi-mappers with --bowtie_m
 
 In general, we find it's not worth the time or effort to deal with 'extreme' multimapping reads. The --bowtie_m
@@ -5050,7 +5080,7 @@ ShortStack-specific tags of these files are described above (section Alignment o
 
 =head2 bowtie2 is newer than bowtie. Why do you still require bowtie but disallow bowtie2?  
 
-Answer: Two reasons. 1) unlike bowtie2, bowtie has support for colorspace data, and 2) According to the manuals for both programs, bowtie2 is optimized for longer (>50 nts) reads, while bowtie is optimized for shorter reads.
+Answer: Three reasons. 1) unlike bowtie2, bowtie has support for colorspace data, and 2) According to the manuals for both programs, bowtie2 is optimized for longer (>50 nts) reads, while bowtie is optimized for shorter reads. 3) Time. Despite the above comments, we will explore this transition in future versions of ShortStack.
 
 =head2 Why does ShortStack say that known MIRNA loci are NOT MIRNAs?
 

@@ -324,6 +324,13 @@ ALIGNMENT METHODS
     mismatches are kept. The option --mismatches controls this threshold,
     and can be set to 0, 1, or 2.
 
+    *** WARNING : If the genome is large (.ebwtl bowtie indices are made,
+    instead of .ebwt), there is a serious bowtie bug that has yet to be
+    resolved involving the --best option.
+    http://sourceforge.net/p/bowtie-bio/bugs/343/ . To get around this, when
+    aligning to a 'large' reference, ShortStack forces the number of allowed
+    mismatches to be 0.
+
     Control of multi-mappers with --bowtie_m
     In general, we find it's not worth the time or effort to deal with
     'extreme' multimapping reads. The --bowtie_m setting determines the
@@ -777,10 +784,11 @@ OUTPUT FILES
 
 FAQ
   bowtie2 is newer than bowtie. Why do you still require bowtie but disallow bowtie2?
-    Answer: Two reasons. 1) unlike bowtie2, bowtie has support for
+    Answer: Three reasons. 1) unlike bowtie2, bowtie has support for
     colorspace data, and 2) According to the manuals for both programs,
     bowtie2 is optimized for longer (>50 nts) reads, while bowtie is
-    optimized for shorter reads.
+    optimized for shorter reads. 3) Time. Despite the above comments, we
+    will explore this transition in future versions of ShortStack.
 
   Why does ShortStack say that known MIRNA loci are NOT MIRNAs?
     Answer: MIRNA annotation by ShortStack is, by design, meant to strongly
