@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.3.4nr1";
+my $version_num = "3.4";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -1175,9 +1175,13 @@ sub ebwt {
 	my $rev1l = "$rev1" . "l";
 	my $rev2l = "$rev2" . "l";
 	
-	unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
-	       ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) { 
-	    
+	if((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) {
+	    $itype = 's';
+	    return $itype;
+	} elsif ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l)) {
+	    $itype = 'l';
+	    return $itype;
+	} else {
 	    my $time = `date`;
 	    chomp $time;
 	    log_it($$options{'logfile'}, "\n$time");
@@ -1215,8 +1219,13 @@ sub ebwt {
 	my $rev1l = "$rev1" . "l";
 	my $rev2l = "$rev2" . "l";
 
-	unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
-	       ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) {
+	if ((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) {
+	    $itype = 's';
+	    return $itype;
+	} elsif ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l)) {
+	    $itype = 'l';
+	    return $itype;
+	} else {
 	    my $time = `date`;
 	    chomp $time;
 	    log_it($$options{'logfile'}, "\n$time");
@@ -4418,7 +4427,7 @@ __END__
 
 ShortStack
 
-Copyright (C) 2012-2015 Michael J. Axtell
+Copyright (C) 2012-2016 Michael J. Axtell
 
 This program is free software: you can redistribute it and/or modify                             
 it under the terms of the GNU General Public License as published by                             
@@ -4439,7 +4448,7 @@ Alignment of small RNA-seq data and annotation of small RNA-producing genes
 
 =head1 CITATIONS
 
-If you use ShortStack in your work, please cite:
+If you use ShortStack in your work, please cite one of the following:
 
 Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  RNA 19:740-751. doi:10.1261/rna.035279.112
 
@@ -4617,6 +4626,12 @@ to take between 20 minutes and 10 hours using default ShortStack settings.
 
 If ShortStack is given the --readfile option, alignments of the reads will be performed. Specifying 
 --readfile is mutually exclusive with both --bamfile or --cramfile
+
+=head2 Details of alignment methods and performance testing
+
+For full details on ShortStack's alignment methods and the results of performance testing, see
+Johnson et al. (2016) bioRxiv http://dx.doi.org/10.1101/044099.  This is a pre-print of a 
+manuscript that is under peer review as of this writing (March 17, 2016).
 
 =head2 Genome pre-processing
 
