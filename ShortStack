@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.4";
+my $version_num = "3.5";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -280,6 +280,13 @@ Alignment Options:
 --align_only : If this switch is present, the ShortStack run will terminate after the alignment phase
   with no analysis performed.
 
+--show_secondaries : If this switch is present, the output alignment file will contain secondary alignments
+  as well as primary alignments for multi-mapped reads. Secondary alignments have bit 256 set in the SAM FLAG field.
+  This option can increase alignment file size, sometimes by a lot.
+
+--keep_quals : As of version 3.5, by default ShortStack alignments no longer store the quality values, to save space. Use 
+  of this switch will cause quality values to be retained. Note that this increases file size.
+
 Analysis Options:
 
 --bamfile [string] : path to input .bam alignment file of small RNAs. Only lines with bits 4 and 256
@@ -356,7 +363,9 @@ sub get_ShortStack_options {
 	       'ranmax=s',
 	       'align_only',
 	       'sort_mem=s',
-	       'foldsize=i'
+	       'foldsize=i',
+	       'show_secondaries',
+	       'keep_quals'
 	);
     
     # If no options were passed, just print help and walk away
@@ -561,9 +570,9 @@ sub validate_genome {
 	die "\ngenomefile $$options{'genomefile'} was not readable\n\n$$usage\n";
     }
     
-    # check the suffix, which must be either .fa or .fasta
+    # check the suffix, which must end in either .fa or .fasta
     my($file,$path,$suffix) = fileparse($$options{'genomefile'}, qr/\.\S+$/);
-    unless(($suffix eq '.fa') or ($suffix eq '.fasta')) {
+    unless(($suffix =~ /\.fa$/) or ($suffix =~ /\.fasta$/)) {
 	die "\ngenomefile $$options{'genomefile'} does not have required suffix .fa or .fasta suffix found was $suffix\n\n$$usage\n";
     }
 }
@@ -582,7 +591,7 @@ sub validate_bamfile1 {
     
     # bamfile suffix must be .bam
     my($file,$path,$suffix) = fileparse($$options{'bamfile'}, qr/\.\S+$/);
-    unless($suffix eq '.bam') {
+    unless($suffix =~ /\.bam$/) {
 	die "\nbamfile $$options{'bamfile'} does not end with required file suffix .bam\n\n$$usage\n";
     }
 }
@@ -601,7 +610,7 @@ sub validate_cramfile1 {
     
     # cramfile suffix must be .cram
     my($file,$path,$suffix) = fileparse($$options{'cramfile'}, qr/\.\S+$/);
-    unless($suffix eq '.cram') {
+    unless($suffix =~ /\.cram$/) {
 	die "\ncramfile $$options{'cramfile'} does not have the required suffix .cram\n\n$$usage\n";
     }
 }
@@ -623,16 +632,16 @@ sub validate_readfile1 {
 	close FILE;
 	# suffix check
 	my($file,$path,$suffix) = fileparse($file, qr/\.\S+$/);
-	unless(($suffix eq '.fasta') or
-	       ($suffix eq '.fa') or
-	       ($suffix eq '.fastq') or
-	       ($suffix eq '.fq') or
-	       ($suffix eq '.fasta.gz') or
-	       ($suffix eq '.fa.gz') or
-	       ($suffix eq '.fastq.gz') or
-	       ($suffix eq '.csfasta') or
-	       ($suffix eq '.csfasta.gz') or
-	       ($suffix eq '.fq.gz')) {
+	unless(($suffix =~ /\.fasta$/) or
+	       ($suffix =~ /\.fa$/) or
+	       ($suffix =~ /\.fastq$/) or
+	       ($suffix =~ /\.fq$/) or
+	       ($suffix =~ /\.fasta.gz$/) or
+	       ($suffix =~ /\.fa.gz$/) or
+	       ($suffix =~ /\.fastq.gz$/) or
+	       ($suffix =~ /\.csfasta$/) or
+	       ($suffix =~ /\.csfasta.gz$/) or
+	       ($suffix =~ /\.fq.gz$/)) {
 	    die "\nreadfile $file does not end in a valid file suffix  suffix was $suffix file was $file path was $path \n\n$$usage\n";
 	}
     }
@@ -1819,8 +1828,8 @@ sub get_read_s_aln {
     
     # Determine the ebwt base name
     my($gbase,$gpath,$gsuffix) = fileparse($$options{'genomefile'}, qr/\.\S+$/);
-    my $ebwt_base = $$options{'genomefile'};
-    $ebwt_base =~ s/$gsuffix//g;
+    my $ebwt_base = $gpath . $gbase;
+    ## $ebwt_base =~ s/$gsuffix//g;
     if($format =~ /C/) {
 	$ebwt_base .= ".cs";
     }
@@ -1955,6 +1964,7 @@ sub get_read_s_aln {
 	    }
 	    # add RG:Z tag
 	    $_ .= "\tRG:Z:$base";
+	    
 	    push(@read_bucket, $_);
 	    $last_read = $this_read;
 	}
@@ -2094,7 +2104,7 @@ sub decider {
 	# open streams
 	open(IN, "gzip -d -c $rs_file |");
 	if(exists($$options{'sort_mem'})) {
-	    open(OUT, "| samtools view -u - | samtools sort -m $$options{'sort_mem'} -O bam -T $tempfile 2>> $$options{'error_logfile'} > $bam_file");
+		open(OUT, "| samtools view -u - | samtools sort -m $$options{'sort_mem'} -O bam -T $tempfile 2>> $$options{'error_logfile'} > $bam_file");
 	} else {
 	    open(OUT, "| samtools view -u - | samtools sort -O bam -T $tempfile 2>> $$options{'error_logfile'} > $bam_file");
 	}
@@ -2150,17 +2160,33 @@ sub decider {
 			    $XZ = sprintf("%.3f", (1 / (scalar @read_bucket)));
 			    # designate one randomly
 			    $index = int(rand(scalar @read_bucket));
-			    for($i = 0; $i < (scalar @read_bucket); ++$i) {
-				unless($i == $index) {
+			    
+			    if($$options{'show_secondaries'}) {
+				for($i = 0; $i < (scalar @read_bucket); ++$i) {
 				    @sam_fields = split ("\t", $read_bucket[$i]);
-				    $sam_fields[1] += 256; ## secondary alignment bit 0x100
-				    $sam_fields[9] = '*';  ## do not store SEQ on secondary alignments to save space
-				    $sam_fields[10] = '*'; ## do not store QUAL either
-				    $read_bucket[$i] = join("\t", @sam_fields);
+				    if($i == $index) {
+					unless($$options{'keep_quals'}) {
+					    $sam_fields[10] = '*';
+					}
+				    } else {
+					$sam_fields[1] += 256; ## secondary alignment bit 0x100
+					$sam_fields[9] = '*';  ## do not store SEQ on secondary alignments to save space
+					$sam_fields[10] = '*'; ## do not store QUAL either
+					$read_bucket[$i] = join("\t", @sam_fields);
+				    }
+				    # for randoms, all of em have the same XY and XZ tags
+				    $read_bucket[$i] .= "\tXY:Z:R\tXZ:f:$XZ";
+				    print OUT "$read_bucket[$i]\n";
 				}
-				# for randoms, all of em have the same XY and XZ tags
-				$read_bucket[$i] .= "\tXY:Z:R\tXZ:f:$XZ";
-				print OUT "$read_bucket[$i]\n";
+			    } else {
+				# not showing secondaries
+				@sam_fields = split ("\t", $read_bucket[$index]);
+				unless($$options{'keep_quals'}) {
+				    $sam_fields[10] = '*';
+				}
+				$read_bucket[$index] = join ("\t", @sam_fields);
+				$read_bucket[$index] .= "\tXY:Z:R\tXZ:f:$XZ";
+				print OUT "$read_bucket[$index]\n";
 			    }
 			} else {
 			    ## If we get here, then mmap is f or u
@@ -2198,25 +2224,41 @@ sub decider {
 	    }
 	    print OUT "$read_bucket[0]\n";
 	} elsif ($$options{'mmap'} eq 'r') {
-	    ## Read bucket is > 1, which means mmap could NOT have been none. 
+	    ## Read bucket is > 1, which means mmap could NOT have been n.
 	    ++$XYs{'R'};
 	    $XZ = sprintf("%.3f", (1 / (scalar @read_bucket)));
 	    # designate one randomly
 	    $index = int(rand(scalar @read_bucket));
-	    for($i = 0; $i < (scalar @read_bucket); ++$i) {
-		unless($i == $index) {
+	    
+	    if($$options{'show_secondaries'}) {
+		for($i = 0; $i < (scalar @read_bucket); ++$i) {
 		    @sam_fields = split ("\t", $read_bucket[$i]);
-		    $sam_fields[1] += 256; ## secondary alignment bit 0x100
-		    $sam_fields[9] = '*';  ## do not store SEQ on secondary alignments to save space
-		    $sam_fields[10] = '*'; ## do not store QUAL either
-		    $read_bucket[$i] = join("\t", @sam_fields);
+		    if($i == $index) {
+			unless($$options{'keep_quals'}) {
+			    $sam_fields[10] = '*';
+			}
+		    } else {
+			$sam_fields[1] += 256; ## secondary alignment bit 0x100
+			$sam_fields[9] = '*';  ## do not store SEQ on secondary alignments to save space
+			$sam_fields[10] = '*'; ## do not store QUAL either
+			$read_bucket[$i] = join("\t", @sam_fields);
+		    }
+		    # for randoms, all of em have the same XY and XZ tags
+		    $read_bucket[$i] .= "\tXY:Z:R\tXZ:f:$XZ";
+		    print OUT "$read_bucket[$i]\n";
 		}
-		# for randoms, all of em have the same XY and XZ tags
-		$read_bucket[$i] .= "\tXY:Z:R\tXZ:f:$XZ";
-		print OUT "$read_bucket[$i]\n";
+	    } else {
+		# not showing secondaries
+		@sam_fields = split ("\t", $read_bucket[$index]);
+		unless($$options{'keep_quals'}) {
+		    $sam_fields[10] = '*';
+		}
+		$read_bucket[$index] = join ("\t", @sam_fields);
+		$read_bucket[$index] .= "\tXY:Z:R\tXZ:f:$XZ";
+		print OUT "$read_bucket[$index]\n";
 	    }
 	} else {
-	    ## If we get here, then mmap is f or u.
+	    ## If we get here, then mmap is f or u
 	    ## Either way, use the density hash to get the odds of each read
 	    pick_mmap($density,\@read_bucket,\%XYs,$options);
 	    for($i = 0; $i < (scalar @read_bucket); ++$i) {
@@ -2224,6 +2266,7 @@ sub decider {
 	    }
 	}
 	@read_bucket = ();
+
 	# process read bucket ends here
 	
 	close OUT;
@@ -2392,6 +2435,12 @@ sub pick_mmap {
 	push(@temp, $$read_lines[0]);
 	$temp[0] =~ s/\tXY:Z:R/\tXY:Z:O/;
 	my @ff = split ("\t", $temp[0]);
+	if($ff[1] & 16) {
+	    # need to flip the SEQ back to original 
+	    my $original = reverse $ff[9];
+	    $original =~ tr/ACTG/TGAC/;
+	    $ff[9] = $original;
+	}
 	$ff[1] = 4;  # FLAG set to unmapped
 	$ff[2] = "\*";  # RNAME set to *
 	$ff[3] = 0; ## per SAM spec for unmapped read
@@ -2400,16 +2449,24 @@ sub pick_mmap {
 	$ff[6] = "*";
 	$ff[7] = 0;
 	$ff[8] = 0;
+	unless($$options{'keep_quals'}) {
+	    $ff[10] = '*';
+	}
 	my $temp_new = join("\t", @ff);
 	$temp[0] = $temp_new;
 	@$read_lines = @temp;
-    } else {
+    } elsif ($$options{'show_secondaries'}) {
 	for(my $k = 0; $k < (scalar @$read_lines); ++$k) {
 	    # TEST
 	    #print STDERR "at k $k read_lines is $$read_lines[$k]\n";
 	    # END TEST
-	    
-	    unless($k == $l) {
+	    if($k == $l) {
+		unless($$options{'keep_quals'}) {
+		    my @fields = split ("\t", $$read_lines[$l]);
+		    $fields[10] = '*';
+		    $$read_lines[$l] = join("\t", @fields);
+		}
+	    } else {
 		my @fields = split ("\t", $$read_lines[$k]);
 		$fields[1] += 256; ## secondary alignment bit 0x100
 		$fields[9] = '*';  ## do not store SEQ for secondary alignments IF a primary has been selected
@@ -2417,10 +2474,17 @@ sub pick_mmap {
 		$$read_lines[$k] = join("\t", @fields);
 	    }
 	}
+    } else {
+	# not showing secondaries.
+	unless($$options{'keep_quals'}) {
+	    my @fields = split ("\t", $$read_lines[$l]);
+	    $fields[10] = '*';
+	    $$read_lines[$l] = join("\t", @fields);
+	}
+	my @temp = ();
+	push(@temp, $$read_lines[$l]);
+	@$read_lines = @temp;
     }
-    # TEST
-    #exit;
-    # END TEST
 }
 
 sub merge_bams {
@@ -2528,7 +2592,6 @@ sub denovo {
     
     # get the names of the read-groups in the file (if any)
     my %read_groups = get_read_groups($options);  ## 'main' is ALWAYS defined.
-    my %rg_primaries = get_rg_primaries($options,\%read_groups);
     my $rg_count_file = "$$options{'outdir'}" . "\/Counts.txt";
     open(COUNTS, ">$rg_count_file");
     # Initialize the header of this file
@@ -2540,8 +2603,9 @@ sub denovo {
     if($$options{'mincov'} =~ /^\d+$/) {
 	$threshold = $&;
     } elsif ($$options{'mincov'} =~ /^([0-9]*\.[0-9]+|[0-9]+)rpm$/) {
-	$threshold = 1 + int(($1 * $rg_primaries{'main'}) / 1E6);
-	log_it($$options{'logfile'}, "\n\tAt specified mincov of $$options{'mincov'} with $rg_primaries{'main'} mapped reads,");
+	my $total_primaries = get_total_primaries($options);
+	$threshold = 1 + int(($1 * $total_primaries) / 1E6);
+	log_it($$options{'logfile'}, "\n\tAt specified mincov of $$options{'mincov'} with $total_primaries mapped reads,");
 	log_it($$options{'logfile'}, "\tmincov is $threshold raw alignments");
     }
     
@@ -3271,7 +3335,7 @@ sub countmode {
     
     # get the names of the read-groups in the file (if any)
     my %read_groups = get_read_groups($options);  ## 'main' is ALWAYS defined.
-    my %rg_primaries = get_rg_primaries($options,\%read_groups);
+    # my %rg_primaries = get_rg_primaries($options,\%read_groups);
     my $rg_count_file = "$$options{'outdir'}" . "\/Counts.txt";
     open(COUNTS, ">$rg_count_file");
     # Initialize the header of this file
@@ -3959,11 +4023,12 @@ sub plain_text {
 	$line .= '.';
     }
     $lc_seq = lc_from_mdz($kf[2],$kf[-1]);
+    $lc_seq =~ s/T/U/g;
+    $lc_seq =~ s/t/u/g;
     $line .= $lc_seq;
     for($i = ($kf[1] + (length $kf[2])); $i <= $fold_stop; ++$i) {
 	$line .= '.';
     }
-    $line =~ s/T/U/g;
     if($$strand eq '-') {
 	my $rc_line = reverse $line;
 	$rc_line =~ tr/AUCG/UAGC/;
@@ -3986,6 +4051,8 @@ sub plain_text {
     
     if($$real_star_key) {
 	$lc_seq = lc_from_mdz($kf[2],$kf[-1]);
+	$lc_seq =~ s/T/U/g;
+	$lc_seq =~ s/t/u/g;
 	$line .= $lc_seq;
 	$read_len = length $lc_seq;
     } else {
@@ -3999,7 +4066,6 @@ sub plain_text {
     for($i = ($kf[1] + $read_len); $i <= $fold_stop; ++$i) {
 	$line .= '.';
     }
-    $line =~ s/T/U/g;
     if($$strand eq '-') {
 	my $rc_line = reverse $line;
 	$rc_line =~ tr/AUCG/UAGC/;
@@ -4041,6 +4107,8 @@ sub plain_text {
 	}
 	
 	$lc_seq = lc_from_mdz($kf[2],$kf[-1]);  ## positions mismatching reference will be changed to lower-case
+	$lc_seq =~ s/T/U/g;
+	$lc_seq =~ s/t/u/g;
 	if($kf[3] ne $$strand) {
 	    $lc_seq =~ tr/ACTUGactug/UGAACugaac/;
 	}
@@ -4052,8 +4120,6 @@ sub plain_text {
 		$line .= '.';
 	    }
 	}
-	$line =~ s/T/U/g;
-	$line =~ s/t/u/g;
 	if($$strand eq '-') {
 	    my $rc_line = reverse $line;
 	    $rc_line =~ tr/AUCGaucg/UAGCuagc/;
@@ -4364,46 +4430,16 @@ sub check_RNAfold_version {
     }
 }
 
-sub get_rg_primaries {
-    my($options,$rgs) = @_;  ## references to hashes
-    my %primaries = (); ## keys: read-group names (including main), values: count of primary alignments
-    my $tally = 0;
-    log_it($$options{'logfile'}, "\nTally of primary alignments (exlcudes unmapped, secondary, duplicate,");
-    log_it($$options{'logfile'}, "failed QC, and supplementary alignments):");
-    if((scalar(keys %$rgs)) > 1) {
-	# there is at least one read-group besides main
-	my $rg;
-	my $x;
-	my @rg_sorted = sort {$$rgs{$a} <=> $$rgs{$b}} keys %$rgs;
-	for(my $i = 1; $i < (scalar @rg_sorted); ++$i) {  ## skips main, which has a value of 1 in the rgs hash
-	    if(exists($$options{'bamfile'})) {
-		open(X, "samtools view -F 3844 -c -r $rg_sorted[$i] $$options{'bamfile'} |");
-	    } elsif (exists($$options{'cramfile'})) {
-		open(X, "samtools view -F 3844 -c -r $rg_sorted[$i] $$options{'cramfile'} |");
-	    }
-	    $x = <X>;
-	    close X;
-	    chomp $x;
-	    $x =~ s/\s//g;
-	    $tally += $x;
-	    $primaries{$rg_sorted[$i]} = $x;
-	    log_it($$options{'logfile'}, "\tRead Group $rg_sorted[$i] : $x");
-	}
-    } else {
-	# no read-group but main
-	if(exists($$options{'bamfile'})) {
-	    open(X, "samtools view -F 3844 -c $$options{'bamfile'} |");
-	} elsif (exists($$options{'cramfile'})) {
-	    open(X, "samtools view -F 3844 -c $$options{'cramfile'} |");
-	}
-	$tally = <X>;
-	close X;
-	chomp $tally;
-	$tally =~ s/\s//g;
-    }
-    $primaries{'main'} = $tally;
-    log_it($$options{'logfile'}, "\tTOTAL: $tally");
-    return %primaries;
+sub get_total_primaries {
+    my($options) = @_;  ## reference to hash
+    open(X, "samtools view -F 3840 -c $$options{'bamfile'} |");
+    my $tally = <X>;
+    close X;
+    chomp $tally;
+    $tally =~ s/\s//g;
+    log_it($$options{'logfile'}, "\nTally of primary alignments (INCLUDES unmapped, but EXCLUDES secondary, duplicate,");
+    log_it($$options{'logfile'}, "failed QC, and supplementary alignments): $tally");
+    return $tally;
 }
 	    
 sub validate_sort_mem {
@@ -4449,6 +4485,12 @@ Alignment of small RNA-seq data and annotation of small RNA-producing genes
 =head1 CITATIONS
 
 If you use ShortStack in your work, please cite one of the following:
+
+=head2 VERSIONS 3.x and higher
+
+Johnson NR, Yeoh JM, Coruh C, Axtell MJ. (2016). G3 6:2103-2111. doi:10.1534/g3.116.030452
+
+=head2 OLDER VERSIONS 
 
 Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes.  RNA 19:740-751. doi:10.1261/rna.035279.112
 
@@ -4558,6 +4600,13 @@ Note that we have done our best to set default settings for all options that are
 --align_only : If this switch is present, the ShortStack run will terminate after the alignment phase
   with no analysis performed.
 
+--show_secondaries : If this switch is present, the output alignment file will contain secondary alignments
+  as well as primary alignments for multi-mapped reads. Secondary alignments have bit 256 set in the SAM FLAG field.
+  This option can increase alignment file size, sometimes by a lot.
+
+--keep_quals : As of version 3.5, by default ShortStack alignments no longer store the quality values, to save space. Use 
+  of this switch will cause quality values to be retained. Note that this increases file size.
+
 =head2 Analysis Options:
 
 --bamfile [string] : path to input .bam alignment file of small RNAs. Only lines with bits 4 and 256
@@ -4630,16 +4679,15 @@ If ShortStack is given the --readfile option, alignments of the reads will be pe
 =head2 Details of alignment methods and performance testing
 
 For full details on ShortStack's alignment methods and the results of performance testing, see
-Johnson et al. (2016) bioRxiv http://dx.doi.org/10.1101/044099.  This is a pre-print of a 
-manuscript that is under peer review as of this writing (March 17, 2016).
+Johnson et al. (2016) G3 6:2103-2111. doi:10.1534/g3.116.030452.
+
 
 =head2 Genome pre-processing
 
 =head3 Genome file format and naming
 
 All runs require a reference genome in FASTA format, specified with the --genomefile option. The file must
-have a valid suffix .. either .fa or .fasta. Remove any other . characters from the file name of the reference
-genome before using ShortStack.
+have a valid suffix .. either .fa or .fasta.
 
 Within the genome, if the name of a chromosome has whitespace characters, the name will be trimmed at the first whitespace character.
 
@@ -4684,7 +4732,7 @@ There is no support for paired-end reads in ShortStack. Small RNA data are assum
 
 Input reads are expected to be de-condensed. That is, if a small RNA was sequenced 10,000 times in a run, there should be 
 10,000 entries, each with a different header name, in the input readfile. In other words, ShortStack is designed
-to take reads right off the sequencer without any other pre-processing (except perhaps adapter trimming .. see below).
+to take reads right off the sequencer without any other pre-processing (except adapter trimming .. see below).
 
 =head3 Unique read names required
 
@@ -5097,7 +5145,7 @@ ShortStack-specific tags of these files are described above (section Alignment o
 
 Answer: Three reasons. 1) unlike bowtie2, bowtie has support for colorspace data, and 2) According to the manuals for both programs, bowtie2 is optimized for longer (>50 nts) reads, while bowtie is optimized for shorter reads. 3) Time. Despite the above comments, we will explore this transition in future versions of ShortStack.
 
-=head2 Why does ShortStack say that known MIRNA loci are NOT MIRNAs?
+=head2 Why does ShortStack say that are known MIRNA loci are NOT MIRNAs?
 
 Answer: MIRNA annotation by ShortStack is, by design, meant to strongly reduce, perhaps eliminate, false positives. Any locus given a MIRNA result of 'Y' by ShortStack has sufficiently strong evidence to support its annotation of a miRNA. However, reduction of false positives comes at a price .. there will be some false negatives .. true MIRNAs that are not reported as such by ShortStack. Users should consider a 'No' MIRNA result by ShortStack to mean that the evidence in that particular small RNA-seq run did not offer 100% proof that the locus was a MIRNA.
 

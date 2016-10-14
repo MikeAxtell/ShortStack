@@ -23,6 +23,11 @@ SYNOPSIS
 CITATIONS
     If you use ShortStack in your work, please cite one of the following:
 
+  VERSIONS 3.x and higher
+    Johnson NR, Yeoh JM, Coruh C, Axtell MJ. (2016). G3 6:2103-2111.
+    doi:10.1534/g3.116.030452
+
+  OLDER VERSIONS
     Axtell MJ. (2013) ShortStack: Comprehensive annotation and
     quantification of small RNA genes. RNA 19:740-751.
     doi:10.1261/rna.035279.112
@@ -156,6 +161,16 @@ OPTIONS
     --align_only : If this switch is present, the ShortStack run will
     terminate after the alignment phase with no analysis performed.
 
+    --show_secondaries : If this switch is present, the output alignment
+    file will contain secondary alignments as well as primary alignments for
+    multi-mapped reads. Secondary alignments have bit 256 set in the SAM
+    FLAG field. This option can increase alignment file size, sometimes by a
+    lot.
+
+    --keep_quals : As of version 3.5, by default ShortStack alignments no
+    longer store the quality values, to save space. Use of this switch will
+    cause quality values to be retained. Note that this increases file size.
+
   Analysis Options:
     --bamfile [string] : path to input .bam alignment file of small RNAs.
     Only lines with bits 4 and 256 unset will be used. Mutually exclusive
@@ -237,16 +252,14 @@ ALIGNMENT METHODS
 
   Details of alignment methods and performance testing
     For full details on ShortStack's alignment methods and the results of
-    performance testing, see Johnson et al. (2016) bioRxiv
-    http://dx.doi.org/10.1101/044099. This is a pre-print of a manuscript
-    that is under peer review as of this writing (March 17, 2016).
+    performance testing, see Johnson et al. (2016) G3 6:2103-2111.
+    doi:10.1534/g3.116.030452.
 
   Genome pre-processing
     Genome file format and naming
     All runs require a reference genome in FASTA format, specified with the
     --genomefile option. The file must have a valid suffix .. either .fa or
-    .fasta. Remove any other . characters from the file name of the
-    reference genome before using ShortStack.
+    .fasta.
 
     Within the genome, if the name of a chromosome has whitespace
     characters, the name will be trimmed at the first whitespace character.
@@ -296,7 +309,7 @@ ALIGNMENT METHODS
     sequenced 10,000 times in a run, there should be 10,000 entries, each
     with a different header name, in the input readfile. In other words,
     ShortStack is designed to take reads right off the sequencer without any
-    other pre-processing (except perhaps adapter trimming .. see below).
+    other pre-processing (except adapter trimming .. see below).
 
     Unique read names required
     The small RNA reads must all have unique names within a given file. If
@@ -796,7 +809,7 @@ FAQ
     optimized for shorter reads. 3) Time. Despite the above comments, we
     will explore this transition in future versions of ShortStack.
 
-  Why does ShortStack say that known MIRNA loci are NOT MIRNAs?
+  Why does ShortStack say that are known MIRNA loci are NOT MIRNAs?
     Answer: MIRNA annotation by ShortStack is, by design, meant to strongly
     reduce, perhaps eliminate, false positives. Any locus given a MIRNA
     result of 'Y' by ShortStack has sufficiently strong evidence to support
