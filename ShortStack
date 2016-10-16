@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.5";
+my $version_num = "3.5.1";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -2152,6 +2152,11 @@ sub decider {
 				# unique mapper
 				$read_bucket[0] .= "\tXY:Z:U\tXZ:f:1";
 				++$XYs{'U'};
+			    }
+			    unless($$options{'keep_quals'}) {
+				@sam_fields = split ("\t", $read_bucket[0]);
+				$sam_fields[10] = '*';
+				$read_bucket[0] = join ("\t", @sam_fields);
 			    }
 			    print OUT "$read_bucket[0]\n";
 			} elsif ($$options{'mmap'} eq 'r') {
