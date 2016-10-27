@@ -473,6 +473,15 @@ DE-NOVO CLUSTER FINDING
     threshold allows the sensitivity of cluster discovery to be normalized
     between libraries of different sizes.
 
+UNPLACED SMALL RNAS
+    As of version 3.6 and higher, de-novo identification of small RNA
+    clusters also will include reporting of unplaced small RNAs ... small
+    RNAs that were not placed on the reference genome. Only small RNAs with
+    an abundance higher than the limit set by option --mincov are reported.
+    These small RNAs typically inlcude RNAs that could not be aligned
+    anywhere on the reference, as well as multi-mapped RNAs where ShortStack
+    did not choose a alignment position for (see alignment methods).
+
 USER-SPECIFIED CLUSTERS
     Users can supply specific loci to analyze in two ways. For just one or a
     few loci, the option --locus can be used. The argument should be a
@@ -757,13 +766,28 @@ OUTPUT FILES
 
     19-end: Number of primary alignments of the indicated RNA size.
 
+  Unplaced file
+    The Unplaced.txt file is plain text, tab-delimited. It shows each
+    unplaced small RNA whose abundance was >= the limit set by --minocv.
+    This file is only created in a de-novo run. RNAs are sorted first by
+    length (ascending) and then by ASCII (ascending). Columns show the
+    sequence, its length, the total number of reads, and the number of
+    equally valid genome alignments.
+
+    In some cases the number of genome alignments may not be able to be
+    found. An entry of '?' indicates that the number of hits is unknown.
+    This will occur if the BAM file used was not created by ShortStack. An
+    entry of '??' indicates that conflicting information about the number of
+    hits is stored in the bam file.
+
   Counts file
     The Counts.txt file is plain text, tab-delimited. For each locus, it
     shows the total read counts observed, the mean read counts (n=10 from
     the resampling method described above), and the standard deviation (n=10
     from the resampling method described above). Each read-group is broken
     out seperately, and the sum of all read groups is also shown (termed
-    'main').
+    'main'). Data from unplaced small RNAs, if present, are also included in
+    Counts.txt
 
   MIRNAs directory
     This directory contains plain-text descriptions of each locus that was

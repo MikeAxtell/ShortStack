@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.5.1";
+my $version_num = "3.6";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -2875,6 +2875,18 @@ sub denovo {
 	##### End analysis block
     }
     close RESULTS;
+
+    ## Initiate search for unplaced RNAs
+    $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "Completed at $time");
+    log_it($$options{'logfile'}, "\nPerforming search for unplaced small RNAs.");
+    
+    unplaced($options, \%read_groups, \*COUNTS, \$threshold);
+    $time = `date`;
+    chomp $time;
+    log_it($$options{'logfile'}, "Completed at $time");
+
     close COUNTS;
 }
 
@@ -4421,7 +4433,87 @@ sub summarize {
     
     }
     log_it($$options{'logfile'}, "$report");
-
+    
+    # summarize unplaced, if exists
+    my $unp_file = "$$options{'outdir'}" . "\/Unplaced.txt";
+    if(-r $unp_file) {
+	# a hash for tracking
+	my %unp_hash = ();
+	# examine the file
+	open(UNP, "$unp_file");
+	while (<UNP>) {
+	    if($_ =~ /^\#/) {
+		next; ## header
+	    }
+	    my @unp_fields = split ("\t", $_);
+	    my $unp_l = $unp_fields[1];
+	    if($unp_l < $$options{'dicermin'}) {
+		$unp_l = 'short';
+	    } elsif ($unp_l > $$options{'dicermax'}) {
+		$unp_l = 'long';
+	    }
+	    if($unp_fields[-1] =~ /^0$/) {
+		# unplaced
+		++$unp_hash{'N'}{$unp_l};
+	    } elsif ($unp_fields[-1] =~ /\d/) {
+		# some type of multi-mapper
+		++$unp_hash{'M'}{$unp_l};
+	    } elsif ($unp_fields[-1] =~ /^\?\?$/) {
+		# no conflicting information for the sequence
+		++$unp_hash{'??'}{$unp_l};
+	    } else {
+		# no info at all
+		++$unp_hash{'?'}{$unp_l};
+	    }
+	}
+	close UNP;
+	my $unp_report = "Unplaced small RNAs\n";
+	$unp_report .= "Size";
+	my @types = sort keys %unp_hash;
+	foreach my $t (@types) {
+	    if($t eq 'N') {
+		$unp_report .= "\tNoAlignments";
+	    } elsif ($t eq 'M') {
+		$unp_report .= "\tMultiMapped";
+	    } elsif ($t eq '?') {
+		$unp_report .= "\tUnknown";
+	    } elsif ($t eq '??') {
+		$unp_report .= "\tConflicting";
+	    }
+	}
+	$unp_report .= "\n";
+	
+	$unp_report .= '<' . "$$options{'dicermin'}";
+	foreach my $t (@types) {
+	    if(exists($unp_hash{$t}{'short'})) {
+		$unp_report .= "\t$unp_hash{$t}{'short'}";
+	    } else {
+		$unp_report .= "\t0";
+	    }
+	}
+	$unp_report .= "\n";
+	for(my $k = $$options{'dicermin'}; $k <= $$options{'dicermax'}; ++$k) {
+	    $unp_report .= "$k";
+	    foreach my $t (@types) {
+		if(exists($unp_hash{$t}{$k})) {
+		    $unp_report .= "\t$unp_hash{$t}{$k}";
+		} else {
+		    $unp_report .= "\t0";
+		}
+	    }
+	    $unp_report .= "\n";
+	}
+	$unp_report .= '>' . "$$options{'dicermax'}";
+	foreach my $t (@types) {
+	    if(exists($unp_hash{$t}{'long'})) {
+		$unp_report .= "\t$unp_hash{$t}{'long'}";
+	    } else {
+		$unp_report .= "\t0";
+	    }
+	}
+	$unp_report .= "\n";
+	log_it($$options{'logfile'}, "$unp_report");
+    }
 }
 
 sub check_RNAfold_version {
@@ -4461,7 +4553,143 @@ sub validate_sort_mem {
     }
 }
 
+sub unplaced {
+    my($options, $read_groups, $counts_fh, $threshold) = @_;
+    # references to hash, hash, filehandle, scalar
+    my %entries  = ();
+
+    if(exists($$options{'bamfile'})) {
+	open(SAM, "samtools view -f 4 $$options{'bamfile'} |");
+    } elsif (exists($$options{'bamfile'})) {
+	open(SAM, "samtools view -f 4 $$options{'cramfile'} |");
+    } else {
+	log_it($$options{'logfile'}, "\nERROR could not open bam or cram file for unplaced searching. Skipping\n");
+	return 0;
+    }
+    my $seq;
+    my $rg;
+    while (<SAM>) {
+	chomp;
+	my @sf = split ("\t", $_);
+	# get seq
+	if($sf[1] & 16) {
+	    $seq = reverse uc $sf[9];
+	} else {
+	    $seq = uc $sf[9];
+	}
+	$seq =~ s/T/U/g;
+	my $n_hits;
+	if($_ =~ /\tXY:Z:(\S)/) {
+	    my $xyz = $1;
+	    if($xyz eq 'M') {
+		if($_ =~ /\tXM:i:(\d+)/) {
+		    $n_hits = '>' . $1;
+		} else {
+		    $n_hits = '?';
+		}
+	    } else {
+		if($_ =~ /\tXX:i:(\d+)/) {
+		    $n_hits = $1;
+		} else {
+		    $n_hits = '?';
+		}
+	    }
+	} else {
+	    $n_hits = '?';
+	}
+	if($_ =~ /RG:Z:(\S+)/) {
+	    if(exists($$read_groups{$1})) {
+		$rg = $1;
+	    }
+	}
+	if(exists($entries{$seq})) {
+	    # n_hits must match up or convert entry to '??'
+	    if($entries{$seq}{'n_hits'} ne $n_hits) {
+		$entries{$seq}{'n_hits'} = '??';
+	    }
+	    ++$entries{$seq}{'main'};
+	    if($rg) {
+		++$entries{$seq}{$rg};
+	    }
+	} else {
+	    $entries{$seq}{'main'} = 1;
+	    if($rg) {
+		$entries{$seq}{$rg} = 1;
+	    }
+	    $entries{$seq}{'n_hits'} = $n_hits;
+	}
+    }
+    close SAM;
+    
+    # winnow
+    while (($seq) = each %entries) {
+	unless($entries{$seq}{'main'} >= $$threshold) {
+	    delete $entries{$seq};
+	}
+    }
+    
+    # output to Unplaced.txt and Counts.txt
+    my @rg_sorted = sort {$$read_groups{$a} <=> $$read_groups{$b}} keys %$read_groups;
+    my $unplaced_file = "$$options{'outdir'}" . "\/Unplaced.txt";
+    open(UNPLACED, ">$unplaced_file");
+    print UNPLACED "\#RNA\tLength\tReads\tN_hits\n";
+    my @rnas = keys %entries;
+    my @sorted = get_sorted_rnas(@rnas);
+    
+    foreach $seq (@sorted) {
+	print UNPLACED "$seq\t";
+	my $l = length $seq;
+	print UNPLACED "$l\t";
+	print UNPLACED "$entries{$seq}{'main'}\t";
+	print UNPLACED "$entries{$seq}{'n_hits'}\n";
 	
+	print $counts_fh "$seq\t$entries{$seq}{'main'}\tNA\tNA";
+	foreach $rg (@rg_sorted) {
+	    print $counts_fh "\t";
+	    if(exists($entries{$seq}{$rg})) {
+		print $counts_fh "$entries{$seq}{$rg}\tNA\tNA";
+	    } else {
+		print $counts_fh "0\tNA\tNA";
+	    }
+	}
+	print $counts_fh "\n";
+    }
+    close UNPLACED;
+}
+
+sub get_sorted_rnas {
+    my(@input) = @_;
+    
+    my @sort1 = sort {length $a <=> length $b} @input;
+    # now they should be sorted in ascending order by sRNA length
+    
+    # within each length, should be sorted by sequence
+    my $last_length = -1;
+    my @temp = ();
+    my @out = ();
+    my $this_l;
+    
+    foreach my $rna (@sort1) {
+	$this_l = length $rna;
+	if(($this_l != $last_length) and (@temp)) {
+	    my @temp2 = sort @temp;
+	    foreach my $x (@temp2) {
+		push(@out, $x);
+	    }
+	    @temp = ();
+	}
+	push(@temp, $rna);
+	$last_length = $this_l;
+    }
+    my @temp2 = sort @temp;
+    foreach my $x (@temp2) {
+	push(@out, $x);
+    }
+    return @out;
+}
+
+	
+
 __END__
 
 =head1 LICENSE
@@ -4873,6 +5101,15 @@ by using a value such as 3.2rpm (which specifies the threshold to be 3.2 reads p
 Using a rpm threshold allows the sensitivity of cluster discovery to be normalized between
 libraries of different sizes.
 
+=head1 UNPLACED SMALL RNAS
+
+As of version 3.6 and higher, de-novo identification of small RNA clusters also will include
+reporting of unplaced small RNAs ... small RNAs that were not placed on the reference genome.
+Only small RNAs with an abundance higher than the limit set by option --mincov are reported.
+These small RNAs typically inlcude RNAs that could not be aligned anywhere on the reference, as
+well as multi-mapped RNAs where ShortStack did not choose a alignment position for (see alignment
+methods). 
+
 =head1 USER-SPECIFIED CLUSTERS
 
 Users can supply specific loci to analyze in two ways. For just one or a few loci, the option
@@ -5107,11 +5344,22 @@ the analysis. The columns are labeled in the first row, and are:
 
 19-end: Number of primary alignments of the indicated RNA size.
 
+=head2 Unplaced file
+
+The Unplaced.txt file is plain text, tab-delimited. It shows each unplaced small RNA whose abundance was >= the limit set
+by --minocv. This file is only created in a de-novo run. RNAs are sorted first by length (ascending) and then by ASCII (ascending). 
+Columns show the sequence, its length, the total number of reads, and the number of equally valid genome alignments.
+
+In some cases the number of genome alignments may not be able to be found. An entry of '?' indicates that the number of hits
+is unknown. This will occur if the BAM file used was not created by ShortStack. An entry of '??' indicates that conflicting
+information about the number of hits is stored in the bam file.
+
 =head2 Counts file
 
 The Counts.txt file is plain text, tab-delimited. For each locus, it shows the total read counts observed, the mean read counts
 (n=10 from the resampling method described above), and the standard deviation (n=10 from the resampling method described
-above). Each read-group is broken out seperately, and the sum of all read groups is also shown (termed 'main').
+above). Each read-group is broken out seperately, and the sum of all read groups is also shown (termed 'main'). Data from 
+unplaced small RNAs, if present, are also included in Counts.txt
 
 =head2 MIRNAs directory
 
