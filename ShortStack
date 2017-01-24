@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.6";
+my $version_num = "3.7";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -58,6 +58,10 @@ if(exists($options{'cquals'})) {
     validate_cquals(\%options,\$usage_message);
 }
 
+if(exists($options{'total_primaries'})) {
+    validate_total_primaries(\%options,\$usage_message);
+}
+
 ######### check for invalid combinations of input file_paths
 if((${$options{'readfile'}}[0]) and
    ((exists($options{'bamfile'})) or (exists($options{'cramfile'})))) {
@@ -71,6 +75,11 @@ if((exists($options{'bamfile'})) and (exists($options{'cramfile'}))) {
 if(((exists($options{'bamfile'})) or (exists($options{'cramfile'}))) and
    (exists($options{'align_only'}))) {
     die "Invalid option combination: align_only can't be specified if a bamfile or cramfile is provided\n\n$usage_message\n";
+}
+if(exists($options{'total_primaries'})) {
+    unless((exists($options{'bamfile'})) or (exists($options{'cramfile'}))) {
+	die "Invalid option combination: The option total_primaries can only be used in conjunction with bamfile or cramfile\n\n$usage_message\n";
+    }
 }
 
 ######### Validate the other options #####
@@ -148,6 +157,7 @@ if(@t_readfiles) {
     
     align_master(\%options,\@t_readfiles,\$version_num,\$command_line);
     # After this, options{'bamfile'} or options{'cramfile'} will be set. 
+    # Also, $options{'total_primaries'}
     # Abort if align_only was specified
     if((exists($options{'align_only'}))) {
 	log_it($options{'logfile'}, "\nRun was set to align_only - terminating");
@@ -156,7 +166,11 @@ if(@t_readfiles) {
 	exit;
     }
 }
-
+# count the number of primary alignments, if it's not done already
+# This will be the base in a countmode analysis where the user didn't state --total_primaries explicitly on the command line.
+unless(exists($options{'total_primaries'})) {
+    get_total_primaries(\%options);
+}
 # analyze
 if(($options{'locifile'}) or ($options{'locus'})) {
     ensure_aln_idx(\%options);
@@ -312,7 +326,7 @@ Analysis Options:
 
 --locus [string] : Analyze the specified interval(s). Interval(s) is specified in format Chr:start-stop.
   Multiple intervals can be specified in a comma-separated list. Mutually exclusive with option 
-  --locifile.
+  --locifile. Specify the value for --total_primaries to make a single locus run fast.
 
 --nohp : Disable MIRNA search.
 
@@ -323,7 +337,11 @@ Analysis Options:
   integer between 1 and 50000. Can also be a normalized value in reads per million. When specifying mincov in 
   reads per million, the mincov value must be a floating point number > 0 and < 500,000 followed
   by the string 'rpm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
-  3.2 reads per million mapped. Deafult: 5 (raw reads).
+  3.2 reads per million mapped. Deafult: 20 (raw reads).
+
+--total_primaries [integer] : Tell ShortStack the total number of primary alignments in the bam file. Specifying
+  this value here speeds the analysis, since ShortStack does not need to count the reads directly from the bam file.
+  Can only be specified in conjunction with --bamfile. This count should include all primary alignment INCLUDING unplaced ones.
 
 Type perldoc ShortStack for documentation, or see README
 
@@ -365,7 +383,8 @@ sub get_ShortStack_options {
 	       'sort_mem=s',
 	       'foldsize=i',
 	       'show_secondaries',
-	       'keep_quals'
+	       'keep_quals',
+	       'total_primaries=i'
 	);
     
     # If no options were passed, just print help and walk away
@@ -374,6 +393,18 @@ sub get_ShortStack_options {
 	die "$usage_message\n";
     }
     return %options;
+}
+
+sub validate_total_primaries {
+    my($options,$usage) = @_;
+    if(exists($$options{'total_primaries'})) {
+	unless($$options{'total_primaries'} =~ /^\d+$/) {
+	    die "\nentry for option --total_primaries is invalid. Must be an integer of 1 or more.\n\n$$usage\n";
+	}
+	unless($$options{'total_primaries'} >= 1) {
+	    die "\nentry for option --total_primaries is invalid. Must be an integer of 1 or more.\n\n$$usage\n";
+	}
+    }
 }
 
 sub validate_locus {
@@ -571,8 +602,8 @@ sub validate_genome {
     }
     
     # check the suffix, which must end in either .fa or .fasta
-    my($file,$path,$suffix) = fileparse($$options{'genomefile'}, qr/\.\S+$/);
-    unless(($suffix =~ /\.fa$/) or ($suffix =~ /\.fasta$/)) {
+    my($file,$path,$suffix) = fileparse($$options{'genomefile'}, qr/\.[^\.]+$/);
+    unless(($suffix eq '.fa') or ($suffix eq '.fasta')) {
 	die "\ngenomefile $$options{'genomefile'} does not have required suffix .fa or .fasta suffix found was $suffix\n\n$$usage\n";
     }
 }
@@ -811,9 +842,9 @@ sub validate_pad {
 sub validate_mincov {
     my ($options,$usage) = @_; ## references to a hash and a scalar
     my $float;
-    # if not provided by user, set mincov to default value of 5
+    # if not provided by user, set mincov to default value of 20 (upped from 5 as of v3.7)
     unless($$options{'mincov'}) {
-	$$options{'mincov'} = 5;
+	$$options{'mincov'} = 20;
     }
     # verify that mincov is an integer or a float followed by 'rpm'
     unless(($$options{'mincov'} =~ /^\d+$/) or
@@ -957,7 +988,7 @@ sub stitch_genome {
     log_it($$options{'logfile'}, "\tthis run, and start a new one with option --nostitch");
     
     # Create a file for the new, stitched genome
-    my($og,$og_path,$og_suffix) = fileparse($$options{'genomefile'}, qr/\.\S+$/);
+    my($og,$og_path,$og_suffix) = fileparse($$options{'genomefile'}, qr/\.[^\.]+$/);
     my $sg_file = "$$options{'outdir'}" . "/$og" . "_stitched" . "$og_suffix";
     open(SG, ">>$sg_file");
     
@@ -1162,7 +1193,7 @@ sub ebwt {
     }
     
     # get file basename for genome
-    my($gen_file,$gen_path,$gen_suffix) = fileparse($$options{'genomefile'}, qr/\.\S+$/);
+    my($gen_file,$gen_path,$gen_suffix) = fileparse($$options{'genomefile'}, qr/\.[^\.]+/);
     
     # variable to store type .. large or small
     my $itype;
@@ -1321,7 +1352,7 @@ sub trim_fasta {
     }
 
     # Open the output file
-    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.\S+$/);
+    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.[^\.]+$/);
     my $outfile = $$options{'outdir'} . "/" . $readbase . "_trimmed" . $readsuffix;
     if($gz) {
 	open(OUT, "| gzip >> $outfile");
@@ -1405,7 +1436,7 @@ sub trim_fastq {
     }
 
     # Open the output file
-    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.\S+$/);
+    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.[^\.]+$/);
     my $outfile = $$options{'outdir'} . "/" . $readbase . "_trimmed" . $readsuffix;
     if($gz) {
 	open(OUT, "| gzip >> $outfile");
@@ -1496,7 +1527,7 @@ sub trim_csfasta {
     }
     
     # Open the output file
-    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.\S+$/);
+    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.[^\.]+$/);  ## suffix here only last dot
     my $outfile = $$options{'outdir'} . "/" . $readbase . "_trimmed" . $readsuffix;
     if($gz) {
 	open(OUT, "| gzip >> $outfile");
@@ -1577,7 +1608,7 @@ sub trim_csfasta_and_qual {
     }
     
     # Open the output files for reads and quals
-    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.\S+$/);
+    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.[^\.]+$/); ## suffix only after LAST .
     my $outfile = $$options{'outdir'} . "/" . $readbase . "_trimmed" . $readsuffix;
     my $q_outfile = $$options{'outdir'} . "/" . $readbase . "_trimmed" . ".qual";
     if($gz) {
@@ -1718,7 +1749,7 @@ sub validate_cquals {
     
     # Check if each qual file is readable and has suffix .qual (NO .gz allowed!)
     foreach my $qf (@{$$options{'cquals'}}) {
-	my($qname,$qpath,$qsuffix) = fileparse($qf, qr/\.\S+$/);
+	my($qname,$qpath,$qsuffix) = fileparse($qf, qr/\.[^\.]+$/);
 	(open(FILE, "$qf")) || die "\nColor-space quality file $qf from option --cquals was not readable\n$$usage\n";
 	close FILE;
 	unless($qsuffix eq ".qual") {
@@ -1748,7 +1779,7 @@ sub align_master {
     my %density = ();
     
     foreach my $t_readfile (@$t_readfiles) {
-	my($base,$path,$suffix) = fileparse($t_readfile, qr/\.\S+$/);
+	my($base,$path,$suffix) = fileparse($t_readfile, qr/\.[^\.]+$/);
 
         # Check about cqualfiles ... 
         #   if the array is not empty, then, if options{'adapter'} exists, ShortStack trimmed them .. if not, they were already trimmed by user
@@ -1767,7 +1798,7 @@ sub align_master {
 	    close FILE;
 	    ++$i;
 	    # double-check that the trimmmed reads are .csfasta format (or .csfasta.gz).
-	    unless($suffix =~ /\.csfasta/) {
+	    unless(($suffix eq '.csfasta') or (($suffix eq '.gz') and ($base =~ /\.csfasta$/))) {
 		log_it($$options{'logfile'}, "\nFATAL in sub-routine align_master : color-space quality values found but read file $t_readfile does not appear to be a csfasta or csfasta.gz file\n");
 		exit;
 	    }
@@ -1808,18 +1839,20 @@ sub get_read_s_aln {
     
     
     # Determine formatting of reads input
-    my($base,$path,$suffix) = fileparse($$reads, qr/\.\S+$/);
+    my $stripped_reads = $$reads;
     my $gz;
-    if($suffix =~ /\.gz$/) {
+    if($stripped_reads =~ /\.gz$/) {
 	$gz = 1;
-	$suffix =~ s/\.gz$//g;
+	$stripped_reads =~ s/\.gz$//;
     }
+
+    my($base,$path,$suffix) = fileparse($$reads, qr/\.[^\.]+$/);
     my $format;
-    if($suffix =~ /\.csfasta$/) {
+    if($suffix eq '.csfasta') {
 	$format = "-C -f";
-    } elsif (($suffix =~ /\.fasta$/) or ($suffix =~ /\.fa$/)) {
+    } elsif (($suffix eq '.fasta') or ($suffix eq '.fa')) {
 	$format = "-f";
-    } elsif (($suffix =~ /\.fastq$/) or ($suffix =~ /\.fq$/)) {
+    } elsif (($suffix eq '.fastq') or ($suffix eq '.fq')) {
 	$format = "-q";
     } else {
 	log_it($$options{'logfile'}, "\nFATAL in sub-routine get_read_s_aln : Could not determine format of reads file $$reads");
@@ -1827,7 +1860,7 @@ sub get_read_s_aln {
     }
     
     # Determine the ebwt base name
-    my($gbase,$gpath,$gsuffix) = fileparse($$options{'genomefile'}, qr/\.\S+$/);
+    my($gbase,$gpath,$gsuffix) = fileparse($$options{'genomefile'}, qr/\.[^\.]+$/);
     my $ebwt_base = $gpath . $gbase;
     ## $ebwt_base =~ s/$gsuffix//g;
     if($format =~ /C/) {
@@ -1872,7 +1905,14 @@ sub get_read_s_aln {
     log_it($$options{'logfile'}, "Starting alignment of $$reads with bowtie command:\n\t$bowtie_cl");
     
     # Open file handles
-    open (SAM, "$bowtie_cl 2>> $$options{'error_logfile'} |");
+    # If bowtie_cores is > 1 , need to use samtools sort to ensure output is sorted by read name .. pertinent for
+    #  bowtie versions 1.2.0 and higher
+    if($$options{'bowtie_cores'} > 1) {
+	my $tempfile = $$options{'outdir'} . "\/" . $base . "_temp";
+	open (SAM, "$bowtie_cl 2>> $$options{'error_logfile'} | samtools sort -n -O sam -m $$options{'sort_mem'} -T $tempfile - 2>> $$options{'error_logfile'} |");
+    } else {
+	open (SAM, "$bowtie_cl 2>> $$options{'error_logfile'} |");
+    }
     open (OUT, "| gzip > $outfile");
     
     my $last_read = 'NULL';
@@ -2095,9 +2135,10 @@ sub decider {
     foreach my $rs_file (@$read_sorted_files) {
 	log_it($$options{'logfile'}, "\tWorking on $rs_file");
 	# parse file path of input file
-	my($file,$path,$suffix) = fileparse($rs_file, qr/\.\S+$/);
+	my($file,$path,$suffix) = fileparse($rs_file, qr/\.[^\.]+$/);
 	# name the output file
 	$file =~ s/_readsorted//g;
+	$file =~ s/\.sam$//g;
 	my $bam_file = "$path" . "$file" . ".bam";
 	# name a temp file
 	my $tempfile = "$path" . "$file" . "_temp";
@@ -2310,6 +2351,9 @@ sub decider {
 	log_it($$options{'logfile'}, "\tXY:Z:R -- Multi-mapped with primary alignment chosen randomly: $XYs{'R'} / $XYsum \($R_percent \%\)");
 	log_it($$options{'logfile'}, "\tXY:Z:P -- Multi-mapped with primary alignment chosen based on $$options{'mmap'}: $XYs{'P'} / $XYsum \($P_percent \%\)");
     }
+    
+    $$options{'total_primaries'} = $XYsum;
+    
     return @bam_files;
 }
 
@@ -2588,8 +2632,8 @@ sub denovo {
     open(RESULTS, ">$results_txt");
     
     # Add header to Results file
-    print RESULTS "\#Locus\tName\tLength\tReads\tMeanReads\tStdevReads\tUniqueReads\tFracTop\tStrand\tMajorRNA\tMajorRNAReads\t";
-    print RESULTS "Complexity\tDicerCall\tMIRNA\tPhaseSize\tPhaseScore\tShort\tLong";
+    print RESULTS "\#Locus\tName\tLength\tReads\tRPM\tUniqueReads\tFracTop\tStrand\tMajorRNA\tMajorRNAReads\t";
+    print RESULTS "Complexity\tDicerCall\tMIRNA\tPhaseScore\tShort\tLong";
     for (my $dcs = $$options{'dicermin'}; $dcs <= $$options{'dicermax'}; ++$dcs) {
 	print RESULTS "\t$dcs";
     }
@@ -2608,9 +2652,8 @@ sub denovo {
     if($$options{'mincov'} =~ /^\d+$/) {
 	$threshold = $&;
     } elsif ($$options{'mincov'} =~ /^([0-9]*\.[0-9]+|[0-9]+)rpm$/) {
-	my $total_primaries = get_total_primaries($options);
-	$threshold = 1 + int(($1 * $total_primaries) / 1E6);
-	log_it($$options{'logfile'}, "\n\tAt specified mincov of $$options{'mincov'} with $total_primaries mapped reads,");
+	$threshold = 1 + int(($1 * $$options{'total_primaries'}) / 1E6);
+	log_it($$options{'logfile'}, "\n\tAt specified mincov of $$options{'mincov'} with $$options{'total_primaries'} mapped reads,");
 	log_it($$options{'logfile'}, "\tmincov is $threshold raw alignments");
     }
     
@@ -2641,24 +2684,15 @@ sub denovo {
     
     my $cluster_n = 0;  ## for naming of the de-novo clusters
     my $cluster_name;
-    # TEST
-    # my $test = 0;
-    # END TEST
-    
-    ### my @primaries = ();
     
     my %all = (); ## primary reads ... {readgroup}{Chr\tleft\tSEQ\tstrand\tMDZ}
     my $all_tally = 0; ## total number of primaries across all read groups
     my $unq = 0; ## simple count of uniquely aligned primary reads across all read groups
-    my %resamples = ();  ## simple counts of re-sampled tallies by readgroup. {readgroup}{n} => tally
-    ## my %sequences = (); ## keys are sequences of primaries, values are frequencies. read sequences, not template sequences .. per SAM
     
     my $all_key;
     my $rg;
     my $is_unique;
     my $prob;
-    my $resamp;
-    ## my $sequence;
     my $mdz;
     
     my $illegals = 0;
@@ -2722,7 +2756,7 @@ sub denovo {
 		    my($coords,$loc_size) = get_coords(\%all); ## based on 'main'
 		    print RESULTS "$coords\t$cluster_name\t$loc_size";
 		    print COUNTS "$coords\t$cluster_name";
-		    analyze_locus($options, \*RESULTS, \*COUNTS, \%read_groups, \%all, \$unq, \%resamples, \$coords, \$loc_size, \$cluster_name);
+		    analyze_locus($options, \*RESULTS, \*COUNTS, \%read_groups, \%all, \$unq, \$coords, \$loc_size, \$cluster_name);
 		}
 		##### End analysis block
 	    }
@@ -2732,8 +2766,6 @@ sub denovo {
 	    %all = ();
 	    $all_tally = 0;
 	    $unq = 0;
-	    %resamples = ();
-	    ## %sequences = ();
 	    
 	    # Process current read ... if it is a primary, open a new entry, process accordingly
 	    unless($fields[1] & 256) {
@@ -2752,46 +2784,11 @@ sub denovo {
 		if($is_unique) {
 		    ++$unq;
 		}
-		for($resamp = 1; $resamp <= 10; ++$resamp) {
-		    if($prob == 1) {
-			++$resamples{$rg}{$resamp};
-			unless($rg eq 'main') {
-			    ++$resamples{'main'}{$resamp};
-			}
-		    } elsif ($prob) {
-			if(rand() < $prob) {
-			    ++$resamples{$rg}{$resamp};
-			    unless($rg eq 'main') {
-				++$resamples{'main'}{$resamp};
-			    }
-			}
-		    }
-		}
-
-		
-		# TEST
-		# print STDERR "\tOpened and captured\n";
-		# END TEST
 	    }
 	} else {
 	    ## This clause ... must be the same chromosome, and at a proper distance
 	    ## So, if open, keep current read no matter what, and store last_right if it's a primary alignment
 	    if($open) {
-		for($resamp = 1; $resamp <= 10; ++$resamp) {
-		    if($prob == 1) {
-			++$resamples{$rg}{$resamp};
-			unless($rg eq 'main') {
-			    ++$resamples{'main'}{$resamp};
-			}
-		    } elsif ($prob) {
-			if(rand() < $prob) {
-			    ++$resamples{$rg}{$resamp};
-			    unless($rg eq 'main') {
-				++$resamples{'main'}{$resamp};
-			    }
-			}
-		    }
-		}
 		unless($fields[1] & 256) {
 		    if($fields[1] & 16) {
 			$all_key = "$fields[2]" . "\t" . "$fields[3]" . "\t" . "$fields[9]" . "\t" . "\-" . "\t" . "$mdz";
@@ -2808,9 +2805,6 @@ sub denovo {
 		    }
 		    $last_right = $right;
 		}
-		# TEST
-		# print STDERR "\tCaptured\n";
-		# END TEST
 	    } else {
 		## ... or, if not open, open it if it is a primary
 		unless($fields[1] & 256) {
@@ -2828,21 +2822,6 @@ sub denovo {
 		    ++$all_tally;
 		    if($is_unique) {
 			++$unq;
-		    }
-		    for($resamp = 1; $resamp <= 10; ++$resamp) {
-			if($prob == 1) {
-			    ++$resamples{$rg}{$resamp};
-			    unless($rg eq 'main') {
-				++$resamples{'main'}{$resamp};
-			    }
-			} elsif ($prob) {
-			    if(rand() < $prob) {
-				++$resamples{$rg}{$resamp};
-				unless($rg eq 'main') {
-				    ++$resamples{'main'}{$resamp};
-				}
-			    }
-			}
 		    }
 		    
 		    # TEST
@@ -2870,7 +2849,7 @@ sub denovo {
 	    my($coords,$loc_size) = get_coords(\%all);
 	    print RESULTS "$coords\t$cluster_name\t$loc_size";
 	    print COUNTS "$coords\t$cluster_name";
-	    analyze_locus($options, \*RESULTS, \*COUNTS, \%read_groups, \%all, \$unq, \%resamples, \$coords, \$loc_size, \$cluster_name);
+	    analyze_locus($options, \*RESULTS, \*COUNTS, \%read_groups, \%all, \$unq, \$coords, \$loc_size, \$cluster_name);
 	}
 	##### End analysis block
     }
@@ -2891,26 +2870,25 @@ sub denovo {
 }
 
 sub analyze_locus {
-    my($options, $res_fh, $cou_fh, $read_groups, $all, $unq, $resamples, $coords, $loc_size, $loc_name) = @_;
-    ## references to hash, filehandle, filehandle, hash, hash, scalar, hash, hash, scalar, scalar, and scalar
-    
-    # observed, mean, and stdev ... first for main:
+    my($options, $res_fh, $cou_fh, $read_groups, $all, $unq, $coords, $loc_size, $loc_name) = @_;
+        
+    # first for main:
     my $observed;
-    my $mean;
-    my $sd;
     my $rg = 'main';
     my $observed_main = get_obs_from_all($all, \$rg);
-    ($mean,$sd) = get_mean_sd_from_resamples($resamples,\$rg);
-    print $res_fh "\t$observed_main\t$mean\t$sd";
-    print $cou_fh "\t$observed_main\t$mean\t$sd";
+    print $res_fh "\t$observed_main";
+    print $cou_fh "\t$observed_main";
     
-    # Now get observed, mean, and stdevs from the read groups separately
+    # RPM
+    my $rpm = sprintf("%.3f", 1E6 * ($observed_main / $$options{'total_primaries'}));
+    print $res_fh "\t$rpm";
+
+    # from the read groups separately
     my @rg_sorted = sort {$$read_groups{$a} <=> $$read_groups{$b}} keys %$read_groups;
     foreach $rg (@rg_sorted) {
 	unless($rg eq 'main') {
 	    $observed = get_obs_from_all($all, \$rg);
-	    ($mean,$sd) = get_mean_sd_from_resamples($resamples,\$rg);
-	    print $cou_fh "\t$observed\t$mean\t$sd";
+	    print $cou_fh "\t$observed";
 	}
     }
     print $cou_fh "\n";
@@ -2993,17 +2971,14 @@ sub analyze_locus {
     }
     
     # Phasing
-    if($observed_main == 0) {
-	print $res_fh "\tNP1\tNA";
-    } elsif ($dicer_call =~ /[^\d]/) {
-	print $res_fh "\tNP2\tNA";
-    } elsif ($$loc_size < (3 * $dicer_call)) {
-	print $res_fh "\tNP3\tNA";
-    } elsif ($strand_call =~ /[\-\+]/) {
-	print $res_fh "\tNP4\tNA";
+    if(($observed_main == 0) or
+       ($dicer_call =~ /[^\d]/) or
+       ($$loc_size < (3 * $dicer_call)) or
+       ($strand_call =~ /[\-\+]/)) {
+	print $res_fh "\t-1";
     } else {
-	my($phase_size,$phase_score) = phaser($all,$options,$coords);
-	print $res_fh "\t$phase_size\t$phase_score";
+	my $phase_score = phaser($all,$options,$coords);
+	print $res_fh "\t$phase_score";
     }
     
     # print lengths .. short, long, DicerCalls
@@ -3017,17 +2992,15 @@ sub analyze_locus {
 }
 
 sub phaser {
-    # Based on equation 3 of Guo et al. (2015) doi:10.1093/bioinformatics/btu628
-    my($all,$options,$coords) = @_; ## references to hashes
-    my $best_score;
-    my $best_size;
+    # Based on modified version of equation 3 of Guo et al. (2015) doi:10.1093/bioinformatics/btu628
+    my($all,$options,$coords) = @_; ## references to 3 hashes and a scalar 
     
     my $pr;
     my $pn;
     my $pa;
     my $score;
     
-    my $size;
+    my $size = 21;
     my $loc_start;
     my %abun = ();
     my %distinct = ();
@@ -3037,47 +3010,34 @@ sub phaser {
     my @kf = ();
     my $bin;
     
-    my $sum;
-    for($size = $$options{'dicermin'}; $size <= $$options{'dicermax'}; ++$size) {
-	%abun = ();
-	%distinct = ();
-	$sum = 0;
-	foreach $k (keys %{$$all{'main'}}) {
-	    @kf = split ("\t", $k);
-	    if($kf[3] eq '+') {
-		$fivep_corrected = $kf[1];
-	    } else {
-		$fivep_corrected = $kf[1] + 2;
-	    }
-	    $bin = $fivep_corrected % $size;  ## ranges from 0 to $size - 1.
-	    $abun{$bin} += $$all{'main'}{$k};
-	    ++$distinct{$bin};
-	    $sum += $$all{'main'}{$k};
+    my $sum = 0;
+    my $rpm;
+    my $rounded;
+    foreach $k (keys %{$$all{'main'}}) {
+	@kf = split ("\t", $k);
+	if($kf[3] eq '+') {
+	    $fivep_corrected = $kf[1];
+	} else {
+	    $fivep_corrected = $kf[1] + 2;
 	}
-	my @sorted = sort {$abun{$b} <=> $abun{$a}} keys %abun;
-	# $sorted[0] is the best bin
-	if($sum) {
-	    $pr = $abun{$sorted[0]} / $sum;
-	    $pn = $distinct{$sorted[0]};
-	    $pa = log($abun{$sorted[0]});
-	    $score = $pr * $pn * $pa;
-	    if($best_score) {
-		if($score > $best_score) {
-		    $best_score = $score;
-		    $best_size = $size;
-		}
-	    } else {
-		$best_score = $score;
-		$best_size = $size;
-	    }
-	}
+	$bin = $fivep_corrected % $size;  ## ranges from 0 to $size - 1.
+	$abun{$bin} += $$all{'main'}{$k};
+	++$distinct{$bin};
+	$sum += $$all{'main'}{$k};
     }
-    if(($best_score) and ($best_size)) {
-	my $rounded = sprintf("%.1f", $best_score);
-	return($best_size,$rounded);
+    my @sorted = sort {$abun{$b} <=> $abun{$a}} keys %abun;
+    # $sorted[0] is the best bin
+    if($sum) {
+	$pr = $abun{$sorted[0]} / $sum;
+	$pn = $distinct{$sorted[0]};
+	$rpm = 1E6 * ($abun{$sorted[0]} / $$options{'total_primaries'});
+	$pa = log(1 + $rpm);   ### always add one to prevent low rpms (less then 1) to make a neg. number
+	$score = $pr * $pn * $pa;
+	$rounded = sprintf("%.1f", $score);
     } else {
-	return('NP5','NA');
+	$rounded = -1;
     }
+    return $rounded;
 }
 	
     
@@ -3261,7 +3221,7 @@ sub initialize_rg_count_file {
     my $i;
     my @sorted = sort {$$read_groups{$a} <=> $$read_groups{$b}} keys %$read_groups;
     foreach my $rg (@sorted) {
-	print $fh "\t$rg", "_obs", "\t$rg", "_mean", "\t$rg", "_stdev";
+	print $fh "\t$rg";
     }
     print $fh "\n";
 }
@@ -3343,8 +3303,8 @@ sub countmode {
     open(RESULTS, ">$results_txt");
     
     # Add header to Results file
-    print RESULTS "\#Locus\tName\tLength\tReads\tMeanReads\tStdevReads\tUniqueReads\tFracTop\tStrand\tMajorRNA\tMajorRNAReads\t";
-    print RESULTS "Complexity\tDicerCall\tMIRNA\tPhaseSize\tPhaseScore\tShort\tLong";
+    print RESULTS "\#Locus\tName\tLength\tReads\tRPM\tUniqueReads\tFracTop\tStrand\tMajorRNA\tMajorRNAReads\t";
+    print RESULTS "Complexity\tDicerCall\tMIRNA\tPhaseScore\tShort\tLong";
     for (my $dcs = $$options{'dicermin'}; $dcs <= $$options{'dicermax'}; ++$dcs) {
 	print RESULTS "\t$dcs";
     }
@@ -3428,7 +3388,6 @@ sub countmode {
 	    my %all = (); ## primary reads ... {readgroup}{Chr\tleft\tSEQ\tstrand\tmdz} => frequency. main is always defined.
 	    my $all_tally = 0; ## total number of primaries across all read groups
 	    my $unq = 0; ## simple count of uniquely aligned primary reads across all read groups
-	    my %resamples = ();  ## simple counts of re-sampled tallies by readgroup. {readgroup}{n} => tally
 
 	    
 	    my @fields = ();
@@ -3437,7 +3396,6 @@ sub countmode {
 	    my $rg;
 	    my $is_unique;
 	    my $prob;
-	    my $resamp;
 	    my $all_key;
 	    my $mdz;
 	    
@@ -3484,21 +3442,7 @@ sub countmode {
 		} else {
 		    $prob = 1; ## no other info and NOT marked as secondary, prob is 1
 		}
-		for($resamp = 1; $resamp <= 10; ++$resamp) {
-		    if($prob == 1) {
-			++$resamples{$rg}{$resamp};
-			unless($rg eq 'main') {
-			    ++$resamples{'main'}{$resamp};
-			}
-		    } elsif ($prob) {
-			if(rand() < $prob) {
-			    ++$resamples{$rg}{$resamp};
-			    unless($rg eq 'main') {
-				++$resamples{'main'}{$resamp};
-			    }
-			}
-		    }
-		}
+		
 		unless($fields[1] & 256) {
 		    if($fields[1] & 16) {
 			$all_key = "$fields[2]" . "\t" . "$fields[3]" . "\t" . "$fields[9]" . "\t" . "\-" . "\t" . "$mdz";
@@ -3524,7 +3468,7 @@ sub countmode {
 		$loc_size = $3 - $2 + 1;
 	    }
 	    print RESULTS "\t$loc_size";
-	    analyze_locus($options, \*RESULTS, \*COUNTS, \%read_groups, \%all, \$unq, \%resamples, \$count_loci[$cidx], \$loc_size, \$count_names[$cidx]);  ## must be robust to lack of any reads!
+	    analyze_locus($options, \*RESULTS, \*COUNTS, \%read_groups, \%all, \$unq, \$count_loci[$cidx], \$loc_size, \$count_names[$cidx]);  ## must be robust to lack of any reads!
 	    
 	} else {
 	    log_it($$options{'logfile'}, "\tWARNING: Invalid locus query $count_loci[$cidx] : Format must be Chr:Start-Stop .. it is being ignored");
@@ -4381,7 +4325,7 @@ sub summarize {
 	    $chr = $1;
 	    $start = $2;
 	    $stop = $3;
-	    $simple_MIR = $fields[13];
+	    $simple_MIR = $fields[12];  ## from [13] before 3.7
 	    $simple_MIR =~ s/\d+//g;
 	    $out_line = "$chr\t";
 	    $out_line .= "ShortStack\t";
@@ -4389,20 +4333,20 @@ sub summarize {
 	    $out_line .= "$start\t";
 	    $out_line .= "$stop\t";
 	    $out_line .= "\.\t";  ## score
-	    $out_line .= "$fields[8]\t";
+	    $out_line .= "$fields[7]\t";  ## from [8] before 3.7 strand
 	    $out_line .= "\.\t"; ## ORF phase
 	    $out_line .= "ID=$fields[1]\;";
-	    $out_line .= "DicerCall=$fields[12]\;";
+	    $out_line .= "DicerCall=$fields[11]\;"; ## from [12] before 3.7
 	    $out_line .= "MIRNA=$simple_MIR\;";
 	    $out_line .= "\n";
 	    
 	    print A3 "$out_line";
 	    
-	    if($fields[12] =~ /[^\d]/) {
+	    if($fields[11] =~ /[^\d]/) {  ## from [12] before 3.7
 		++$tallies{$simple_MIR}{'N'};
 		print N3 "$out_line";
 	    } else {
-		++$tallies{$simple_MIR}{$fields[12]};
+		++$tallies{$simple_MIR}{$fields[11]}; ## from [12] before 3.7
 		print D3 "$out_line";
 	    }
 	}
@@ -4529,14 +4473,18 @@ sub check_RNAfold_version {
 
 sub get_total_primaries {
     my($options) = @_;  ## reference to hash
-    open(X, "samtools view -F 3840 -c $$options{'bamfile'} |");
+    if(exists($$options{'cramfile'})) {
+	open(X, "samtools view -F 3840 -c $$options{'cramfile'} |");
+    } else {
+	open(X, "samtools view -F 3840 -c $$options{'bamfile'} |");
+    }
     my $tally = <X>;
     close X;
     chomp $tally;
     $tally =~ s/\s//g;
     log_it($$options{'logfile'}, "\nTally of primary alignments (INCLUDES unmapped, but EXCLUDES secondary, duplicate,");
     log_it($$options{'logfile'}, "failed QC, and supplementary alignments): $tally");
-    return $tally;
+    $$options{'total_primaries'} = $tally;
 }
 	    
 sub validate_sort_mem {
@@ -4550,6 +4498,9 @@ sub validate_sort_mem {
 	unless($$options{'sort_mem'} =~ /^\d+$|^\d+[KMG]$/) {
 	    die "\nOption --sort_mem is not valid. It must be an integer (implies bytes as units) or end in K/M/G\n\n$$usage\n";
 	}
+    } elsif (exists($$options{'readfile'})) {
+	# set to 768M by default
+	$$options{'sort_mem'} = '768M';
     }
 }
 
@@ -4632,24 +4583,29 @@ sub unplaced {
     my @rg_sorted = sort {$$read_groups{$a} <=> $$read_groups{$b}} keys %$read_groups;
     my $unplaced_file = "$$options{'outdir'}" . "\/Unplaced.txt";
     open(UNPLACED, ">$unplaced_file");
-    print UNPLACED "\#RNA\tLength\tReads\tN_hits\n";
+    print UNPLACED "\#RNA\tLength\tReads\tRPM\tN_hits\n";
     my @rnas = keys %entries;
     my @sorted = get_sorted_rnas(@rnas);
-    
+    my $rpm;
     foreach $seq (@sorted) {
 	print UNPLACED "$seq\t";
 	my $l = length $seq;
 	print UNPLACED "$l\t";
 	print UNPLACED "$entries{$seq}{'main'}\t";
+	$rpm = sprintf("%.3f", 1E6 * ($entries{$seq}{'main'} / $$options{'total_primaries'}));
+	print UNPLACED "$rpm\t";
 	print UNPLACED "$entries{$seq}{'n_hits'}\n";
 	
-	print $counts_fh "$seq\t$entries{$seq}{'main'}\tNA\tNA";
+	print $counts_fh "$seq\tNA\t$entries{$seq}{'main'}\t";
 	foreach $rg (@rg_sorted) {
+	    if($rg eq 'main') {
+		next;
+	    }
 	    print $counts_fh "\t";
 	    if(exists($entries{$seq}{$rg})) {
-		print $counts_fh "$entries{$seq}{$rg}\tNA\tNA";
+		print $counts_fh "$entries{$seq}{$rg}";
 	    } else {
-		print $counts_fh "0\tNA\tNA";
+		print $counts_fh "0";
 	    }
 	}
 	print $counts_fh "\n";
@@ -4688,15 +4644,13 @@ sub get_sorted_rnas {
     return @out;
 }
 
-	
-
 __END__
 
 =head1 LICENSE
 
 ShortStack
 
-Copyright (C) 2012-2016 Michael J. Axtell
+Copyright (C) 2012-2017 Michael J. Axtell
 
 This program is free software: you can redistribute it and/or modify                             
 it under the terms of the GNU General Public License as published by                             
@@ -4746,6 +4700,10 @@ bowtie-build (if aligning and .ebwt indices not found) : Free from http://bowtie
 gzip (if aligning) : Generally installed in linux and mac machines by default.
 
 RNAfold (unless running with --nohp option to disable MIRNA search) : Part of the Vienna RNA package, Free from http://www.tbi.univie.ac.at/RNA/ 
+
+=head3 Test environment
+
+This release of ShortStack (3.7) tested on Mac OSX (10.10.5), perl 5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2
 
 =head2 Install
 
@@ -4876,7 +4834,11 @@ Note that we have done our best to set default settings for all options that are
   integer between 1 and 50000. Can also be a normalized value in reads per million. When specifying mincov in 
   reads per million, the mincov value must be a floating point number > 0 and < 500,000 followed
   by the string 'rpm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
-  3.2 reads per million mapped. Deafult: 5 (raw reads).
+  3.2 reads per million mapped. Deafult: 20 (raw reads).
+
+--total_primaries [integer] : Tell ShortStack the total number of primary alignments in the bam file. Specifying
+  this value here speeds the analysis, since ShortStack does not need to count the reads directly from the bam file.
+  Can only be specified in conjunction with --bamfile. This count should include all primary alignment INCLUDING unplaced ones.
 
 =head1 SYSTEM RECOMMENDATIONS
 
@@ -4920,7 +4882,7 @@ Johnson et al. (2016) G3 6:2103-2111. doi:10.1534/g3.116.030452.
 =head3 Genome file format and naming
 
 All runs require a reference genome in FASTA format, specified with the --genomefile option. The file must
-have a valid suffix .. either .fa or .fasta.
+end with a valid suffix .. either .fa or .fasta.
 
 Within the genome, if the name of a chromosome has whitespace characters, the name will be trimmed at the first whitespace character.
 
@@ -4947,7 +4909,7 @@ indices of the genome. This can be time-consuming, and memory intensive.
 =head3 Reads file formats
 
 Small RNA reads to be aligned must be in fasta, fastq, or csfasta formats, or their gzip-compressed versions. 
-File extensions must therefore be .fa, .fasta, .fastq, .fq, .csfasta, .fa.gz, .fasta.gz, .fastq.gz, .fq,gz, or
+File names must end with .fa, .fasta, .fastq, .fq, .csfasta, .fa.gz, .fasta.gz, .fastq.gz, .fq,gz, or
 .csfasta.gz. 
 
 Multiple readfiles can be specified with option --readfile by separating the file names/paths with commas. Colorspace
@@ -5086,8 +5048,7 @@ Requirements for input bam or cram files:
 3. Read groups will not be recognized unless they are properly noted in the header.
 
 4. Paired-end, spliced, clipped, padded, or gapped alignments will be ignored, with a warning to 
-the user. Reads marked as secondary alignments (bit 256 set in the FLAG) will not be used EXCEPT
-when estimating the abundance uncertainty due to multi-mapping reads (see below).
+the user. Reads marked as secondary alignments (bit 256 set in the FLAG) will not be used.
 
 =head1 DE-NOVO CLUSTER FINDING
 
@@ -5095,7 +5056,7 @@ Unless options --locus or --locifile are used (see below), ShortStack will de-no
 clusters of small RNA accumulation genome-wide. Cluster definition is simple: 
 First, all regions containing at least one primary alignment are found where the maximum
 distance between the ends of the alignments is <= option --pad (default: 75). Second,
-if the number of alignments in the cluster is >= option --mincov (default: 5), the cluster
+if the number of alignments in the cluster is >= option --mincov (default: 20), the cluster
 is kept. The mincov threshold can also be specified in terms of reads per million mapped
 by using a value such as 3.2rpm (which specifies the threshold to be 3.2 reads per million).
 Using a rpm threshold allows the sensitivity of cluster discovery to be normalized between
@@ -5129,23 +5090,9 @@ novo cluster finding occurs.
 Regardless of whether the small RNA clusters were de-novo discovered or user-defined, the analysis
 methods of each cluster are the same. The major methods are described below:
 
-=head2 Uncertainties and read-group-specific counts
+=head2 Read-group-specific counts
 
-When multi-mapping reads are placed, there is an inherent uncertainty whether they've been put in the 
-right place. When ShortStack is used to make the alignments, all possible alignments for multi-mapping
-reads are retained (subject to the limits of --bowtie_m and --ranmax; see above) ... one is chosen and
-marked as the primary, while the others are noted as secondary reads. Importantly the computed
-probabilities of these placements are retained. Therefore, the alignments in a given cluster,
-including the secondary alignments, can be resampled to create an estimate of the abundance 
-variability in the locus that is inherent to the multi-mapping decisions made in the alignment.
-
-To do this, for each cluster analyzed, ShortStack examines ten replicates. Within each replicate, 
-each read is 'resampled', and put into or excluded from the locus based on the probability (as 
-indicated by the XZ:f tags in the line). This process is repeated for a total of ten times, which
-allows the calculation of a mean abundance and a standard deviation. If the probabilities are not 
-available (i.e., the alignments lack the XZ:f tag), no variation will be found.
-
-This resampling also occurs separately for each read-group in the alignment. The results are 
+Quantification occurs separately for each read-group in the alignment. The results are 
 in the 'Counts.txt' file, which has the observed number of reads, the mean number of reads
 for the ten re-samplings, and the standard deviations. When there are multiple read-groups,
 this is helpful to gather the raw data for differential expression analysis.
@@ -5246,26 +5193,18 @@ processing from a defined terminus. Phased siRNA clusters often are triggered by
 small RNA-mediated clevage event which causes RNA-dependent RNA polymerase activity and subsequent
 siRNA production from the terminus defined by the cleavage event.
 
-For valid loci, ShortStack 3.x uses the formula described by Guo et al. (2015) (doi: 10.1093/bioinformatics/btu628), 
-S = PR * PN * ln(PA), where S is the phase score, PR is the phase ratio (see Axtell 2010 doi: 10.1007/978-1-60327-005-2_5),
-PN is the number of distinct sequences that are phased, and PA is the abundance of the phased reads.
+For valid loci, ShortStack 3.7 and above uses a modified version of the  formula described by Guo et al. (2015) (doi: 10.1093/bioinformatics/btu628), 
+S = PR * PN * ln(1 + PArpm), where S is the phase score, PR is the phase ratio (see Axtell 2010 doi: 10.1007/978-1-60327-005-2_5),
+PN is the number of distinct sequences that are phased, and PArpm is the abundance of the phased reads in units of reads per million.
 
-ShortStack calculates the phase score in each possible phase size contained within --dicermin and --dicermax, 
-and returns the best score along with the associated phase register.  Higher phasing scores indicate 
-more phasing signature.
+ShortStack calculates the phase score in a 21 nt phase size
+and returns the score.  Higher phasing scores indicate 
+more phasing signature. Phase scores range from very near 0 (worst) up.
 
-Not all loci are subject to phasing analysis. Like for MIRNA analysis, there are defined codes that are 
-returned for different outcomes:
+The modification of the Guo et al. formula, first implemented in ShortStack version 3.7, makes the PhaseScore numbers
+comparable between different libraries.
 
-NP1: no reads at all aligned in locus
-
-NP2: DicerCall was N or NA (< 80% of reads in the Dicer size range defined by --dicermin and --dicermax).
-
-NP3: Locus size was < (3 * DicerCall)... to short to evaluate phasing
-
-NP4: Locus is stranded (>= 80% of reads on top strand OR <= 20% of reads on top strand).
-
-NP5: General failure to calculate a phasing score.
+Not all loci are subject to phasing analysis. Loci with no reads at all aligned, a DicerCall of N or NA, a Locus Size of < 3 * DicerCall, and stranded loci (>= 80% of reads on top strand OR <= 20% of reads on top strand) are not analyzed. These are assigned a PhaseScore of -1.
 
 =head1 OUTPUT FILES
 
@@ -5314,41 +5253,37 @@ the analysis. The columns are labeled in the first row, and are:
 
 4. Reads: Total number of primary alignments in the locus
 
-5. MeanReads: Mean value of reads (average of ten re-samplings of secondary alignments).
+5. RPM: Total number of primary alignments normalized to reads per million. Note the the normalization factor includes all primary alignments .. both mapped and unmapped.
 
-6. StdevReads: Standard deviation of MeanReads (n=10).
+6. UniqueReads: Number of uniquely aligned primary alignments in locus.
 
-7. UniqueReads: Number of uniquely aligned primary alignments in locus.
+7. FracTop: Fraction of primary alignments aligned to the top genomic strand
 
-8. FracTop: Fraction of primary alignments aligned to the top genomic strand
+8. Strand: Strand call for the locus
 
-9. Strand: Strand call for the locus
+9. MajorRNA: Most abundant RNA at locus. In cases of tie, MajorRNA is arbitrarily chosen from the tied entries.
 
-10. MajorRNA: Most abundant RNA at locus. In cases of tie, MajorRNA is arbitrarily chosen from the tied entries.
+10. MajorRNAReads: Number of primary alignments for the MajorRNA.
 
-11. MajorRNAReads: Number of primary alignments for the MajorRNA.
+11. Complexity: A number >0 and <= 1 that reflects the complexity of small RNA production from the locus. Defined by (n_distinct_read_sequences) / (abundance of all reads). Lower numbers indicate loci that are more dominated by a single highly abundant RNA.
 
-12. Complexity: A number >0 and <= 1 that reflects the complexity of small RNA production from the locus. Defined by (n_distinct_read_sequences) / (abundance of all reads). Lower numbers indicate loci that are more dominated by a single highly abundant RNA.
+12. DicerCall: If >= 80% of the primary alignments were reads >= dicermin and <= dicermax, DicerCall is a number that indicates the predominant size of the RNA population from the locus. If the 80% threshold was not met, then DicerCall is N instead. Can also be NA if the locus had no aligned reads.
 
-13. DicerCall: If >= 80% of the primary alignments were reads >= dicermin and <= dicermax, DicerCall is a number that indicates the predominant size of the RNA population from the locus. If the 80% threshold was not met, then DicerCall is N instead. Can also be NA if the locus had no aligned reads.
+13. MIRNA: Results of MIRNA analysis. Codes starting with N indicate not a MIRNA, Y means yes. See above for full description of codes.
 
-14. MIRNA: Results of MIRNA analysis. Codes starting with N indicate not a MIRNA, Y means yes. See above for full description of codes.
+14. PhaseScore:  Phasing score for a phase size of 21 nts according to a modified version of equation 3 of Guo et al (2015) doi: 10.1093/bioinformatics/btu628. See above for full description of phasing analysis.
 
-15. PhaseSize: Codes starting with N mean phasing was not analyzed, see above for description of codes. Otherwise, a number reflecting the phase register with the best score.
+15. Short: Number of primary alignments that were shorter than --dicermin
 
-16. PhaseScore: If NA, phasing was not analyzed. Otherwise, reports the phasing score according to equation 3 of Guo et al (2015) doi: 10.1093/bioinformatics/btu628
+16. Long: Number of primary alignments that were longer than --dicermax
 
-17. Short: Number of primary alignments that were shorter than --dicermin
-
-18. Long: Number of primary alignments that were longer than --dicermax
-
-19-end: Number of primary alignments of the indicated RNA size.
+17-end: Number of primary alignments of the indicated RNA size.
 
 =head2 Unplaced file
 
 The Unplaced.txt file is plain text, tab-delimited. It shows each unplaced small RNA whose abundance was >= the limit set
 by --minocv. This file is only created in a de-novo run. RNAs are sorted first by length (ascending) and then by ASCII (ascending). 
-Columns show the sequence, its length, the total number of reads, and the number of equally valid genome alignments.
+Columns show the sequence, its length, the total number of reads, the reads per million (RPM) and the number of equally valid genome alignments.
 
 In some cases the number of genome alignments may not be able to be found. An entry of '?' indicates that the number of hits
 is unknown. This will occur if the BAM file used was not created by ShortStack. An entry of '??' indicates that conflicting
@@ -5356,9 +5291,8 @@ information about the number of hits is stored in the bam file.
 
 =head2 Counts file
 
-The Counts.txt file is plain text, tab-delimited. For each locus, it shows the total read counts observed, the mean read counts
-(n=10 from the resampling method described above), and the standard deviation (n=10 from the resampling method described
-above). Each read-group is broken out seperately, and the sum of all read groups is also shown (termed 'main'). Data from 
+The Counts.txt file is plain text, tab-delimited. For each locus, it shows the total raw read counts. Each 
+read-group is broken out seperately, and the sum of all read groups is also shown (termed 'main'). Data from 
 unplaced small RNAs, if present, are also included in Counts.txt
 
 =head2 MIRNAs directory

@@ -1,7 +1,7 @@
 LICENSE
     ShortStack
 
-    Copyright (C) 2012-2016 Michael J. Axtell
+    Copyright (C) 2012-2017 Michael J. Axtell
 
     This program is free software: you can redistribute it and/or modify it
     under the terms of the GNU General Public License as published by the
@@ -57,6 +57,10 @@ INSTALL
     RNAfold (unless running with --nohp option to disable MIRNA search) :
     Part of the Vienna RNA package, Free from
     http://www.tbi.univie.ac.at/RNA/
+
+    Test environment
+    This release of ShortStack (3.7) tested on Mac OSX (10.10.5), perl
+    5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2
 
   Install
     There is no real installation of ShortStack. Make sure it is executable.
@@ -214,7 +218,13 @@ OPTIONS
     per million, the mincov value must be a floating point number > 0 and <
     500,000 followed by the string 'rpm'. Examples: '5' --> threshold is 5
     raw reads. '3.2rpm' --> threshold is 3.2 reads per million mapped.
-    Deafult: 5 (raw reads).
+    Deafult: 20 (raw reads).
+
+    --total_primaries [integer] : Tell ShortStack the total number of
+    primary alignments in the bam file. Specifying this value here speeds
+    the analysis, since ShortStack does not need to count the reads directly
+    from the bam file. Can only be specified in conjunction with --bamfile.
+    This count should include all primary alignment INCLUDING unplaced ones.
 
 SYSTEM RECOMMENDATIONS
     ShortStack was developed on Apple Mac OSX devices running 10.9 or 10.10.
@@ -258,8 +268,8 @@ ALIGNMENT METHODS
   Genome pre-processing
     Genome file format and naming
     All runs require a reference genome in FASTA format, specified with the
-    --genomefile option. The file must have a valid suffix .. either .fa or
-    .fasta.
+    --genomefile option. The file must end with a valid suffix .. either .fa
+    or .fasta.
 
     Within the genome, if the name of a chromosome has whitespace
     characters, the name will be trimmed at the first whitespace character.
@@ -287,9 +297,9 @@ ALIGNMENT METHODS
   Reads pre-processing
     Reads file formats
     Small RNA reads to be aligned must be in fasta, fastq, or csfasta
-    formats, or their gzip-compressed versions. File extensions must
-    therefore be .fa, .fasta, .fastq, .fq, .csfasta, .fa.gz, .fasta.gz,
-    .fastq.gz, .fq,gz, or .csfasta.gz.
+    formats, or their gzip-compressed versions. File names must end with
+    .fa, .fasta, .fastq, .fq, .csfasta, .fa.gz, .fasta.gz, .fastq.gz,
+    .fq,gz, or .csfasta.gz.
 
     Multiple readfiles can be specified with option --readfile by separating
     the file names/paths with commas. Colorspace reads cannot be mixed with
@@ -456,9 +466,7 @@ BAM AND CRAM FILE REQUIREMENTS
 
     4. Paired-end, spliced, clipped, padded, or gapped alignments will be
     ignored, with a warning to the user. Reads marked as secondary
-    alignments (bit 256 set in the FLAG) will not be used EXCEPT when
-    estimating the abundance uncertainty due to multi-mapping reads (see
-    below).
+    alignments (bit 256 set in the FLAG) will not be used.
 
 DE-NOVO CLUSTER FINDING
     Unless options --locus or --locifile are used (see below), ShortStack
@@ -466,7 +474,7 @@ DE-NOVO CLUSTER FINDING
     Cluster definition is simple: First, all regions containing at least one
     primary alignment are found where the maximum distance between the ends
     of the alignments is <= option --pad (default: 75). Second, if the
-    number of alignments in the cluster is >= option --mincov (default: 5),
+    number of alignments in the cluster is >= option --mincov (default: 20),
     the cluster is kept. The mincov threshold can also be specified in terms
     of reads per million mapped by using a value such as 3.2rpm (which
     specifies the threshold to be 3.2 reads per million). Using a rpm
@@ -503,32 +511,12 @@ ANALYSIS METHODS
     user-defined, the analysis methods of each cluster are the same. The
     major methods are described below:
 
-  Uncertainties and read-group-specific counts
-    When multi-mapping reads are placed, there is an inherent uncertainty
-    whether they've been put in the right place. When ShortStack is used to
-    make the alignments, all possible alignments for multi-mapping reads are
-    retained (subject to the limits of --bowtie_m and --ranmax; see above)
-    ... one is chosen and marked as the primary, while the others are noted
-    as secondary reads. Importantly the computed probabilities of these
-    placements are retained. Therefore, the alignments in a given cluster,
-    including the secondary alignments, can be resampled to create an
-    estimate of the abundance variability in the locus that is inherent to
-    the multi-mapping decisions made in the alignment.
-
-    To do this, for each cluster analyzed, ShortStack examines ten
-    replicates. Within each replicate, each read is 'resampled', and put
-    into or excluded from the locus based on the probability (as indicated
-    by the XZ:f tags in the line). This process is repeated for a total of
-    ten times, which allows the calculation of a mean abundance and a
-    standard deviation. If the probabilities are not available (i.e., the
-    alignments lack the XZ:f tag), no variation will be found.
-
-    This resampling also occurs separately for each read-group in the
-    alignment. The results are in the 'Counts.txt' file, which has the
-    observed number of reads, the mean number of reads for the ten
-    re-samplings, and the standard deviations. When there are multiple
-    read-groups, this is helpful to gather the raw data for differential
-    expression analysis.
+  Read-group-specific counts
+    Quantification occurs separately for each read-group in the alignment.
+    The results are in the 'Counts.txt' file, which has the observed number
+    of reads, the mean number of reads for the ten re-samplings, and the
+    standard deviations. When there are multiple read-groups, this is
+    helpful to gather the raw data for differential expression analysis.
 
     There is always a read-group called 'main', which is all read-groups
     combined.
@@ -647,31 +635,26 @@ ANALYSIS METHODS
     event which causes RNA-dependent RNA polymerase activity and subsequent
     siRNA production from the terminus defined by the cleavage event.
 
-    For valid loci, ShortStack 3.x uses the formula described by Guo et al.
-    (2015) (doi: 10.1093/bioinformatics/btu628), S = PR * PN * ln(PA), where
-    S is the phase score, PR is the phase ratio (see Axtell 2010 doi:
+    For valid loci, ShortStack 3.7 and above uses a modified version of the
+    formula described by Guo et al. (2015) (doi:
+    10.1093/bioinformatics/btu628), S = PR * PN * ln(1 + PArpm), where S is
+    the phase score, PR is the phase ratio (see Axtell 2010 doi:
     10.1007/978-1-60327-005-2_5), PN is the number of distinct sequences
-    that are phased, and PA is the abundance of the phased reads.
+    that are phased, and PArpm is the abundance of the phased reads in units
+    of reads per million.
 
-    ShortStack calculates the phase score in each possible phase size
-    contained within --dicermin and --dicermax, and returns the best score
-    along with the associated phase register. Higher phasing scores indicate
-    more phasing signature.
+    ShortStack calculates the phase score in a 21 nt phase size and returns
+    the score. Higher phasing scores indicate more phasing signature. Phase
+    scores range from very near 0 (worst) up.
 
-    Not all loci are subject to phasing analysis. Like for MIRNA analysis,
-    there are defined codes that are returned for different outcomes:
+    The modification of the Guo et al. formula, first implemented in
+    ShortStack version 3.7, makes the PhaseScore numbers comparable between
+    different libraries.
 
-    NP1: no reads at all aligned in locus
-
-    NP2: DicerCall was N or NA (< 80% of reads in the Dicer size range
-    defined by --dicermin and --dicermax).
-
-    NP3: Locus size was < (3 * DicerCall)... to short to evaluate phasing
-
-    NP4: Locus is stranded (>= 80% of reads on top strand OR <= 20% of reads
-    on top strand).
-
-    NP5: General failure to calculate a phasing score.
+    Not all loci are subject to phasing analysis. Loci with no reads at all
+    aligned, a DicerCall of N or NA, a Locus Size of < 3 * DicerCall, and
+    stranded loci (>= 80% of reads on top strand OR <= 20% of reads on top
+    strand) are not analyzed. These are assigned a PhaseScore of -1.
 
 OUTPUT FILES
     All output files are in the directory created by ShortStack, whose name
@@ -720,59 +703,55 @@ OUTPUT FILES
 
     4. Reads: Total number of primary alignments in the locus
 
-    5. MeanReads: Mean value of reads (average of ten re-samplings of
-    secondary alignments).
+    5. RPM: Total number of primary alignments normalized to reads per
+    million. Note the the normalization factor includes all primary
+    alignments .. both mapped and unmapped.
 
-    6. StdevReads: Standard deviation of MeanReads (n=10).
+    6. UniqueReads: Number of uniquely aligned primary alignments in locus.
 
-    7. UniqueReads: Number of uniquely aligned primary alignments in locus.
-
-    8. FracTop: Fraction of primary alignments aligned to the top genomic
+    7. FracTop: Fraction of primary alignments aligned to the top genomic
     strand
 
-    9. Strand: Strand call for the locus
+    8. Strand: Strand call for the locus
 
-    10. MajorRNA: Most abundant RNA at locus. In cases of tie, MajorRNA is
+    9. MajorRNA: Most abundant RNA at locus. In cases of tie, MajorRNA is
     arbitrarily chosen from the tied entries.
 
-    11. MajorRNAReads: Number of primary alignments for the MajorRNA.
+    10. MajorRNAReads: Number of primary alignments for the MajorRNA.
 
-    12. Complexity: A number >0 and <= 1 that reflects the complexity of
+    11. Complexity: A number >0 and <= 1 that reflects the complexity of
     small RNA production from the locus. Defined by
     (n_distinct_read_sequences) / (abundance of all reads). Lower numbers
     indicate loci that are more dominated by a single highly abundant RNA.
 
-    13. DicerCall: If >= 80% of the primary alignments were reads >=
+    12. DicerCall: If >= 80% of the primary alignments were reads >=
     dicermin and <= dicermax, DicerCall is a number that indicates the
     predominant size of the RNA population from the locus. If the 80%
     threshold was not met, then DicerCall is N instead. Can also be NA if
     the locus had no aligned reads.
 
-    14. MIRNA: Results of MIRNA analysis. Codes starting with N indicate not
+    13. MIRNA: Results of MIRNA analysis. Codes starting with N indicate not
     a MIRNA, Y means yes. See above for full description of codes.
 
-    15. PhaseSize: Codes starting with N mean phasing was not analyzed, see
-    above for description of codes. Otherwise, a number reflecting the phase
-    register with the best score.
+    14. PhaseScore: Phasing score for a phase size of 21 nts according to a
+    modified version of equation 3 of Guo et al (2015) doi:
+    10.1093/bioinformatics/btu628. See above for full description of phasing
+    analysis.
 
-    16. PhaseScore: If NA, phasing was not analyzed. Otherwise, reports the
-    phasing score according to equation 3 of Guo et al (2015) doi:
-    10.1093/bioinformatics/btu628
-
-    17. Short: Number of primary alignments that were shorter than
+    15. Short: Number of primary alignments that were shorter than
     --dicermin
 
-    18. Long: Number of primary alignments that were longer than --dicermax
+    16. Long: Number of primary alignments that were longer than --dicermax
 
-    19-end: Number of primary alignments of the indicated RNA size.
+    17-end: Number of primary alignments of the indicated RNA size.
 
   Unplaced file
     The Unplaced.txt file is plain text, tab-delimited. It shows each
     unplaced small RNA whose abundance was >= the limit set by --minocv.
     This file is only created in a de-novo run. RNAs are sorted first by
     length (ascending) and then by ASCII (ascending). Columns show the
-    sequence, its length, the total number of reads, and the number of
-    equally valid genome alignments.
+    sequence, its length, the total number of reads, the reads per million
+    (RPM) and the number of equally valid genome alignments.
 
     In some cases the number of genome alignments may not be able to be
     found. An entry of '?' indicates that the number of hits is unknown.
@@ -782,10 +761,8 @@ OUTPUT FILES
 
   Counts file
     The Counts.txt file is plain text, tab-delimited. For each locus, it
-    shows the total read counts observed, the mean read counts (n=10 from
-    the resampling method described above), and the standard deviation (n=10
-    from the resampling method described above). Each read-group is broken
-    out seperately, and the sum of all read groups is also shown (termed
+    shows the total raw read counts. Each read-group is broken out
+    seperately, and the sum of all read groups is also shown (termed
     'main'). Data from unplaced small RNAs, if present, are also included in
     Counts.txt
 
