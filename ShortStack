@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.7";
+my $version_num = "3.7.1";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -244,7 +244,8 @@ General Options:
 --genomefile [string] : path to reference genome in .fasta or .fa format. Required for any run.
 
 --outdir [string] : name of output directory to be created for results. Defaults to 'ShortStack_[time]', 
-  where [time] is the current UNIX time according to the system.
+  where [time] is the current UNIX time according to the system. If the outdir already exists, ShortStack
+  will exit with an error message.
 
 Alignment Options:
 
@@ -448,7 +449,7 @@ sub validate_outdir {
     if(exists($$options{'outdir'})) {
 	# if user added a trailing / , remove it
 	if($$options{'outdir'} =~ /\/$/) {
-	    $$options{'outdir'} =~ s/\///;
+	    $$options{'outdir'} =~ s/\/$//;
 	}
 	
     } else {
@@ -469,7 +470,7 @@ sub initiate_log {
     ## also creates the output directory
     my($options,$v_num) = @_;
     
-    system "mkdir $$options{'outdir'}";
+    system "mkdir -p $$options{'outdir'}";
     
     my $logfile = "$$options{'outdir'}" . '/' . 'Log.txt';
     my $error_logfile = "$$options{'outdir'}" . '/' . 'ErrorLogs.txt';
@@ -667,11 +668,11 @@ sub validate_readfile1 {
 	       ($suffix =~ /\.fa$/) or
 	       ($suffix =~ /\.fastq$/) or
 	       ($suffix =~ /\.fq$/) or
-	       ($suffix =~ /\.fasta.gz$/) or
-	       ($suffix =~ /\.fa.gz$/) or
-	       ($suffix =~ /\.fastq.gz$/) or
+	       ($suffix =~ /\.fasta\.gz$/) or
+	       ($suffix =~ /\.fa\.gz$/) or
+	       ($suffix =~ /\.fastq\.gz$/) or
 	       ($suffix =~ /\.csfasta$/) or
-	       ($suffix =~ /\.csfasta.gz$/) or
+	       ($suffix =~ /\.csfasta\.gz$/) or
 	       ($suffix =~ /\.fq.gz$/)) {
 	    die "\nreadfile $file does not end in a valid file suffix  suffix was $suffix file was $file path was $path \n\n$$usage\n";
 	}
@@ -1193,7 +1194,8 @@ sub ebwt {
     }
     
     # get file basename for genome
-    my($gen_file,$gen_path,$gen_suffix) = fileparse($$options{'genomefile'}, qr/\.[^\.]+/);
+    my @suffices = ('.fa', '.fasta');
+    my($gen_file,$gen_path,$gen_suffix) = fileparse($$options{'genomefile'}, @suffices);
     
     # variable to store type .. large or small
     my $itype;
@@ -1318,7 +1320,7 @@ sub trim_master {
 	
 	# use reg-ex's for these checks, since the whole suffix could end in .gz or not
 	
-	if($readfilesuffix =~ /.csfasta/) {
+	if(($readfilesuffix =~ /\.csfasta$/) or ($readfilesuffix =~ /\.csfasta\.gz$/)) {
 	    if(exists($$options{'cquals'})) {
 		$cqualfile = ${$$options{'cquals'}}[$i];
 		++$i;
@@ -1329,10 +1331,12 @@ sub trim_master {
 		$trimmed = trim_csfasta(\$readfile,$adapters,$options);
 		push(@trimmed_files, $trimmed);
 	    }
-	} elsif ($readfilesuffix =~ /q/) {
+	} elsif (($readfilesuffix =~ /\.fastq$/) or ($readfilesuffix =~ /\.fastq\.gz$/) or 
+		 ($readfilesuffix =~ /\.fq$/) or ($readfilesuffix =~ /\.fq\.gz$/))  {
 	    $trimmed = trim_fastq(\$readfile,$adapters,$options);
 	    push(@trimmed_files, $trimmed);
-	} elsif ($readfilesuffix =~ /fa/) {
+	} elsif (($readfilesuffix =~ /\.fa$/) or ($readfilesuffix =~ /\.fa\.gz$/) or
+		 ($readfilesuffix =~ /\.fasta$/) or ($readfilesuffix =~ /\.fasta\.gz$/)){
 	    $trimmed = trim_fasta(\$readfile,$adapters,$options);
 	    push(@trimmed_files, $trimmed);
 	}
@@ -1350,9 +1354,10 @@ sub trim_fasta {
     if($$reads =~ /\.gz$/) {
 	$gz = 1;
     }
-
+    my @suffices = ('.fa', '.fasta', '.fa.gz', '.fasta.gz', '.fastq.gz', '.fq.gz', '.csfasta', '.csfasta.gz');
     # Open the output file
-    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.[^\.]+$/);
+    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, @suffices);
+
     my $outfile = $$options{'outdir'} . "/" . $readbase . "_trimmed" . $readsuffix;
     if($gz) {
 	open(OUT, "| gzip >> $outfile");
@@ -1422,7 +1427,6 @@ sub trim_fasta {
     log_it($$options{'logfile'}, "\tComplete: $ok out of $in reads successfully trimmed");
     return $outfile;
 }
-	
     
 sub trim_fastq {
     # Input: references to readfile (scalar), adapters (array), and options (hash)
@@ -1434,9 +1438,9 @@ sub trim_fastq {
     if($$reads =~ /\.gz$/) {
 	$gz = 1;
     }
-
+    my @suffices = ('.fa', '.fasta', '.fa.gz', '.fasta.gz', '.fastq.gz', '.fq.gz', '.csfasta', '.csfasta.gz');
     # Open the output file
-    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.[^\.]+$/);
+    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, @suffices);
     my $outfile = $$options{'outdir'} . "/" . $readbase . "_trimmed" . $readsuffix;
     if($gz) {
 	open(OUT, "| gzip >> $outfile");
@@ -1525,9 +1529,10 @@ sub trim_csfasta {
     if($$reads =~ /\.gz$/) {
 	$gz = 1;
     }
-    
+    my @suffices = ('.fa', '.fasta', '.fa.gz', '.fasta.gz', '.fastq.gz', '.fq.gz', '.csfasta', '.csfasta.gz');
     # Open the output file
-    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, qr/\.[^\.]+$/);  ## suffix here only last dot
+    my ($readbase,$readpath,$readsuffix) = fileparse($$reads, @suffices);
+
     my $outfile = $$options{'outdir'} . "/" . $readbase . "_trimmed" . $readsuffix;
     if($gz) {
 	open(OUT, "| gzip >> $outfile");
@@ -1846,7 +1851,7 @@ sub get_read_s_aln {
 	$stripped_reads =~ s/\.gz$//;
     }
 
-    my($base,$path,$suffix) = fileparse($$reads, qr/\.[^\.]+$/);
+    my($base,$path,$suffix) = fileparse($stripped_reads, qr/\.[^\.]+$/);
     my $format;
     if($suffix eq '.csfasta') {
 	$format = "-C -f";
@@ -4703,7 +4708,7 @@ RNAfold (unless running with --nohp option to disable MIRNA search) : Part of th
 
 =head3 Test environment
 
-This release of ShortStack (3.7) tested on Mac OSX (10.10.5), perl 5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2
+This release of ShortStack (3.7.1) tested on Mac OSX (10.10.5), perl 5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2
 
 =head2 Install
 
@@ -4741,7 +4746,8 @@ Note that we have done our best to set default settings for all options that are
 --genomefile [string] : path to reference genome in .fasta or .fa format. Required for any run.
 
 --outdir [string] : name of output directory to be created for results. Defaults to 'ShortStack_[time]', 
-  where [time] is the current UNIX time according to the system.
+  where [time] is the current UNIX time according to the system. If the directory already exists, ShortStack
+  exits with an error message.
 
 =head2 Alignment Options:
 
