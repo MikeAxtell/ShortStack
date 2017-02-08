@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.7.1";
+my $version_num = "3.7.2";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -1354,7 +1354,7 @@ sub trim_fasta {
     if($$reads =~ /\.gz$/) {
 	$gz = 1;
     }
-    my @suffices = ('.fa', '.fasta', '.fa.gz', '.fasta.gz', '.fastq.gz', '.fq.gz', '.csfasta', '.csfasta.gz');
+    my @suffices = ('.fa', '.fasta', '.fa.gz', '.fasta.gz', '.fq', '.fastq', '.fastq.gz', '.fq.gz', '.csfasta', '.csfasta.gz');
     # Open the output file
     my ($readbase,$readpath,$readsuffix) = fileparse($$reads, @suffices);
 
@@ -1438,7 +1438,7 @@ sub trim_fastq {
     if($$reads =~ /\.gz$/) {
 	$gz = 1;
     }
-    my @suffices = ('.fa', '.fasta', '.fa.gz', '.fasta.gz', '.fastq.gz', '.fq.gz', '.csfasta', '.csfasta.gz');
+    my @suffices = ('.fa', '.fasta', '.fa.gz', '.fasta.gz', '.fq', '.fastq', '.fastq.gz', '.fq.gz', '.csfasta', '.csfasta.gz');
     # Open the output file
     my ($readbase,$readpath,$readsuffix) = fileparse($$reads, @suffices);
     my $outfile = $$options{'outdir'} . "/" . $readbase . "_trimmed" . $readsuffix;
