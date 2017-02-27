@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.7.2";
+my $version_num = "3.8";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -118,14 +118,13 @@ initiate_log(\%options, \$version_num);
 
 # check for fai file
 my $fai_file = fai(\%options);
-
+my $stitch_fai_file;
 # genome stitching, if warranted
-if(exists($options{'readfile'})) {
-    unless((exists($options{'nostitch'})) or (exists($options{'nohp'}))) {
-	my $need2 = need_to_stitch(\%options);  ## $need2 is the size of N's to be added when stitching
-	if($need2) {
-	    $fai_file = stitch_genome(\%options,\$need2);
-	}
+unless((exists($options{'align_only'})) or (exists($options{'nohp'}))) {
+    my $need2 = need_to_stitch(\%options);  ## $need2 is the size of N's to be added when stitching. As of 3.8, always 100 (or 0)
+    if($need2) {
+	$stitch_fai_file = stitch_genome(\%options,\$need2);
+	$options{'stitchfai_file'} = $stitch_fai_file;
     }
 }
 # Add final genome .fai file to the options hash, for convenience later
@@ -181,6 +180,14 @@ if(($options{'locifile'}) or ($options{'locus'})) {
 
 # summarize
 summarize(\%options);
+
+# clean up stitched file, if warranted
+if(exists($options{'stitchgenomefile'})) {
+    system "rm -f $options{'stitchgenomefile'}";
+}
+if(exists($options{'stitchfai_file'})) {
+    system "rm -f $options{'stitchfai_file'}";
+}
 		       
 exit;
 
@@ -271,10 +278,6 @@ Alignment Options:
   to be tolerated in a valid alignment. Must be either 0, 1, or 2. In cases of multiple hits, only hits
   with lowest number of mismatches kept. Default: 1.
 
---nostitch : Disable 'stitching' of fragmented genomes. By default, if the genomefile has more than 50 chromosomes 
-  and two or more of them are < 1Mb, ShortStack stitches chromosomes shorter than 1Mb into larger (>5Mb) assemblies. 
-  This drastically improves performance when working with highly fragmented reference genomes.
-
 --cquals [string] : path(s) to color-space quality value file(s). Used only in conjunction with .csfasta 
   or .csfasta.gz formatted files in --readfile. Compressed format for cquals is NOT allowed. Like --readfile, 
   cquals can take multiple arguments for multiple files, e.g. --cquals file1.qual file2.qual file3.qual
@@ -338,7 +341,7 @@ Analysis Options:
   integer between 1 and 50000. Can also be a normalized value in reads per million. When specifying mincov in 
   reads per million, the mincov value must be a floating point number > 0 and < 500,000 followed
   by the string 'rpm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
-  3.2 reads per million mapped. Deafult: 20 (raw reads).
+  3.2 reads per million mapped. Deafult: 0.5rpm.
 
 --total_primaries [integer] : Tell ShortStack the total number of primary alignments in the bam file. Specifying
   this value here speeds the analysis, since ShortStack does not need to count the reads directly from the bam file.
@@ -372,7 +375,6 @@ sub get_ShortStack_options {
 	       'locifile=s',
 	       'locus=s',
 	       'nohp',
-	       'nostitch',
 	       'pad=i',
 	       'mincov=s',
 	       'cquals=s@{,}',
@@ -504,9 +506,6 @@ sub initiate_log {
 	}
 	if(exists($$options{'mismatches'})) {
 	    delete $$options{'mismatches'};
-	}
-	if(exists($$options{'nostitch'})) {
-	    delete $$options{'nostitch'};
 	}
 	if(exists($$options{'cquals'})) {
 	    delete $$options{'cquals'};
@@ -843,9 +842,9 @@ sub validate_pad {
 sub validate_mincov {
     my ($options,$usage) = @_; ## references to a hash and a scalar
     my $float;
-    # if not provided by user, set mincov to default value of 20 (upped from 5 as of v3.7)
+    # if not provided by user, set mincov to default value of 0.5 rpm (changed from 20  in 3.8 and upped from 5 as of v3.7).
     unless($$options{'mincov'}) {
-	$$options{'mincov'} = 20;
+	$$options{'mincov'} = '0.5rpm';
     }
     # verify that mincov is an integer or a float followed by 'rpm'
     unless(($$options{'mincov'} =~ /^\d+$/) or
@@ -935,6 +934,26 @@ sub fai {
     }
 }
 
+sub fai_stitch {
+    ## checks whether the genome file stored in $$options{'stitchgenomefile'} has a .fai index
+    ## if not, tries to create it .. silently
+    ## Input is options hash, passed by reference
+    ## Output is the .fai file path
+    my($options) = @_;
+    my $expected_fai = "$$options{'stitchgenomefile'}" . ".fai";
+    if(-r $expected_fai) {
+	return $expected_fai;
+    } else {
+	system "samtools faidx $$options{'stitchgenomefile'}";
+	if(-r $expected_fai) {
+	    return $expected_fai;
+	} else {
+	    log_it($$options{'logfile'}, "\tFailed to make fai of stitched genome. Aborting Run");
+	    exit;
+	}
+    }
+}
+
 sub need_to_stitch {
     # Input is a reference to the options hash
     # Checks the genome's fai file, and determines whether stitching is warranted
@@ -968,7 +987,8 @@ sub need_to_stitch {
 	return 0; ## never stitch if there are 50 or fewer chromosomes
     } elsif ($small >= 2) {
 	# if there are 2 or more chromosomes of < 1Mb in size, stitch is turned on
-	my $st_size = $$options{'pad'} + 25;
+	# as of 3.8, stich size is always 100
+	my $st_size = 100;
 	return $st_size;
     } else {
 	return 0; ## was more than 50 chromosomes, but no more than 1 were < 1Mb in length, so no stitching
@@ -985,8 +1005,10 @@ sub stitch_genome {
     chomp $time;
     log_it($$options{'logfile'}, "\n$time");
     log_it($$options{'logfile'}, "Genome has more than 50 segments and more than two of them are < 1Mb. Stitching short references to improve performance ...");
-    log_it($$options{'logfile'}, "\tNOTE: This will make a modified version of your genome. To avoid genome stitching, abort");
-    log_it($$options{'logfile'}, "\tthis run, and start a new one with option --nostitch");
+    
+    # As of 3.8, these warnings are no longer needed. Results, bamfile, etc. will still be relative to original genome.
+    ##log_it($$options{'logfile'}, "\tNOTE: This will make a modified version of your genome. To avoid genome stitching, abort");
+    ##log_it($$options{'logfile'}, "\tthis run, and start a new one with option --nostitch");
     
     # Create a file for the new, stitched genome
     my($og,$og_path,$og_suffix) = fileparse($$options{'genomefile'}, qr/\.[^\.]+$/);
@@ -994,8 +1016,9 @@ sub stitch_genome {
     open(SG, ">>$sg_file");
     
     # Create a file that summarizes the changes in the stitched genome
-    my $sg_guide_file = "$$options{'outdir'}" . "/$og" . "_stitched" . "_guide.txt";
-    open(SGG, ">$sg_guide_file");
+    # This file is no longer needed. Data stored in hash during run, then stitched genome will be deleted.
+    #my $sg_guide_file = "$$options{'outdir'}" . "/$og" . "_stitched" . "_guide.txt";
+    #open(SGG, ">$sg_guide_file");
     
     # Initialize counter for 'stitches' and other variables
     my $x = 0;
@@ -1024,8 +1047,8 @@ sub stitch_genome {
 		$current_seq =~ s/\s//g;
 		$current_seq =~ s/\n//g;
 		if($stitch_seq) {
-		    # stop stitching if current_seq by itself is >= 5E6 nts
-		    if((length $current_seq) >= 5E6) {
+		    # stop stitching if current_seq by itself is >= 5E7 nts
+		    if((length $current_seq) >= 5E7) {
 			print SG ">stitch", "_$x\n";
 			# format and print
 			$stitch_seq =~ s/(.{60})/$1\n/g;
@@ -1040,7 +1063,8 @@ sub stitch_genome {
 			# Now output current_seq untouched
 			$start = 1;
 			$stop = length $current_seq;
-			print SGG "$orig_head\t$orig_head\t$start\t$stop\n";
+			#print SGG "$orig_head\t$orig_head\t$start\t$stop\n";
+			$$options{'stitchguide'}{$orig_head} = $orig_head . ':' . $start . '-' . $stop;
 			$current_seq =~ s/(.{60})/$1\n/g;
 			print SG ">$orig_head\n";
 			if($current_seq =~ /\n$/) {
@@ -1050,13 +1074,14 @@ sub stitch_genome {
 			}
 		    } else {
 			## Add to the current stitch seq, update SGG, and
-			## then check to see if it exceeds 5E6
+			## then check to see if it exceeds 5E7
 			$stitch_seq .= "$Ns";
 			$start = (length $stitch_seq) + 1;
 			$stitch_seq .= $current_seq;
 			$stop = length $stitch_seq;
-			print SGG "$orig_head\tstitch_$x\t$start\t$stop\n";
-			if((length $stitch_seq) >= 5E6) {
+			#print SGG "$orig_head\tstitch_$x\t$start\t$stop\n";
+			$$options{'stitchguide'}{$orig_head} = 'stitch_' . $x . ':' . $start . '-' . $stop;
+			if((length $stitch_seq) >= 5E7) {
 			    print SG ">stitch", "_$x\n";
 			    # format and print
 			    $stitch_seq =~ s/(.{60})/$1\n/g;
@@ -1072,17 +1097,19 @@ sub stitch_genome {
 		    }
 		} else {
 		    # check length of current seq ... 
-		    if((length $current_seq) < 5E6) {
+		    if((length $current_seq) < 5E7) {
 			# stitch time!
 			$stitch_seq = $current_seq;
 			$start = 1;
 			$stop = length($stitch_seq);
-			print SGG "$orig_head\tstitch_$x\t$start\t$stop\n";
+			#print SGG "$orig_head\tstitch_$x\t$start\t$stop\n";
+			$$options{'stitchguide'}{$orig_head} = 'stitch_' . $x . ':' . $start . '-' . $stop;
 		    } else {
 			# output as is .. after formatting
 			$start = 1;
 			$stop = length $current_seq;
-			print SGG "$orig_head\t$orig_head\t$start\t$stop\n";
+			#print SGG "$orig_head\t$orig_head\t$start\t$stop\n";
+			$$options{'stitchguide'}{$orig_head} = $orig_head . ':' . $start . '-' . $stop;
 			$current_seq =~ s/(.{60})/$1\n/g;
 			print SG ">$orig_head\n";
 			if($current_seq =~ /\n$/) {
@@ -1109,8 +1136,8 @@ sub stitch_genome {
     $current_seq =~ s/\s//g;
     $current_seq =~ s/\n//g;
     if($stitch_seq) {
-	# stop stitching if current_seq by itself is >= 5E6 nts
-	if((length $current_seq) >= 5E6) {
+	# stop stitching if current_seq by itself is >= 5E7 nts
+	if((length $current_seq) >= 5E7) {
 	    print SG ">stitch", "_$x\n";
 	    # format and print
 	    $stitch_seq =~ s/(.{60})/$1\n/g;
@@ -1125,7 +1152,8 @@ sub stitch_genome {
 	    # Now output current_seq untouched
 	    $start = 1;
 	    $stop = length $current_seq;
-	    print SGG "$orig_head\t$orig_head\t$start\t$stop\n";
+	    #print SGG "$orig_head\t$orig_head\t$start\t$stop\n";
+	    $$options{'stitchguide'}{$orig_head} = $orig_head . ':' . $start . '-' . $stop;
 	    $current_seq =~ s/(.{60})/$1\n/g;
 	    print SG ">$orig_head\n";
 	    if($current_seq =~ /\n$/) {
@@ -1140,7 +1168,8 @@ sub stitch_genome {
 	    $start = (length $stitch_seq) + 1;
 	    $stitch_seq .= $current_seq;
 	    $stop = length $stitch_seq;
-	    print SGG "$orig_head\tstitch_$x\t$start\t$stop\n";
+	    #print SGG "$orig_head\tstitch_$x\t$start\t$stop\n";
+	    $$options{'stitchguide'}{$orig_head} = 'stitch_' . $x . ':' . $start . '-' . $stop;
 	    print SG ">stitch", "_$x\n";
 	    # format and print
 	    $stitch_seq =~ s/(.{60})/$1\n/g;
@@ -1158,7 +1187,8 @@ sub stitch_genome {
 	# output as is .. after formatting
 	$start = 1;
 	$stop = length $current_seq;
-	print SGG "$orig_head\t$orig_head\t$start\t$stop\n";
+	#print SGG "$orig_head\t$orig_head\t$start\t$stop\n";
+	$$options{'stitchguide'}{$orig_head} = $orig_head . ':' . $start . '-' . $stop;
 	$current_seq =~ s/(.{60})/$1\n/g;
 	print SG ">$orig_head\n";
 	if($current_seq =~ /\n$/) {
@@ -1169,14 +1199,18 @@ sub stitch_genome {
     }
 
     close SG;
-    close SGG;
+    #close SGG;
     
     # Report
-    $$options{'genomefile'} = $sg_file;
-    log_it($$options{'logfile'}, "\tDone: now using $sg_file as reference genome");
+    ##$$options{'genomefile'} = $sg_file;
+    $$options{'stitchgenomefile'} = $sg_file;
     
     # fai it
-    my $fai_file = fai($options);
+    my $fai_file = fai_stitch($options);
+
+    # note that $$options{'stitchguide'} also has entries after this.
+    
+    log_it($$options{'logfile'}, "\tDone");
     return $fai_file;
 }
 
@@ -3535,15 +3569,25 @@ sub MIRNA {
     if($fold_start < 1) {
 	$fold_start = 1;
     }
-    my $faidx_region = "$chr" . ":" . "$fold_start" . "-" . "$fold_stop";
-    
+    my $faidx_region_o = "$chr" . ":" . "$fold_start" . "-" . "$fold_stop";  # _o is for original
+    my $faidx_region_s;  ## _s is for stitched, should it exist
+    if(exists($$options{'stitchgenomefile'})) {
+	$faidx_region_s = convert_coordinates($options,\$faidx_region_o);
+	# test
+	#print "\nReturned converted coordinates for $faidx_region_o as $faidx_region_s\n";
+	#exit;
+    }
     # TEST
     #print "Locus: $$coords Strand: $$strand Folded Region: $faidx_region\n";
     # END TEST
     
     # get sequence to be folded
-    my $fold_seq = get_fold_seq($options,$strand,\$faidx_region);
-    
+    my $fold_seq;
+    if($faidx_region_s) {
+	$fold_seq = get_fold_seq($options,$strand,\$faidx_region_s);
+    } else {
+	$fold_seq = get_fold_seq($options,$strand,\$faidx_region_o);
+    }
     # TEST
     #print "$fold_seq : fold_seq\n";
     # END TEST
@@ -3576,7 +3620,8 @@ sub MIRNA {
     
     # mature miRNA pairing .. all 'one way', 4 or fewer unpaired bases
     # no more than one bulge containing no more than 2 bulged nts.
-    my $star_key = check_mir_star($brax,$mirkey,$faidx_region);  ## returns 0 if fail, or key in form Chr\tleft\tx\tstrand\tlength
+    # faidx region should always be _o here
+    my $star_key = check_mir_star($brax,$mirkey,$faidx_region_o);  ## returns 0 if fail, or key in form Chr\tleft\tx\tstrand\tlength
     if ($star_key =~ /^N\d+$/) {
 	# TEST
 	#print "failed check_mir_star\n\n";
@@ -3662,7 +3707,7 @@ sub MIRNA {
 	#print "result: Y\n\n";
 	## END TEST
 	$call = 'Y';
-	plain_text($all,\$mirkey,\$star_key,$options,$strand,\$faidx_region,$coords,$loc_name,\$fold_seq,\$brax,\$call,\$real_star_key);
+	plain_text($all,\$mirkey,\$star_key,$options,$strand,\$faidx_region_o,$coords,$loc_name,\$fold_seq,\$brax,\$call,\$real_star_key);
 	return 'Y';
     } else {
 	# TEST
@@ -3892,7 +3937,11 @@ sub get_mir_key {
 
 sub get_fold_seq {
     my($options,$strand,$region) = @_; ## references to hash, scalar, and scalar
-    open(FASTA, "samtools faidx $$options{'genomefile'} $$region |");
+    if(exists($$options{'stitchgenomefile'})) {
+	open(FASTA, "samtools faidx $$options{'stitchgenomefile'} $$region |");
+    } else {
+	open(FASTA, "samtools faidx $$options{'genomefile'} $$region |");
+    }
     my $raw_seq;
     while (<FASTA>) {
 	if($_ =~ /^>/) {
@@ -4649,6 +4698,43 @@ sub get_sorted_rnas {
     return @out;
 }
 
+sub convert_coordinates {
+    my($options,$original) = @_; # refs to hash, scalar
+    my $o_chr;
+    my $o_start;
+    my $o_stop;
+    my $s_range;
+    my $s_chr;
+    my $s_range_start;
+    my $s_range_stop;
+    my $s_start;
+    my $s_stop;
+    my $out;
+    if($$original =~ /^(\S+):(\d+)-(\d+)$/) {
+	$o_chr = $1;
+	$o_start = $2;
+	$o_stop = $3;
+	    if(exists($$options{'stitchguide'}{$o_chr})) {
+		$s_range = $$options{'stitchguide'}{$o_chr};
+		if($s_range =~ /^(\S+):(\d+)-(\d+)$/) {
+		    $s_chr = $1;
+		    $s_range_start = $2;
+		    $s_range_stop = $3;
+		    $s_start = $o_start + $s_range_start - 1;
+		    $s_stop = $o_stop + $s_range_start - 1;
+		    $out = $s_chr . ':' . $s_start . '-' . $s_stop;
+		    return $out;
+		} else {
+		    return 0;
+		}
+	} else {
+	    return 0;
+	}
+    } else {
+	return 0;
+    }
+}
+
 __END__
 
 =head1 LICENSE
@@ -4708,7 +4794,7 @@ RNAfold (unless running with --nohp option to disable MIRNA search) : Part of th
 
 =head3 Test environment
 
-This release of ShortStack (3.7.1) tested on Mac OSX (10.10.5), perl 5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2
+This release of ShortStack (3.8) tested on Mac OSX (10.10.5), perl 5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2. It is known that samtools 1.x and higher is critical (no old 0.x samtools allowed).
 
 =head2 Install
 
@@ -4773,10 +4859,6 @@ Note that we have done our best to set default settings for all options that are
   to be tolerated in a valid alignment. Must be either 0, 1, or 2. In cases of multiple hits, only hits
   with lowest number of mismatches kept. Default: 1.
 
---nostitch : Disable 'stitching' of fragmented genomes. By default, if the genomefile has more than 50 chromosomes 
-  and two or more of them are < 1Mb, ShortStack stitches chromosomes shorter than 1Mb into larger (>5Mb) assemblies. 
-  This drastically improves performance when working with highly fragmented reference genomes.
-
 --cquals [string] : path(s) to color-space quality value file(s). Used only in conjunction with .csfasta 
   or .csfasta.gz formatted files in --readfile. Compressed format for cquals is NOT allowed. Like --readfile, 
   cquals can take multiple arguments for multiple files, e.g. --cquals file1.qual file2.qual file3.qual
@@ -4840,7 +4922,7 @@ Note that we have done our best to set default settings for all options that are
   integer between 1 and 50000. Can also be a normalized value in reads per million. When specifying mincov in 
   reads per million, the mincov value must be a floating point number > 0 and < 500,000 followed
   by the string 'rpm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
-  3.2 reads per million mapped. Deafult: 20 (raw reads).
+  3.2 reads per million mapped. Deafult: 0.5rpm.
 
 --total_primaries [integer] : Tell ShortStack the total number of primary alignments in the bam file. Specifying
   this value here speeds the analysis, since ShortStack does not need to count the reads directly from the bam file.
@@ -4897,9 +4979,8 @@ Within the genome, if the name of a chromosome has whitespace characters, the na
 If the reference genome has > 50 chromosomes/scaffolds/contigs, and the genome N50 length is < 1Mb, and MIRNAs are
 to be analyzed (e.g., --nohp was NOT specified), then ShortStack will 'stitch' the small chromosomes together to make
 fewer but larger chromosomes. This can drastically improve performance during MIRNA searching for highly fragmented
-genome assemblies. BUT, if the genome is stitched, the coordinates for stitched references are changed (there is a
-guide produced), and the bowtie indices will need to be built, which can be time-consuming. Genome stitching can be
-disabled with the option --nostitch.
+genome assemblies. As of ShortStack 3.8, stitching has no effect on the results (e.g. results are reported relative
+to the original genome, not the stitched one).
 
 =head3 Genome indexing
 
@@ -5230,21 +5311,12 @@ For debugging. Most users won't need to look at this. It stores the verbose outp
 bowtie, samtools sort, and samtools merge commands that are not kep in the main Log. Sometimes these are
 helpful in diagnosing bugs, particularly samtools sort and merge bugs due to memory issues.
 
-=head2 Stitched genome files
+=head2 Stitched genome file
 
 If the input genome was 'stitched' (see above), the stitched genome file will be 
-put in the ShortStack outdir, along with its fai index, and the six bowtie indices 
-(which end with .ebwt). Additionally, a guide file will be written that describes the
-relationships between the input genome and the stitched genome. This guide file is 
-tab-delimited plain text. The columns are:
-
-1. Original chromosome name
-
-2. Stitched chromosome name
-
-3. Start of sequence in stitched
-
-4. End of sequence in stitched.
+put in the ShortStack outdir, along with its fai index temporarily during the run.
+Both files will be deleted at the end of the run so you won't see them unless your
+run was killed before completion for some reason.
 
 =head2 Results file
 
@@ -5342,10 +5414,6 @@ Answer: Three reasons. 1) unlike bowtie2, bowtie has support for colorspace data
 
 Answer: MIRNA annotation by ShortStack is, by design, meant to strongly reduce, perhaps eliminate, false positives. Any locus given a MIRNA result of 'Y' by ShortStack has sufficiently strong evidence to support its annotation of a miRNA. However, reduction of false positives comes at a price .. there will be some false negatives .. true MIRNAs that are not reported as such by ShortStack. Users should consider a 'No' MIRNA result by ShortStack to mean that the evidence in that particular small RNA-seq run did not offer 100% proof that the locus was a MIRNA.
 
-=head2 For phasing analysis, why does the PhaseSize often conflict with the DicerCall?
-
-Answer: ShortStack's PhaseSize is the phasing register that gave the best phasing score. It is independent of the DicerCall. There will even be cases where there are no actual small RNAs of the PhaseSize at the locus. In most cases, such cases are likely to be low phasing scores anyway. But there are known cases with 21nt phasing but yet a single dominant 22nt siRNA in the locus that would cause the PhaseSize and the DicerCall to differ.
-
 =head2 I ran the same analysis, with the same reads, and the same settings a second time, and received slightly different results. Is this a bug?
 
 Answer: No. This is caused by the treatment of multi-mapped reads. Because the decisions on which of the possible alignment positions are probabilistic, some small number of the reads will be differ in their selected primary positions when alignments are repeated. This is normal, and typically the differences are minor.
@@ -5360,9 +5428,9 @@ Answer: It is gone. This was a rather crude way to assess overlaps between Short
 
 =head2 Are the read counts reported by ShortStack normalized in any way?
 
-Answer: No. This is because there are many slight variants for normalization in use. It's better to leave this to the user to decide on. The counts are all raw numbers of reads from the loci in question.
+Answer: The column 'Reads' in the Results is just the raw reads. The column 'RPM' in the Results is the reads per million, calculated on the basis of all aligned + unaligned reads in the library.
 
 =head2 ShortStack seems to be slow. Why? And how to make it go faster?
 
-Answer: To make alignments go faster, use the --bowtie_cores and --sort_mem options to make full use of your system. Their default settings (1 core, and sort_mem of 768M) are quite low to ensure success on low-powered machines, but if you have more cores and memory available, raising these will speed alignments along quite a bit. Another way to make alignments go faster is to specifiy r or n for option --mmap. But there is a trade-off there .. r causes multi-mapped reads to be just placed randomly instead of more intelligently, while n causes all multi-mappers to be marked as unmapped. So, if you use --mmap of r or n, you will get a much faster alignment, but a much less sensitive and precise one.  There are also some tricks to increase the speed of analysis, but they all also involve some down-side. You can set option --nohp, which means that MIRNAs will not be tested for. This will increase the speed of analysis but of course you won't be able to annotate MIRNAs. You can also adjust the option --mincov to have a higher threshold. This will cause fewer loci to be discovered (only those with higher expression levels), so analysis time will be reduced. But of course the trade-off there is that you will not discovery loci with lower expression levels.
+Answer: To make alignments go faster, use the --bowtie_cores and --sort_mem options to make full use of your system. Their default settings (1 core, and sort_mem of 768M) are quite low to ensure success on low-powered machines, but if you have more cores and memory available, raising these will speed alignments along quite a bit. Another way to make alignments go faster is to specifiy r or n for option --mmap. But there is a trade-off there .. r causes multi-mapped reads to be just placed randomly instead of more intelligently, while n causes all multi-mappers to be marked as unmapped. So, if you use --mmap of r or n, you will get a much faster alignment, but a much less sensitive and precise one.  There are also some tricks to increase the speed of analysis, but they all also involve some down-side. You can set option --nohp, which means that MIRNAs will not be tested for. This will increase the speed of analysis but of course you won't be able to annotate MIRNAs. You can also adjust the option --mincov to have a higher threshold. This will cause fewer loci to be discovered (only those with higher expression levels), so analysis time will be reduced. But of course the trade-off there is that you will not discover loci with lower expression levels. The current default of mincov 0.5rpm should be a good balance of sensitivity and speed for most applications.
 

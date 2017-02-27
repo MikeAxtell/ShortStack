@@ -59,8 +59,9 @@ INSTALL
     http://www.tbi.univie.ac.at/RNA/
 
     Test environment
-    This release of ShortStack (3.7.1) tested on Mac OSX (10.10.5), perl
-    5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2
+    This release of ShortStack (3.8) tested on Mac OSX (10.10.5), perl
+    5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2. It is known that
+    samtools 1.x and higher is critical (no old 0.x samtools allowed).
 
   Install
     There is no real installation of ShortStack. Make sure it is executable.
@@ -132,12 +133,6 @@ OPTIONS
     specifying number of mismatches to be tolerated in a valid alignment.
     Must be either 0, 1, or 2. In cases of multiple hits, only hits with
     lowest number of mismatches kept. Default: 1.
-
-    --nostitch : Disable 'stitching' of fragmented genomes. By default, if
-    the genomefile has more than 50 chromosomes and two or more of them are
-    < 1Mb, ShortStack stitches chromosomes shorter than 1Mb into larger
-    (>5Mb) assemblies. This drastically improves performance when working
-    with highly fragmented reference genomes.
 
     --cquals [string] : path(s) to color-space quality value file(s). Used
     only in conjunction with .csfasta or .csfasta.gz formatted files in
@@ -219,7 +214,7 @@ OPTIONS
     per million, the mincov value must be a floating point number > 0 and <
     500,000 followed by the string 'rpm'. Examples: '5' --> threshold is 5
     raw reads. '3.2rpm' --> threshold is 3.2 reads per million mapped.
-    Deafult: 20 (raw reads).
+    Deafult: 0.5rpm.
 
     --total_primaries [integer] : Tell ShortStack the total number of
     primary alignments in the bam file. Specifying this value here speeds
@@ -281,10 +276,9 @@ ALIGNMENT METHODS
     was NOT specified), then ShortStack will 'stitch' the small chromosomes
     together to make fewer but larger chromosomes. This can drastically
     improve performance during MIRNA searching for highly fragmented genome
-    assemblies. BUT, if the genome is stitched, the coordinates for stitched
-    references are changed (there is a guide produced), and the bowtie
-    indices will need to be built, which can be time-consuming. Genome
-    stitching can be disabled with the option --nostitch.
+    assemblies. As of ShortStack 3.8, stitching has no effect on the results
+    (e.g. results are reported relative to the original genome, not the
+    stitched one).
 
     Genome indexing
     If not detected, an index of the genome will be created using samtools
@@ -675,21 +669,12 @@ OUTPUT FILES
     helpful in diagnosing bugs, particularly samtools sort and merge bugs
     due to memory issues.
 
-  Stitched genome files
+  Stitched genome file
     If the input genome was 'stitched' (see above), the stitched genome file
-    will be put in the ShortStack outdir, along with its fai index, and the
-    six bowtie indices (which end with .ebwt). Additionally, a guide file
-    will be written that describes the relationships between the input
-    genome and the stitched genome. This guide file is tab-delimited plain
-    text. The columns are:
-
-    1. Original chromosome name
-
-    2. Stitched chromosome name
-
-    3. Start of sequence in stitched
-
-    4. End of sequence in stitched.
+    will be put in the ShortStack outdir, along with its fai index
+    temporarily during the run. Both files will be deleted at the end of the
+    run so you won't see them unless your run was killed before completion
+    for some reason.
 
   Results file
     The file Results.txt is a plain-text tab-delimited file that contains
@@ -821,15 +806,6 @@ FAQ
     result by ShortStack to mean that the evidence in that particular small
     RNA-seq run did not offer 100% proof that the locus was a MIRNA.
 
-  For phasing analysis, why does the PhaseSize often conflict with the DicerCall?
-    Answer: ShortStack's PhaseSize is the phasing register that gave the
-    best phasing score. It is independent of the DicerCall. There will even
-    be cases where there are no actual small RNAs of the PhaseSize at the
-    locus. In most cases, such cases are likely to be low phasing scores
-    anyway. But there are known cases with 21nt phasing but yet a single
-    dominant 22nt siRNA in the locus that would cause the PhaseSize and the
-    DicerCall to differ.
-
   I ran the same analysis, with the same reads, and the same settings a second time, and received slightly different results. Is this a bug?
     Answer: No. This is caused by the treatment of multi-mapped reads.
     Because the decisions on which of the possible alignment positions are
@@ -849,9 +825,9 @@ FAQ
     Use bedtools instead (using the gff3 output from ShortStack).
 
   Are the read counts reported by ShortStack normalized in any way?
-    Answer: No. This is because there are many slight variants for
-    normalization in use. It's better to leave this to the user to decide
-    on. The counts are all raw numbers of reads from the loci in question.
+    Answer: The column 'Reads' in the Results is just the raw reads. The
+    column 'RPM' in the Results is the reads per million, calculated on the
+    basis of all aligned + unaligned reads in the library.
 
   ShortStack seems to be slow. Why? And how to make it go faster?
     Answer: To make alignments go faster, use the --bowtie_cores and
@@ -871,6 +847,7 @@ FAQ
     annotate MIRNAs. You can also adjust the option --mincov to have a
     higher threshold. This will cause fewer loci to be discovered (only
     those with higher expression levels), so analysis time will be reduced.
-    But of course the trade-off there is that you will not discovery loci
-    with lower expression levels.
+    But of course the trade-off there is that you will not discover loci
+    with lower expression levels. The current default of mincov 0.5rpm
+    should be a good balance of sensitivity and speed for most applications.
 
