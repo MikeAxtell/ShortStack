@@ -638,18 +638,21 @@ ANALYSIS METHODS
     that are phased, and PArpm is the abundance of the phased reads in units
     of reads per million.
 
-    ShortStack calculates the phase score in a 21 nt phase size and returns
-    the score. Higher phasing scores indicate more phasing signature. Phase
-    scores range from very near 0 (worst) up.
+    ShortStack calculates the phase score in a 21 nt phase size for loci
+    with a DicerCall of 21, or in a 24 nt phase size for loci with a
+    DicerCall of 24, and returns the score. Higher phasing scores indicate
+    more phasing signature. Phase scores range from very near 0 (worst) up.
 
     The modification of the Guo et al. formula, first implemented in
     ShortStack version 3.7, makes the PhaseScore numbers comparable between
-    different libraries.
+    different libraries. A score of ~30 or more indicates a well-phased
+    locus.
 
     Not all loci are subject to phasing analysis. Loci with no reads at all
-    aligned, a DicerCall of N or NA, a Locus Size of < 3 * DicerCall, and
-    stranded loci (>= 80% of reads on top strand OR <= 20% of reads on top
-    strand) are not analyzed. These are assigned a PhaseScore of -1.
+    aligned, a DicerCall of anything except 21 or 24, a Locus Size of < 3 *
+    DicerCall, and stranded loci (>= 80% of reads on top strand OR <= 20% of
+    reads on top strand) are not analyzed. These are assigned a PhaseScore
+    of -1.
 
 OUTPUT FILES
     All output files are in the directory created by ShortStack, whose name
@@ -719,10 +722,12 @@ OUTPUT FILES
     13. MIRNA: Results of MIRNA analysis. Codes starting with N indicate not
     a MIRNA, Y means yes. See above for full description of codes.
 
-    14. PhaseScore: Phasing score for a phase size of 21 nts according to a
-    modified version of equation 3 of Guo et al (2015) doi:
-    10.1093/bioinformatics/btu628. See above for full description of phasing
-    analysis.
+    14. PhaseScore: Phasing score for a phase size of 21 or 24nts according
+    to a modified version of equation 3 of Guo et al (2015) doi:
+    10.1093/bioinformatics/btu628. If the locus had a DicerCall of 21, phase
+    score is for a 21 nt phasing register. If the locus had a DicerCall of
+    24, the phase score is for a 24 nt phasing register. See above for full
+    description of phasing analysis.
 
     15. Short: Number of primary alignments that were shorter than
     --dicermin

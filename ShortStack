@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.8";
+my $version_num = "3.8.1";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -3016,7 +3016,7 @@ sub analyze_locus {
        ($strand_call =~ /[\-\+]/)) {
 	print $res_fh "\t-1";
     } else {
-	my $phase_score = phaser($all,$options,$coords);
+	my $phase_score = phaser($all,$options,$coords,\$dicer_call);
 	print $res_fh "\t$phase_score";
     }
     
@@ -3032,14 +3032,15 @@ sub analyze_locus {
 
 sub phaser {
     # Based on modified version of equation 3 of Guo et al. (2015) doi:10.1093/bioinformatics/btu628
-    my($all,$options,$coords) = @_; ## references to 3 hashes and a scalar 
+    my($all,$options,$coords,$dicer_call) = @_; ## references to 3 hashes and a scalar 
     
     my $pr;
     my $pn;
     my $pa;
     my $score;
     
-    my $size = 21;
+    my $size = $$dicer_call;
+
     my $loc_start;
     my %abun = ();
     my %distinct = ();
@@ -3052,6 +3053,13 @@ sub phaser {
     my $sum = 0;
     my $rpm;
     my $rounded;
+
+    # only check 21nt phasing for DicerCall 21 loci, and 24nt phasing for DicerCall 24 loci
+    unless(($size == 21) or ($size == 24)) {
+	$rounded = -1;
+	return $rounded;
+    }
+
     foreach $k (keys %{$$all{'main'}}) {
 	@kf = split ("\t", $k);
 	if($kf[3] eq '+') {
@@ -5284,14 +5292,15 @@ For valid loci, ShortStack 3.7 and above uses a modified version of the  formula
 S = PR * PN * ln(1 + PArpm), where S is the phase score, PR is the phase ratio (see Axtell 2010 doi: 10.1007/978-1-60327-005-2_5),
 PN is the number of distinct sequences that are phased, and PArpm is the abundance of the phased reads in units of reads per million.
 
-ShortStack calculates the phase score in a 21 nt phase size
+ShortStack calculates the phase score in a 21 nt phase size for loci with a DicerCall of 21, or in a
+24 nt phase size for loci with a DicerCall of 24,
 and returns the score.  Higher phasing scores indicate 
 more phasing signature. Phase scores range from very near 0 (worst) up.
 
 The modification of the Guo et al. formula, first implemented in ShortStack version 3.7, makes the PhaseScore numbers
-comparable between different libraries.
+comparable between different libraries. A score of ~30 or more indicates a well-phased locus.
 
-Not all loci are subject to phasing analysis. Loci with no reads at all aligned, a DicerCall of N or NA, a Locus Size of < 3 * DicerCall, and stranded loci (>= 80% of reads on top strand OR <= 20% of reads on top strand) are not analyzed. These are assigned a PhaseScore of -1.
+Not all loci are subject to phasing analysis. Loci with no reads at all aligned, a DicerCall of anything except 21 or 24, a Locus Size of < 3 * DicerCall, and stranded loci (>= 80% of reads on top strand OR <= 20% of reads on top strand) are not analyzed. These are assigned a PhaseScore of -1.
 
 =head1 OUTPUT FILES
 
@@ -5349,7 +5358,7 @@ the analysis. The columns are labeled in the first row, and are:
 
 13. MIRNA: Results of MIRNA analysis. Codes starting with N indicate not a MIRNA, Y means yes. See above for full description of codes.
 
-14. PhaseScore:  Phasing score for a phase size of 21 nts according to a modified version of equation 3 of Guo et al (2015) doi: 10.1093/bioinformatics/btu628. See above for full description of phasing analysis.
+14. PhaseScore:  Phasing score for a phase size of 21 or 24nts according to a modified version of equation 3 of Guo et al (2015) doi: 10.1093/bioinformatics/btu628. If the locus had a DicerCall of 21, phase score is for a 21 nt phasing register. If the locus had a DicerCall of 24, the phase score is for a 24 nt phasing register. See above for full description of phasing analysis. 
 
 15. Short: Number of primary alignments that were shorter than --dicermin
 
