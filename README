@@ -216,6 +216,15 @@ OPTIONS
     raw reads. '3.2rpm' --> threshold is 3.2 reads per million mapped.
     Deafult: 0.5rpm.
 
+    --strand_cutoff [float] : Cutoff for calling the strandedness of a
+    locus. Must be a floating point number between 0.5 and 1 (inclusive).
+    DEFAULT: 0.8. At default of 0.8, a locus must have 80% of more of its
+    reads on the top strand to be called a + strand locus, or 20% or less on
+    the top strand to be a - strand locus. All others receive no strand call
+    (e.g. '.'). Only stranded loci are analyzed for MIRNAs, while only
+    unstranded loci are analyzed with respect to phasing. Most users
+    probably want to use the default setting of 0.8.
+
     --total_primaries [integer] : Tell ShortStack the total number of
     primary alignments in the bam file. Specifying this value here speeds
     the analysis, since ShortStack does not need to count the reads directly

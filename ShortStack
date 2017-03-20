@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.8.1";
+my $version_num = "3.8.2";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -96,13 +96,15 @@ validate_ranmax(\%options,\$usage_message);
 validate_locus(\%options,\$usage_message);
 validate_sort_mem(\%options,\$usage_message);
 validate_foldsize(\%options,\$usage_message);
+validate_strand_cutoff(\%options,\$usage_message);
 
 ######## Check for required dependencies
 my $samtools_which = install_check('samtools',$usage_message);
 my $samtools_version = samtools_version1_check($usage_message);
 my $bowtie_which;
 my $gzip_which;
-if(exists($options{'readfile'})) {
+if(${$options{'readfile'}}[0]) {
+### if(exists($options{'readfile'})) {
     $bowtie_which = install_check('bowtie', $usage_message);
     $gzip_which = install_check('gzip',$usage_message);
 }
@@ -120,7 +122,7 @@ initiate_log(\%options, \$version_num);
 my $fai_file = fai(\%options);
 my $stitch_fai_file;
 # genome stitching, if warranted
-unless((exists($options{'align_only'})) or (exists($options{'nohp'}))) {
+unless((exists($options{'align_only'})) or (exists($options{'nohp'})) or (exists($options{'locus'}))) {
     my $need2 = need_to_stitch(\%options);  ## $need2 is the size of N's to be added when stitching. As of 3.8, always 100 (or 0)
     if($need2) {
 	$stitch_fai_file = stitch_genome(\%options,\$need2);
@@ -343,6 +345,13 @@ Analysis Options:
   by the string 'rpm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
   3.2 reads per million mapped. Deafult: 0.5rpm.
 
+--strand_cutoff [float] : Cutoff for calling the strandedness of a locus. Must be a floating point number 
+  between 0.5 and 1 (inclusive). DEFAULT: 0.8. At default of 0.8, a locus must have 80% of more of its 
+  reads on the top strand to be called a + strand locus, or 20% or less on the top strand to be a - 
+  strand locus. All others receive no strand call (e.g. '.'). Only stranded loci are analyzed for 
+  MIRNAs, while only unstranded loci are analyzed with respect to phasing. Most users probably want
+  to use the default setting of 0.8.
+
 --total_primaries [integer] : Tell ShortStack the total number of primary alignments in the bam file. Specifying
   this value here speeds the analysis, since ShortStack does not need to count the reads directly from the bam file.
   Can only be specified in conjunction with --bamfile. This count should include all primary alignment INCLUDING unplaced ones.
@@ -387,7 +396,8 @@ sub get_ShortStack_options {
 	       'foldsize=i',
 	       'show_secondaries',
 	       'keep_quals',
-	       'total_primaries=i'
+	       'total_primaries=i',
+	       'strand_cutoff=f'
 	);
     
     # If no options were passed, just print help and walk away
@@ -769,6 +779,17 @@ sub validate_bowtie_m {
 	} else {
 	    $$options{'bowtie_m'} = 50;
 	}
+    }
+}
+
+sub validate_strand_cutoff {
+    my($options,$usage) = @_;
+    if(exists($$options{'strand_cutoff'})) {
+	unless(($$options{'strand_cutoff'} >= 0.5) and ($$options{'strand_cutoff'} <= 1)) {
+	    die "\noption strand_cutoff must be a floating point number between 0.5 and 1 (inclusive).\n\n$$usage\n";
+	}
+    } else {
+	$$options{'strand_cutoff'} = 0.8;
     }
 }
 
@@ -2936,7 +2957,7 @@ sub analyze_locus {
     print $res_fh "\t$$unq";
     
     # top strand mappers and strand call
-    my($frac_top,$strand_call) = get_strand($all);
+    my($frac_top,$strand_call) = get_strand($all,$options);
     print $res_fh "\t$frac_top\t$strand_call";
     
     # Dominant sequence, and complexity
@@ -3121,7 +3142,7 @@ sub get_big_seq {
     
 
 sub get_strand {
-    my($all) = @_; ## reference to hash
+    my($all,$options) = @_; ## reference to hashes
     my $top = 0;
     my $sum = 0;
     my @keys = ();
@@ -3138,9 +3159,9 @@ sub get_strand {
     }
     if($sum) {
 	$frac = sprintf("%.3f", ($top / $sum)); 
-	if($frac >= 0.8) {
+	if($frac >= $$options{'strand_cutoff'}) {
 	    $strand = "+";
-	} elsif ($frac <= 0.2) {
+	} elsif ($frac <= (1 - $$options{'strand_cutoff'})) {
 	    $strand = "-";
 	} else {
 	    $strand = '.';
@@ -4931,6 +4952,13 @@ Note that we have done our best to set default settings for all options that are
   reads per million, the mincov value must be a floating point number > 0 and < 500,000 followed
   by the string 'rpm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
   3.2 reads per million mapped. Deafult: 0.5rpm.
+
+--strand_cutoff [float] : Cutoff for calling the strandedness of a locus. Must be a floating point number 
+  between 0.5 and 1 (inclusive). DEFAULT: 0.8. At default of 0.8, a locus must have 80% of more of its 
+  reads on the top strand to be called a + strand locus, or 20% or less on the top strand to be a - 
+  strand locus. All others receive no strand call (e.g. '.'). Only stranded loci are analyzed for 
+  MIRNAs, while only unstranded loci are analyzed with respect to phasing. Most users probably want
+  to use the default setting of 0.8.
 
 --total_primaries [integer] : Tell ShortStack the total number of primary alignments in the bam file. Specifying
   this value here speeds the analysis, since ShortStack does not need to count the reads directly from the bam file.
