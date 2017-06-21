@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.8.2";
+my $version_num = "3.8.3";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -135,7 +135,8 @@ $options{'fai_file'} = $fai_file;
 # check and build .ebwt (or ebwtl) indices, if warranted
 my $g_type;
 if(exists($options{'readfile'})) {
-    $g_type = ebwt(\%options);
+    $g_type = ebwt(\%options);  ## g_type is either 's' or 'l' for small or large genomes, resp.
+    $options{'g_type'} = $g_type;
 }
 
 # trim 3' adapters, if warranted
@@ -1284,11 +1285,23 @@ sub ebwt {
 	    log_it($$options{'logfile'}, "\n$time");
 	    log_it ($$options{'logfile'}, "Expected bowtie indices not found. Attempting to make them with bowtie-build...");
 	    my $base = $gen_path . $gen_file;
-	    system "bowtie-build $$options{'genomefile'} $base >> $$options{'error_logfile'}";
-	    unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
-		   ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) {
-		log_it ($$options{'logfile'}, "\tFAILED. Aborting.");
-		exit;
+	    
+	    # determine if large-index needs to be called or not
+	    my $large = is_large($options);
+	    if($large) {
+		system "bowtie-build --large-index $$options{'genomefile'} $base >> $$options{'error_logfile'}";
+		unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
+		       ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) {
+		    log_it ($$options{'logfile'}, "\tFAILED. Aborting.");
+		    exit;
+		}
+	    } else {
+		system "bowtie-build $$options{'genomefile'} $base >> $$options{'error_logfile'}";
+		unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
+		       ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) {
+		    log_it ($$options{'logfile'}, "\tFAILED. Aborting.");
+		    exit;
+		}
 	    }
 	    log_it ($$options{'logfile'}, "\tSuccessful");
 	    if(-r $one) {
@@ -1299,7 +1312,7 @@ sub ebwt {
 	    return $itype;
 	}
     }
-
+    
     # check and build color-space indices
     if($colorspace) {
 	my $one = $gen_path . $gen_file . ".cs.1.ebwt";
@@ -1328,12 +1341,25 @@ sub ebwt {
 	    log_it($$options{'logfile'}, "\n$time");
 	    log_it ($$options{'logfile'}, "Expected color-space bowtie indices not found. Attempting to make them with bowtie-build...");
 	    my $base = $gen_path . $gen_file . ".cs";
-	    system "bowtie-build -C $$options{'genomefile'} $base >> $$options{'error_logfile'}";
-	    unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
-		   ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) {
-		log_it ($$options{'logfile'}, "\tFAILED. Aborting.");
-		exit;
+
+	    # determine if large-index needs to be called or not
+	    my $large = is_large($options);
+	    if($large) {
+		system "bowtie-build -C --large-index $$options{'genomefile'} $base >> $$options{'error_logfile'}";
+		unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
+		       ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) {
+		    log_it ($$options{'logfile'}, "\tFAILED. Aborting.");
+		    exit;
+		}
+	    } else {
+		system "bowtie-build -C $$options{'genomefile'} $base >> $$options{'error_logfile'}";
+		unless(((-r $one) and (-r $two) and (-r $three) and (-r $four) and (-r $rev1) and (-r $rev2)) or
+		       ((-r $onel) and (-r $twol) and (-r $threel) and (-r $fourl) and (-r $rev1l) and (-r $rev2l))) {
+		    log_it ($$options{'logfile'}, "\tFAILED. Aborting.");
+		    exit;
+		}
 	    }
+
 	    log_it ($$options{'logfile'}, "\tSuccessful");
 	    if(-r $one) {
 		$itype = 's';
@@ -1949,7 +1975,11 @@ sub get_read_s_aln {
     if($format =~ /C/) {
 	$bowtie_cl .= " --col-keepends";
     }
-
+    
+    if($$options{'g_type'} eq 'l') {
+	$bowtie_cl .= " --large-index";
+    }
+    
     $bowtie_cl .= " --sam-RG ID:$base";
     $bowtie_cl .= " $ebwt_base -";
     if ($gz) {
@@ -4764,6 +4794,30 @@ sub convert_coordinates {
     }
 }
 
+sub is_large {
+    my($options) = @_;
+    # if more than 3,500,000,000 nts in genome per .fai file, it's large.
+    unless(-r $$options{'fai_file'}) {
+	log_it($$options{'logfile'}, "\nFATAL: Failed to read fai file $$options{'fai_file'} ABORTING\n");
+	exit;
+    }
+    open(FAI, "$$options{'fai_file'}");
+    my $n = 0;
+    my @fields = ();
+    while (<FAI>) {
+	chomp;
+	@fields = split ("\t", $_);
+	$n += $fields[1];
+    }
+    close FAI;
+    if($n > 3500000000) {
+	return 1;
+    } else {
+	return 0;
+    }
+}
+	       
+
 __END__
 
 =head1 LICENSE
@@ -4823,7 +4877,7 @@ RNAfold (unless running with --nohp option to disable MIRNA search) : Part of th
 
 =head3 Test environment
 
-This release of ShortStack (3.8) tested on Mac OSX (10.10.5), perl 5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2. It is known that samtools 1.x and higher is critical (no old 0.x samtools allowed).
+This release of ShortStack (3.8.2) tested on Mac OSX (10.10.5), perl 5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2. It is known that samtools 1.x and higher is critical (no old 0.x samtools allowed).
 
 =head2 Install
 

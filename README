@@ -59,7 +59,7 @@ INSTALL
     http://www.tbi.univie.ac.at/RNA/
 
     Test environment
-    This release of ShortStack (3.8) tested on Mac OSX (10.10.5), perl
+    This release of ShortStack (3.8.2) tested on Mac OSX (10.10.5), perl
     5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2. It is known that
     samtools 1.x and higher is critical (no old 0.x samtools allowed).
 
