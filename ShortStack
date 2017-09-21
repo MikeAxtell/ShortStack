@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.8.3";
+my $version_num = "3.8.4";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -98,6 +98,12 @@ validate_sort_mem(\%options,\$usage_message);
 validate_foldsize(\%options,\$usage_message);
 validate_strand_cutoff(\%options,\$usage_message);
 
+## Requesting a mincov in units of rpmm is incompatible with specifying an explicit 'total_primaries'
+if((exists($options{'total_primaries'})) and
+    ($options{'mincov'} =~ /rpmm$/)) {
+    die "Option total_primaries cannot be used in combination with a setting of option mincov in units of rpmm. Use units of rpm or raw reads instead.\n";
+}
+
 ######## Check for required dependencies
 my $samtools_which = install_check('samtools',$usage_message);
 my $samtools_version = samtools_version1_check($usage_message);
@@ -159,7 +165,7 @@ if(@t_readfiles) {
     
     align_master(\%options,\@t_readfiles,\$version_num,\$command_line);
     # After this, options{'bamfile'} or options{'cramfile'} will be set. 
-    # Also, $options{'total_primaries'}
+    # Also, $options{'total_primaries'} and $options{'total_primaries_placed'}
     # Abort if align_only was specified
     if((exists($options{'align_only'}))) {
 	log_it($options{'logfile'}, "\nRun was set to align_only - terminating");
@@ -171,8 +177,9 @@ if(@t_readfiles) {
 # count the number of primary alignments, if it's not done already
 # This will be the base in a countmode analysis where the user didn't state --total_primaries explicitly on the command line.
 unless(exists($options{'total_primaries'})) {
-    get_total_primaries(\%options);
+    get_total_primaries(\%options);  ## also sets options{'total_primaries_placed'}
 }
+
 # analyze
 if(($options{'locifile'}) or ($options{'locus'})) {
     ensure_aln_idx(\%options);
@@ -341,10 +348,10 @@ Analysis Options:
   less than or equal to the value of pad. Must be an integer between 0 and 50000. Default: 75.
 
 --mincov [string] : Clusters of small RNAs must have at least this many alignments. Supply an
-  integer between 1 and 50000. Can also be a normalized value in reads per million. When specifying mincov in 
-  reads per million, the mincov value must be a floating point number > 0 and < 500,000 followed
-  by the string 'rpm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
-  3.2 reads per million mapped. Deafult: 0.5rpm.
+  integer between 1 and 50000. Can also be a normalized value in reads per million (rpm) OR reads per million mapped (rpmm). When specifying mincov in 
+  rpm or rpmm, the mincov value must be a floating point number > 0 and < 500,000 followed
+  by the string 'rpm' or 'rpmm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
+  3.2 reads per million mapped. '2.8rpmm' --> threshold is 2.8 reads per million mapped. Deafult: 0.5rpm.
 
 --strand_cutoff [float] : Cutoff for calling the strandedness of a locus. Must be a floating point number 
   between 0.5 and 1 (inclusive). DEFAULT: 0.8. At default of 0.8, a locus must have 80% of more of its 
@@ -868,27 +875,27 @@ sub validate_mincov {
     unless($$options{'mincov'}) {
 	$$options{'mincov'} = '0.5rpm';
     }
-    # verify that mincov is an integer or a float followed by 'rpm'
+    # verify that mincov is an integer or a float followed by 'rpm' or 'rpmm'
     unless(($$options{'mincov'} =~ /^\d+$/) or
-	   ($$options{'mincov'} =~ /^[0-9]*\.[0-9]+|[0-9]+rpm$/)) {
-	die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\'.\n\n$$usage\n";
+	   ($$options{'mincov'} =~ /^[0-9]*\.[0-9]+|[0-9]+rpm$/) or
+	   ($$options{'mincov'} =~ /^[0-9]*\.[0-9]+|[0-9]+rpmm$/)) {
+	die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\' or \'rpmm\'.\n\n$$usage\n";
     }
     # If integer, verify that mincov is between 0 and 50000
     if ($$options{'mincov'} =~ /^\d+$/) {
 	unless(($$options{'mincov'} >= 1) and 
 	       ($$options{'mincov'} <= 50000)) {
-	    die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\'.\n\n$$usage\n";
-	    
+	    die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\' or \'rpmm\'.\n\n$$usage\n";
 	}
     } else {
-	# is a float followed by rpm. 
-	if($$options{'mincov'} =~ /^([0-9]*\.[0-9]+|[0-9]+)rpm$/) {
+	# is a float followed by rpm or rpmm
+	if($$options{'mincov'} =~ /^([0-9]*\.[0-9]+|[0-9]+)rpm{1,2}$/) {
 	    $float = $1;
 	    unless(($float > 0) and ($float < 500000)) {
-		die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\'.\n\n$$usage\n";
+	    die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\' or \'rpmm\'.\n\n$$usage\n";
 	    }
 	} else { 
-	    die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\'.\n\n$$usage\n";
+	    die "\noption mincov is invalid. It must be an integer between 1 and 50,000\n OR a floating point number >0 and < 500,000 followed  by \'rpm\' or \'rpmm\'.\n\n$$usage\n";
 	}
     }
 }
@@ -2420,8 +2427,14 @@ sub decider {
     # Report on overall results
     my $XYtype;
     my $XYsum = 0;
+    my $placed_sum = 0;
     while(($XYtype) = each %XYs) {
 	$XYsum += $XYs{$XYtype};
+	if(($XYtype eq 'U') or
+	   ($XYtype eq 'R') or 
+	   ($XYtype eq 'P')) {
+	    $placed_sum += $XYs{$XYtype};
+	}
     }
     log_it($$options{'logfile'}, "Summary of primary alignments:");
     if($XYsum <= 0) {
@@ -2443,7 +2456,7 @@ sub decider {
     }
     
     $$options{'total_primaries'} = $XYsum;
-    
+    $$options{'total_primaries_placed'} = $placed_sum;
     return @bam_files;
 }
 
@@ -2741,10 +2754,17 @@ sub denovo {
     my $threshold;
     if($$options{'mincov'} =~ /^\d+$/) {
 	$threshold = $&;
-    } elsif ($$options{'mincov'} =~ /^([0-9]*\.[0-9]+|[0-9]+)rpm$/) {
-	$threshold = 1 + int(($1 * $$options{'total_primaries'}) / 1E6);
-	log_it($$options{'logfile'}, "\n\tAt specified mincov of $$options{'mincov'} with $$options{'total_primaries'} mapped reads,");
-	log_it($$options{'logfile'}, "\tmincov is $threshold raw alignments");
+    } elsif ($$options{'mincov'} =~ /^([0-9]*\.[0-9]+|[0-9]+)(rpm{1,2})$/) {
+	if($1 eq 'rpm') {
+	    $threshold = 1 + int(($1 * $$options{'total_primaries'}) / 1E6);
+	    log_it($$options{'logfile'}, "\n\tAt specified mincov of $$options{'mincov'} with $$options{'total_primaries'} primary reads,");
+	    log_it($$options{'logfile'}, "\tmincov is $threshold raw alignments");
+	} else {
+	    # rpmm clause
+	    $threshold = 1 + int(($1 * $$options{'total_primaries_placed'}) / 1E6);
+	    log_it($$options{'logfile'}, "\n\tAt specified mincov of $$options{'mincov'} with $$options{'total_primaries_placed'} placed primary reads,");
+	    log_it($$options{'logfile'}, "\tmincov is $threshold raw alignments");
+	}
     }
     
     # If we are doing MIRNA finding, make a directory for those results.
@@ -4598,6 +4618,20 @@ sub get_total_primaries {
     log_it($$options{'logfile'}, "\nTally of primary alignments (INCLUDES unmapped, but EXCLUDES secondary, duplicate,");
     log_it($$options{'logfile'}, "failed QC, and supplementary alignments): $tally");
     $$options{'total_primaries'} = $tally;
+
+    # Now count the primaries that are placed:
+    if(exists($$options{'cramfile'})) {
+	open(X, "samtools view -F 3844 -c $$options{'cramfile'} |");
+    } else {
+	open(X, "samtools view -F 3844 -c $$options{'bamfile'} |");
+    }
+    $tally = <X>;
+    close X;
+    chomp $tally;
+    $tally =~ s/\s//g;
+    log_it($$options{'logfile'}, "\nTally of PLACED primary alignments (EXCLUDES unmapped, secondary, duplicate,");
+    log_it($$options{'logfile'}, "failed QC, and supplementary alignments): $tally");
+    $$options{'total_primaries_placed'} = $tally;
 }
 	    
 sub validate_sort_mem {
@@ -4877,7 +4911,7 @@ RNAfold (unless running with --nohp option to disable MIRNA search) : Part of th
 
 =head3 Test environment
 
-This release of ShortStack (3.8.2) tested on Mac OSX (10.10.5), perl 5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2. It is known that samtools 1.x and higher is critical (no old 0.x samtools allowed).
+This release of ShortStack (3.8.4) tested on Mac OSX (10.10.5), perl 5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2. It is known that samtools 1.x and higher is critical (no old 0.x samtools allowed).
 
 =head2 Install
 
@@ -5002,10 +5036,10 @@ Note that we have done our best to set default settings for all options that are
   less than or equal to the value of pad. Must be an integer between 0 and 50000. Default: 75.
 
 --mincov [string] : Clusters of small RNAs must have at least this many alignments. Supply an
-  integer between 1 and 50000. Can also be a normalized value in reads per million. When specifying mincov in 
-  reads per million, the mincov value must be a floating point number > 0 and < 500,000 followed
-  by the string 'rpm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
-  3.2 reads per million mapped. Deafult: 0.5rpm.
+  integer between 1 and 50000. Can also be a normalized value in reads per million (rpm) OR reads per million mapped (rpmm). When specifying mincov in 
+  rpm or rpmm, the mincov value must be a floating point number > 0 and < 500,000 followed
+  by the string 'rpm' or 'rpmm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' --> threshold is 
+  3.2 reads per million mapped. '2.8rpmm' --> threshold is 2.8 reads per million mapped. Deafult: 0.5rpm.
 
 --strand_cutoff [float] : Cutoff for calling the strandedness of a locus. Must be a floating point number 
   between 0.5 and 1 (inclusive). DEFAULT: 0.8. At default of 0.8, a locus must have 80% of more of its 
@@ -5233,11 +5267,13 @@ Unless options --locus or --locifile are used (see below), ShortStack will de-no
 clusters of small RNA accumulation genome-wide. Cluster definition is simple: 
 First, all regions containing at least one primary alignment are found where the maximum
 distance between the ends of the alignments is <= option --pad (default: 75). Second,
-if the number of alignments in the cluster is >= option --mincov (default: 20), the cluster
-is kept. The mincov threshold can also be specified in terms of reads per million mapped
+if the number of alignments in the cluster is >= option --mincov (default: 0.5rpm), the cluster
+is kept. The mincov threshold can also be specified in terms of reads per million
 by using a value such as 3.2rpm (which specifies the threshold to be 3.2 reads per million).
 Using a rpm threshold allows the sensitivity of cluster discovery to be normalized between
-libraries of different sizes.
+libraries of different sizes. Alternatively, reads per million mapped (rpmm) can be specified: 
+A --mincov of 1.2rpmm indicates 1.2 reads per million mapped is the threshold. rpm is a fraction
+of total library size, while rpmm is a fraction of only the aligned & placed fraction of the library.
 
 =head1 UNPLACED SMALL RNAS
 

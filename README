@@ -59,7 +59,7 @@ INSTALL
     http://www.tbi.univie.ac.at/RNA/
 
     Test environment
-    This release of ShortStack (3.8.2) tested on Mac OSX (10.10.5), perl
+    This release of ShortStack (3.8.4) tested on Mac OSX (10.10.5), perl
     5.18.2, samtools 1.3.1, bowtie 1.2.0, RNAfold 2.3.2. It is known that
     samtools 1.x and higher is critical (no old 0.x samtools allowed).
 
@@ -210,11 +210,12 @@ OPTIONS
 
     --mincov [string] : Clusters of small RNAs must have at least this many
     alignments. Supply an integer between 1 and 50000. Can also be a
-    normalized value in reads per million. When specifying mincov in reads
-    per million, the mincov value must be a floating point number > 0 and <
-    500,000 followed by the string 'rpm'. Examples: '5' --> threshold is 5
-    raw reads. '3.2rpm' --> threshold is 3.2 reads per million mapped.
-    Deafult: 0.5rpm.
+    normalized value in reads per million (rpm) OR reads per million mapped
+    (rpmm). When specifying mincov in rpm or rpmm, the mincov value must be
+    a floating point number > 0 and < 500,000 followed by the string 'rpm'
+    or 'rpmm'. Examples: '5' --> threshold is 5 raw reads. '3.2rpm' -->
+    threshold is 3.2 reads per million mapped. '2.8rpmm' --> threshold is
+    2.8 reads per million mapped. Deafult: 0.5rpm.
 
     --strand_cutoff [float] : Cutoff for calling the strandedness of a
     locus. Must be a floating point number between 0.5 and 1 (inclusive).
@@ -478,12 +479,16 @@ DE-NOVO CLUSTER FINDING
     Cluster definition is simple: First, all regions containing at least one
     primary alignment are found where the maximum distance between the ends
     of the alignments is <= option --pad (default: 75). Second, if the
-    number of alignments in the cluster is >= option --mincov (default: 20),
-    the cluster is kept. The mincov threshold can also be specified in terms
-    of reads per million mapped by using a value such as 3.2rpm (which
+    number of alignments in the cluster is >= option --mincov (default:
+    0.5rpm), the cluster is kept. The mincov threshold can also be specified
+    in terms of reads per million by using a value such as 3.2rpm (which
     specifies the threshold to be 3.2 reads per million). Using a rpm
     threshold allows the sensitivity of cluster discovery to be normalized
-    between libraries of different sizes.
+    between libraries of different sizes. Alternatively, reads per million
+    mapped (rpmm) can be specified: A --mincov of 1.2rpmm indicates 1.2
+    reads per million mapped is the threshold. rpm is a fraction of total
+    library size, while rpmm is a fraction of only the aligned & placed
+    fraction of the library.
 
 UNPLACED SMALL RNAS
     As of version 3.6 and higher, de-novo identification of small RNA
