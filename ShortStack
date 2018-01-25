@@ -4,7 +4,7 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
-my $version_num = "3.8.4";
+my $version_num = "3.8.5";
 my $usage_message = usage_message($version_num);
 my $command_line = join(" ", @ARGV);
 
@@ -2755,7 +2755,7 @@ sub denovo {
     if($$options{'mincov'} =~ /^\d+$/) {
 	$threshold = $&;
     } elsif ($$options{'mincov'} =~ /^([0-9]*\.[0-9]+|[0-9]+)(rpm{1,2})$/) {
-	if($1 eq 'rpm') {
+	if($2 eq 'rpm') {
 	    $threshold = 1 + int(($1 * $$options{'total_primaries'}) / 1E6);
 	    log_it($$options{'logfile'}, "\n\tAt specified mincov of $$options{'mincov'} with $$options{'total_primaries'} primary reads,");
 	    log_it($$options{'logfile'}, "\tmincov is $threshold raw alignments");
@@ -4858,7 +4858,7 @@ __END__
 
 ShortStack
 
-Copyright (C) 2012-2017 Michael J. Axtell
+Copyright (C) 2012-2018 Michael J. Axtell
 
 This program is free software: you can redistribute it and/or modify                             
 it under the terms of the GNU General Public License as published by                             
