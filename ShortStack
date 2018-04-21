@@ -128,7 +128,7 @@ initiate_log(\%options, \$version_num);
 my $fai_file = fai(\%options);
 my $stitch_fai_file;
 # genome stitching, if warranted
-unless((exists($options{'align_only'})) or (exists($options{'nohp'})) or (exists($options{'locus'}))) {
+unless((exists($options{'align_only'})) or (exists($options{'nohp'})) or (exists($options{'locus'})) or (exists($options{'inbam'}))) {
     my $need2 = need_to_stitch(\%options);  ## $need2 is the size of N's to be added when stitching. As of 3.8, always 100 (or 0)
     if($need2) {
 	$stitch_fai_file = stitch_genome(\%options,\$need2);
@@ -139,10 +139,12 @@ unless((exists($options{'align_only'})) or (exists($options{'nohp'})) or (exists
 $options{'fai_file'} = $fai_file;
 
 # check and build .ebwt (or ebwtl) indices, if warranted
-my $g_type;
-if(exists($options{'readfile'})) {
+my $g_type = 's';
+unless(exists($options{'inbam'})){
+  if(exists($options{'readfile'})) {
     $g_type = ebwt(\%options);  ## g_type is either 's' or 'l' for small or large genomes, resp.
     $options{'g_type'} = $g_type;
+  }
 }
 
 # trim 3' adapters, if warranted
@@ -392,6 +394,7 @@ sub get_ShortStack_options {
 	       'locifile=s',
 	       'locus=s',
 	       'nohp',
+	       'inbam',
 	       'pad=i',
 	       'mincov=s',
 	       'cquals=s@{,}',
@@ -688,6 +691,7 @@ sub validate_readfile1 {
 	       ($suffix =~ /\.fasta\.gz$/) or
 	       ($suffix =~ /\.fa\.gz$/) or
 	       ($suffix =~ /\.fastq\.gz$/) or
+	       ($suffix =~ /\.bam$/) or
 	       ($suffix =~ /\.csfasta$/) or
 	       ($suffix =~ /\.csfasta\.gz$/) or
 	       ($suffix =~ /\.fq.gz$/)) {
@@ -1941,6 +1945,16 @@ sub get_read_s_aln {
 
     my($base,$path,$suffix) = fileparse($stripped_reads, qr/\.[^\.]+$/);
     my $format;
+
+    # Determine output file name
+    my $outfile = $$options{'outdir'} . "\/" . $base . "_readsorted.sam.gz";
+    
+    # Allow .bam file as --readfile option    
+    if($suffix eq '.bam') {
+  my $tempfile = $$options{'outdir'} . "\/" . $base . "_temp";
+  open (SAM, "samtools sort -n -O sam -m $$options{'sort_mem'} -T $tempfile $$reads 2>> $$options{'error_logfile'} |");
+    } else {
+
     if($suffix eq '.csfasta') {
 	$format = "-C -f";
     } elsif (($suffix eq '.fasta') or ($suffix eq '.fa')) {
@@ -1959,9 +1973,6 @@ sub get_read_s_aln {
     if($format =~ /C/) {
 	$ebwt_base .= ".cs";
     }
-    
-    # Determine output file name
-    my $outfile = $$options{'outdir'} . "\/" . $base . "_readsorted.sam.gz";
     
     # Build bowtie command
     my $bowtie_cl = "bowtie $format -v $$options{'mismatches'} -p $$options{'bowtie_cores'} -S";
@@ -2010,6 +2021,8 @@ sub get_read_s_aln {
     } else {
 	open (SAM, "$bowtie_cl 2>> $$options{'error_logfile'} |");
     }
+  }
+
     open (OUT, "| gzip > $outfile");
     
     my $last_read = 'NULL';
