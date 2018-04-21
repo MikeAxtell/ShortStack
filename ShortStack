@@ -752,11 +752,11 @@ sub validate_mismatches {
 	}
 	# Must be an integer 
 	unless($$options{'mismatches'} =~ /^\d+$/) {
-	    die "\noption mismatches is invalid. It must be an integer of 0, 1, or 21\n\n$$usage\n";
+	    die "\noption mismatches is invalid. It must be an integer of 0, 1, 2 or 3\n\n$$usage\n";
 	}
-	# Must be 0 or 1
-	unless(($$options{'mismatches'} == 0) or ($$options{'mismatches'} == 1) or ($$options{'mismatches'} == 2)) {
-	    die "\noption mismatches is invalid. It must be an integer of 0, 1, or 21\n\n$$usage\n";
+	# Must be 0, 1, 2 or 3
+	unless(($$options{'mismatches'} == 0) or ($$options{'mismatches'} == 1) or ($$options{'mismatches'} == 2) or ($$options{'mismatches'} == 3)) {
+	    die "\noption mismatches is invalid. It must be an integer of 0, 1, 2 or 3\n\n$$usage\n";
 	}
     } elsif (exists($$options{'readfile'})) {
 	# if it was unset by the user, set it to 1
@@ -1974,7 +1974,7 @@ sub get_read_s_aln {
     }
     
     if($$options{'mismatches'} > 0) {
-	$bowtie_cl .= " --best --strata";
+	$bowtie_cl .= " -y --best --strata";
     }
     if ($$cqual) {
 	$bowtie_cl .= " -Q $$cqual";
