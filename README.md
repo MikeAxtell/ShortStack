@@ -85,7 +85,7 @@ USAGE
 
 TEST
     Test data and brief instructions are available at
-    https://plantsmallrnagenes.science.psu.edu/axtelldata/ShortStack_TestData.zip
+    http://axtelldata.bio.psu.edu/data/ShortStack_TestData/
 
 OPTIONS
     Note that we have done our best to set default settings for all options
