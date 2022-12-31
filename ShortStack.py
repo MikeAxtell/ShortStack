@@ -264,6 +264,10 @@ def check_executables(args):
     if (args.readfile is not None) or (args.knownRNAs is not None):
         rqd.append('bowtie')
         rqd.append('bowtie-build')
+    
+    # ShortTracks is required if user is aligning reads. So, if --readfile is not empty
+    if args.readfile is not None:
+        rqd.append('ShortTracks')
 
     # cutadapt is needed if --autotrim or --adapter is set
     if (args.autotrim is True) or (args.adapter is not None):
@@ -764,9 +768,28 @@ def align(args, fai, trimmed_files):
         subprocess.run(merge_args)
         idx_args = ['samtools', 'index', '-@', str(args.threads), mb]
         subprocess.run(idx_args)
+
+        # ShortTracks x 2 : mode readgroup and mode readlength
+        print('')
+        print('Creating browser tracks by readgroup using ShortTracks')
+        callShortTracks(mb, 'readgroup', False)
+        print('')
+        print('Creating browser tracks by readlength and strand using ShortTracks')
+        callShortTracks(mb, 'readlength', True)
+
         return mb
     else:
+        # ShortTracks x 1 : mode readlength
+        print('')
+        print('Creating browser tracks by readlength and strand using ShortTracks')
+        callShortTracks(final_bams[0], 'readlength', True)
         return final_bams[0]
+
+def callShortTracks(bamfile, mode, stranded):
+    cmd = f'ShortTracks --mode {mode} --bamfile {bamfile}'
+    if stranded is True:
+        cmd = cmd + ' --stranded'
+    subprocess.run(cmd, shell=True)
 
 def mapping_rpt(lib_counts, map_rpt_file, bamfile):
     """Produce a mapping report from a lib_counts counter object
@@ -916,12 +939,25 @@ def al_pass_1(t_file, args):
     os
     sys
     subprocess
+    re
     """
     # file paths and handles
     (head, tail) = os.path.split(t_file)
     (root, ext) = os.path.splitext(tail)
+
+    # guard against extensions like .fastq.gz or .fq.gz ...
+    #  we don't want to name files with .fastq or .fq if they
+    #  aren't that format!
+
+    fqlike = re.compile('\.fq$|\.fastq$')
+    if fqlike.search(root):
+        (root2, ext2) = os.path.splitext(root)
+        final_root = root2
+    else:
+        final_root = root
+
     rs1_counter = 1
-    rs1_sam = args.outdir + '/' + root + '_' + str(rs1_counter) + '_rs1.sam'
+    rs1_sam = args.outdir + '/' + final_root + '_' + str(rs1_counter) + '_rs1.sam'
     rs1_sam_fh = open(rs1_sam, "w")
 
     # bowtie arguments
