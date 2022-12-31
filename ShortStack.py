@@ -2966,6 +2966,7 @@ def write_files(args, qdata, mir_qdata):
     
     # Now report out
     if nm_bedlines:
+        nm_dcalls = Counter()
         for line in nm_bedlines:
             f = line.rstrip().split('\t')
             onestart = int(f[1]) + 1
@@ -2994,6 +2995,9 @@ def write_files(args, qdata, mir_qdata):
             rline = rline + qdata[coords]['DicerCall'] + '\t'
             rline = rline + 'N\n'
             resultsfh.write(rline)
+            
+            # For a tally to be reported on stdout
+            nm_dcalls[qdata[coords]['DicerCall']] += 1
 
             # Counts.txt
             if rgs:
@@ -3003,6 +3007,13 @@ def write_files(args, qdata, mir_qdata):
                         cline = cline + '\t' + str(qdata[coords][rg])
                     cline = cline + '\n'
                     countsfh.write(cline)
+        # report tally of non-MIRNA loci by DicerCall
+        print('')
+        print('Non-MIRNA loci by DicerCall:')
+        for dcall, tally in nm_dcalls.most_common():
+            print(dcall, tally)
+
+
     if m_bedlines:
         for line in m_bedlines:
             f = line.rstrip().split('\t')
@@ -3116,15 +3127,5 @@ if __name__ == '__main__':
     print('')
     print(time.strftime("%a %d %b %Y %H:%M:%S %z %Z", time.localtime()))
     print('Run Completed!')
-
-
-
-
-
-
-
-    
-    
-
 
 
