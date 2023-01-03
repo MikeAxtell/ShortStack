@@ -8,6 +8,18 @@ Michael J. Axtell, Penn State University, mja18@psu.edu
 # Alpha testing
 *Important* : The ShortStack 4 branch is in alpha testing mode! Not ready for production use!
 
+# Table of Contents
+- [Citations](#citations)
+- [Installation](#installation)
+- [Usage](#usage)
+- [System Recommendations](#system-recommendations)
+- [Overview of Methods](#overview-of-methods)
+- [Outputs](#outputs)
+- [Visualizing Results](#visualizing-results)
+- [ShortStack Version 4 Major Changes](#shortstack-version-4-major-changes)
+- [Issues](#issues)
+- [FAQ](#faq)
+
 # Citations
 If you use `ShortStack` in support of your work, please cite one or more of the following:
 
