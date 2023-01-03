@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-version = '4.0'
+version = '4.0alpha'
 
 # Main script / control is at the BOTTOM of this file
 
@@ -1644,6 +1644,14 @@ def quant(args, merged_bam, cluster_bed):
         sstart = int(bedfields[1]) + 1
         stcoords = bedfields[0] + ':' + str(sstart) + '-' + bedfields[2]
 
+        if len(bedfields) >= 4:
+            if bedfields[3] == '.':
+                lname = 'NA'
+            else:
+                lname = bedfields[3]
+        else:
+            lname = 'NA'
+
             # Counters
             # Sequences
             # strand_count
@@ -1714,8 +1722,9 @@ def quant(args, merged_bam, cluster_bed):
             #for uniqseq in set(seqs):
             #    seqdict[uniqseq] = seqs.count(uniqseq)
             
-            # Locus, Length, Reads, UniqueReads, FracTop, Strand, MajorRNA, MajorRNAReads, DicerCall, Short, Long, [..sizes..]
+            # Name, Locus, Length, Reads, UniqueReads, FracTop, Strand, MajorRNA, MajorRNAReads, DicerCall, Short, Long, [..sizes..]
         quant_data[stcoords] = {}
+        quant_data[stcoords]['Name'] = lname
         quant_data[stcoords]['start'] = sstart
         quant_data[stcoords]['end'] = int(bedfields[2])
         quant_data[stcoords]['chrom'] = str(bedfields[0])
@@ -2932,6 +2941,10 @@ def write_files(args, qdata, mir_qdata):
     res_header = res_header + 'DicerCall\tMIRNA\n'
     resultsfh.write(res_header)
 
+    # gff3 file of master results
+    gff3f = args.outdir + '/Results.gff3'
+    gff3fh = open(gff3f, "w")
+
     # Gather bedlines to examine
     # bed files to draw from:
     # deNovoClusters.bed if it exists; 
@@ -2964,100 +2977,251 @@ def write_files(args, qdata, mir_qdata):
             bedlines = mh.readlines()
         m_bedlines = m_bedlines + bedlines
     
-    # Now report out
+    # First make a temp bed file with all Results loci
+    #  this will be used for genome-sorting, prior to naming
+
+    resUnsortedBedf = args.outdir + '/ResultsUnsorted.bed'
+    resUnsortedBedfh = open(resUnsortedBedf, "w")
+
     if nm_bedlines:
-        nm_dcalls = Counter()
         for line in nm_bedlines:
+            f = line.rstrip().split('\t')
+            outline = f[0] + '\t' + f[1] + '\t' + f[2] + '\tnm\n'
+            resUnsortedBedfh.write(outline)
+    mat_lookups = {}
+    if m_bedlines:
+        for line in m_bedlines:
+            f = line.rstrip().split('\t')
+            outline = f[0] + '\t' + f[1] + '\t' + f[2] + '\tm\n'
+            resUnsortedBedfh.write(outline)
+            # We must also store information about the locations of the inferred
+            #  mature miRNA from this file
+            onestart = int(f[1]) + 1
+            coords = f[0] + ':' + str(onestart) + '-' + f[2]
+            mat_lookups[coords] = [f[6], f[7], f[4]]  # bedstart, end, and score for the genomic mature interval
+
+
+    resUnsortedBedfh.close()
+
+    resSortedBedf = args.outdir + '/ResultsSorted.bed'
+    fai_file = args.genomefile + '.fai'
+    scmd = f'bedtools sort -faidx {fai_file} -i {resUnsortedBedf} > {resSortedBedf}'
+    subprocess.run(scmd, shell=True)
+
+    # Now report out
+    nm_dcalls = Counter()
+    clus_num = 0
+    with open(resSortedBedf) as resSortedBed:
+        for line in resSortedBed:
+            clus_num += 1
             f = line.rstrip().split('\t')
             onestart = int(f[1]) + 1
             coords = f[0] + ':' + str(onestart) + '-' + f[2]
-            if len(f) > 3:
-                name = f[3]
-            else:
-                name = 'NA'
-            
-            # Results.txt
-            rline = f'{coords}\t{name}\t'
-            rline = rline + qdata[coords]['chrom'] + '\t'
-            rline = rline + str(qdata[coords]['start']) + '\t'
-            rline = rline + str(qdata[coords]['end']) + '\t'
-            rline = rline + str(qdata[coords]['Length']) + '\t'
-            rline = rline + str(qdata[coords]['Reads']) + '\t'
-            rline = rline + str(qdata[coords]['UniqueReads']) + '\t'
-            rline = rline + str(qdata[coords]['FracTop']) + '\t'
-            rline = rline + qdata[coords]['Strand'] + '\t'
-            rline = rline + qdata[coords]['MajorRNA'] + '\t'
-            rline = rline + str(qdata[coords]['MajorRNAReads']) + '\t'
-            rline = rline + str(qdata[coords]['Short']) + '\t'
-            rline = rline + str(qdata[coords]['Long']) + '\t'
-            for rlen in range(args.dicermin, args.dicermax + 1, 1):
-                rline = rline + str(qdata[coords][str(rlen)]) + '\t'
-            rline = rline + qdata[coords]['DicerCall'] + '\t'
-            rline = rline + 'N\n'
-            resultsfh.write(rline)
-            
-            # For a tally to be reported on stdout
-            nm_dcalls[qdata[coords]['DicerCall']] += 1
+            dtype = f[3] ## 'nm' or 'm'
 
-            # Counts.txt
-            if rgs:
-                if len(rgs) > 1:
-                    cline = f'{coords}\t{name}\tN'
-                    for rg in rgs:
-                        cline = cline + '\t' + str(qdata[coords][rg])
-                    cline = cline + '\n'
-                    countsfh.write(cline)
-        # report tally of non-MIRNA loci by DicerCall
+            if dtype == 'nm':
+                # name is allowed to be inherited, if it is not 'NA'
+                inh_name = qdata[coords]['Name']
+                if inh_name == 'NA':
+                    name = 'Cluster_' + str(clus_num)
+                else:
+                    name = inh_name
+                # Results.txt
+                rline = f'{coords}\t{name}\t'
+                rline = rline + qdata[coords]['chrom'] + '\t'
+                rline = rline + str(qdata[coords]['start']) + '\t'
+                rline = rline + str(qdata[coords]['end']) + '\t'
+                rline = rline + str(qdata[coords]['Length']) + '\t'
+                rline = rline + str(qdata[coords]['Reads']) + '\t'
+                rline = rline + str(qdata[coords]['UniqueReads']) + '\t'
+                rline = rline + str(qdata[coords]['FracTop']) + '\t'
+                rline = rline + qdata[coords]['Strand'] + '\t'
+                rline = rline + qdata[coords]['MajorRNA'] + '\t'
+                rline = rline + str(qdata[coords]['MajorRNAReads']) + '\t'
+                rline = rline + str(qdata[coords]['Short']) + '\t'
+                rline = rline + str(qdata[coords]['Long']) + '\t'
+                for rlen in range(args.dicermin, args.dicermax + 1, 1):
+                    rline = rline + str(qdata[coords][str(rlen)]) + '\t'
+                rline = rline + qdata[coords]['DicerCall'] + '\t'
+                rline = rline + 'N\n'
+                resultsfh.write(rline)
+                
+                # For a tally to be reported on stdout
+                nm_dcalls[qdata[coords]['DicerCall']] += 1
+
+                # Results.gff3
+                gline = qdata[coords]['chrom'] + '\t'
+                gline = gline + 'ShortStack\t'
+                dicerCall = qdata[coords]['DicerCall']
+                if (dicerCall == 'N') or (dicerCall == 'NA'):
+                    gff3type = 'Unknown_sRNA_locus'
+                else:
+                    gff3type = 'siRNA' + dicerCall + '_locus'
+                gline = gline + gff3type + '\t'
+                gline = gline + str(qdata[coords]['start']) + '\t'
+                gline = gline + str(qdata[coords]['end']) + '\t'
+                gline = gline + str(qdata[coords]['Reads']) + '\t'
+                gline = gline + qdata[coords]['Strand'] + '\t'
+                gline = gline + '.\t' # Phase, gff3 field 8
+                gline = gline + 'ID=' + coords  # guaranteed to be unique in scope
+                gline = gline + ';Name=' + name # not unqiue
+                gline = gline + ';MIRNA=N\n' # b/c we are in the non-MIRNA file
+                gff3fh.write(gline)
+
+                # Counts.txt
+                if rgs:
+                    if len(rgs) > 1:
+                        cline = f'{coords}\t{name}\tN'
+                        for rg in rgs:
+                            cline = cline + '\t' + str(qdata[coords][rg])
+                        cline = cline + '\n'
+                        countsfh.write(cline)
+            elif dtype == 'm':
+
+                # MIRNA loci are always 'de novo'
+                # So names will always be generic.
+                name = 'Cluster_' + str(clus_num)
+
+                # Results.txt
+                rline = f'{coords}\t{name}\t'
+                rline = rline + mir_qdata[coords]['chrom'] + '\t'
+                rline = rline + str(mir_qdata[coords]['start']) + '\t'
+                rline = rline + str(mir_qdata[coords]['end']) + '\t'
+                rline = rline + str(mir_qdata[coords]['Length']) + '\t'
+                rline = rline + str(mir_qdata[coords]['Reads']) + '\t'
+                rline = rline + str(mir_qdata[coords]['UniqueReads']) + '\t'
+                rline = rline + str(mir_qdata[coords]['FracTop']) + '\t'
+                rline = rline + mir_qdata[coords]['Strand'] + '\t'
+                rline = rline + mir_qdata[coords]['MajorRNA'] + '\t'
+                rline = rline + str(mir_qdata[coords]['MajorRNAReads']) + '\t'
+                rline = rline + str(mir_qdata[coords]['Short']) + '\t'
+                rline = rline + str(mir_qdata[coords]['Long']) + '\t'
+                for rlen in range(args.dicermin, args.dicermax + 1, 1):
+                    rline = rline + str(mir_qdata[coords][str(rlen)]) + '\t'
+                rline = rline + mir_qdata[coords]['DicerCall'] + '\t'
+                rline = rline + 'Y\n'
+                resultsfh.write(rline)
+
+                # Results.gff3
+                gline = mir_qdata[coords]['chrom'] + '\t'
+                gline = gline + 'ShortStack\t'
+                gline = gline + 'MIRNA_hairpin' + '\t'
+                gline = gline + str(mir_qdata[coords]['start']) + '\t'
+                gline = gline + str(mir_qdata[coords]['end']) + '\t'
+                gline = gline + str(mir_qdata[coords]['Reads']) + '\t'
+                gline = gline + mir_qdata[coords]['Strand'] + '\t'
+                gline = gline + '.\t' # Phase, gff3 field 8
+                gline = gline + 'ID=' + coords  # guaranteed to be unique in scope
+                gline = gline + ';Name=' + name # not unqiue
+                gline = gline + ';MIRNA=Y\n' # b/c we are in the non-MIRNA file
+                gff3fh.write(gline)
+
+                # For microRNAs, need to write a child line showing
+                #  the inferred position of the mature miRNA
+                gline = mir_qdata[coords]['chrom'] + '\t'
+                gline = gline + 'ShortStack\t'
+                gline = gline + 'mature_miRNA' + '\t'
+                mat_onestart = str(int(mat_lookups[coords][0]) + 1)
+                gline = gline + mat_onestart + '\t'  # start of mature
+                #gline = gline + str(mir_qdata[coords]['start']) + '\t'
+                gline = gline + mat_lookups[coords][1] + '\t'
+                #gline = gline + str(mir_qdata[coords]['end']) + '\t'
+                gline = gline + mat_lookups[coords][2] + '\t'
+                #gline = gline + str(mir_qdata[coords]['Reads']) + '\t'
+                gline = gline + mir_qdata[coords]['Strand'] + '\t'
+                gline = gline + '.\t' # Phase, gff3 field 8
+                gline = gline + 'ID=' + coords + '.mature'  # guaranteed to be unique in scope
+                gline = gline + ';Name=' + name + '.mature_miRNA' 
+                gline = gline + f';Parent={coords}\n' # b/c we are in the non-MIRNA file
+                gff3fh.write(gline)
+
+                # Counts.txt
+                if rgs:
+                    if len(rgs) > 1:
+                        cline = f'{coords}\t{name}\tY'
+                        for rg in rgs:
+                            cline = cline + '\t' + str(mir_qdata[coords][rg])
+                        cline = cline + '\n'
+                        countsfh.write(cline)
+
+    resultsfh.close()
+    gff3fh.close()
+    if rgs:
+        if len(rgs) > 1:
+            countsfh.close()
+    # report tally of non-MIRNA loci by DicerCall
+    if nm_bedlines:
         print('')
         print('Non-MIRNA loci by DicerCall:')
         for dcall, tally in nm_dcalls.most_common():
             print(dcall, tally)
-
-
-    if m_bedlines:
-        for line in m_bedlines:
-            f = line.rstrip().split('\t')
-            onestart = int(f[1]) + 1
-            coords = f[0] + ':' + str(onestart) + '-' + f[2]
-            if len(f) > 3:
-                name = f[3]
-            else:
-                name = 'NA'
-            
-            # Results.txt
-            rline = f'{coords}\t{name}\t'
-            rline = rline + mir_qdata[coords]['chrom'] + '\t'
-            rline = rline + str(mir_qdata[coords]['start']) + '\t'
-            rline = rline + str(mir_qdata[coords]['end']) + '\t'
-            rline = rline + str(mir_qdata[coords]['Length']) + '\t'
-            rline = rline + str(mir_qdata[coords]['Reads']) + '\t'
-            rline = rline + str(mir_qdata[coords]['UniqueReads']) + '\t'
-            rline = rline + str(mir_qdata[coords]['FracTop']) + '\t'
-            rline = rline + mir_qdata[coords]['Strand'] + '\t'
-            rline = rline + mir_qdata[coords]['MajorRNA'] + '\t'
-            rline = rline + str(mir_qdata[coords]['MajorRNAReads']) + '\t'
-            rline = rline + str(mir_qdata[coords]['Short']) + '\t'
-            rline = rline + str(mir_qdata[coords]['Long']) + '\t'
-            for rlen in range(args.dicermin, args.dicermax + 1, 1):
-                rline = rline + str(mir_qdata[coords][str(rlen)]) + '\t'
-            rline = rline + mir_qdata[coords]['DicerCall'] + '\t'
-            rline = rline + 'Y\n'
-            resultsfh.write(rline)
-
-            # Counts.txt
-            if rgs:
-                if len(rgs) > 1:
-                    cline = f'{coords}\t{name}\tY'
-                    for rg in rgs:
-                        cline = cline + '\t' + str(mir_qdata[coords][rg])
-                    cline = cline + '\n'
-                    countsfh.write(cline)
-
-    resultsfh.close()
-    if rgs:
-        if len(rgs) > 1:
-            countsfh.close()
     
+    # Report overlaps between alignment positions of 
+    #  knownRNAs and loci in Results.gff/.txt
+    #  Do this by adding a column to Results.txt
+    k = args.outdir + '/knownRNAs.bed'
+    if os.path.exists(k):
+        ifile = args.outdir + '/intersect_temp.tsv'
+        bicmd = f'bedtools intersect -wb -a {gff3f} -b {k} > {ifile}'
+        subprocess.run(bicmd, shell=True)
+        k_hits = {}
+        with open(ifile) as idata:
+            for line in idata:
+                i_fields = line.rstrip().split('\t')
+                desc_fields = i_fields[8].split(';')
+                i_name = desc_fields[1].replace('Name=', '')
+                k_name = i_fields[12]
+                if i_name in k_hits:
+                    k_hits[i_name].append(k_name)
+                else:
+                    k_hits[i_name] = [k_name]
+        newResf = args.outdir + '/NewResults.txt'
+        newResfh = open(newResf, "w")
+        line_num = 0
+        with open(resultsf) as oldres:
+            for oldres_line in oldres:
+                line_num += 1
+                stub = oldres_line.rstrip()
+                if line_num == 1:
+                    new_line = stub + '\tKnownRNAs\n'
+                else:
+                    res_fields = stub.split('\t')
+                    res_name = res_fields[1]
+                    if res_name in k_hits:
+                        k_string = ';'.join(k_hits[res_name])
+                        new_line = stub + '\t' + k_string + '\n'
+                    else:
+                        new_line = stub + '\tNA\n'
+                newResfh.write(new_line)
+        newResfh.close()
+        mv_cmd = f'mv {newResf} {resultsf}'
+        rm_cmd = f'rm -f {ifile}'
+        subprocess.run(mv_cmd, shell=True)
+        subprocess.run(rm_cmd, shell=True)
+        
+        # Reformat the knownRNAs.bed into gff3 for better browser display
+        k_gff_f = args.outdir + '/knownRNAs.gff3'
+        k_gff_fh = open(k_gff_f, "w")
+        with open(k) as kbed:
+            for kbed_line in kbed:
+                kbed_fields = kbed_line.rstrip().split('\t')
+                one_start = str(int(kbed_fields[1]) + 1)
+                kgff_line = kbed_fields[0] + '\t' # Chrom
+                kgff_line = kgff_line + 'ShortStack\t' # Source
+                kgff_line = kgff_line + 'sRNA\t' # Type
+                kgff_line = kgff_line + one_start + '\t' # Start in one-based system
+                kgff_line = kgff_line + kbed_fields[2] + '\t' # End
+                kgff_line = kgff_line + kbed_fields[4] + '\t'  # Score (n reads)
+                kgff_line = kgff_line + kbed_fields[5] + '\t' # Strand
+                kgff_line = kgff_line + '.\t' # Phase
+                kgff_line = kgff_line + f'ID={kbed_fields[3]};Name={kbed_fields[3]}\n' # Desc
+                k_gff_fh.write(kgff_line)
+        k_gff_fh.close()
+
+    # Delete bed files
+    bedpath = args.outdir + '/*.bed'
+    subprocess.run(f'rm -f {bedpath}', shell=True)
+
 
 def get_read_groups(bam):
     rgs = []
@@ -3076,6 +3240,9 @@ def merge_two_dicts(x, y):
     z = x.copy()   # start with keys and values of x
     z.update(y)    # modifies z with keys and values of y
     return z
+
+
+
 
 ## Main control / script
 if __name__ == '__main__':
