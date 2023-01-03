@@ -67,10 +67,11 @@ mv ShortStack /Users/mja18/miniconda3/envs/ShortStack4/bin/
 ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
  (--readfile [READFILE ...] | --bamfile [BAMFILE ...]) [--outdir OUTDIR] 
  [--adapter ADAPTER | --autotrim] [--autotrim_key AUTOTRIM_KEY] [--threads THREADS]
-  [--mmap {u,f,r}] [--align_only] [--dicermin DICERMIN] [--dicermax DICERMAX]
-   [--locifile LOCIFILE | --locus LOCUS] [--nohp] [--dn_mirna] 
-   [--strand_cutoff STRAND_CUTOFF] [--mincov MINCOV] [--pad PAD]
-   
+[--mmap {u,f,r}] [--align_only] [--show_secondaries]
+[--dicermin DICERMIN [--dicermax DICERMAX]
+[--locifile LOCIFILE | --locus LOCUS] [--nohp] [--dn_mirna]
+[--strand_cutoff STRAND_CUTOFF] [--mincov MINCOV] [--pad PAD]
+
 ```
 
 ## Required
