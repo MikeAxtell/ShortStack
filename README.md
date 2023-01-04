@@ -25,11 +25,9 @@ If you use `ShortStack` in support of your work, please cite one or more of the 
 
 - Johnson NR, Yeoh JM, Coruh C, Axtell MJ. (2016). G3 6:2103-2111.
     doi:10.1534/g3.116.030452
-- Axtell MJ. (2013) ShortStack: Comprehensive annotation and
-    quantification of small RNA genes. RNA 19:740-751.
-    doi:10.1261/rna.035279.112
-- Shahid S., Axtell MJ. (2013) Identification and annotation of small RNA
-    genes using ShortStack. Methods doi:10.1016/j.ymeth.2013.10.004
+- Shahid S., Axtell MJ. (2013) Identification and annotation of small RNA genes using ShortStack. Methods doi:10.1016/j.ymeth.2013.10.004
+- Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes. RNA 19:740-751. doi:10.1261/rna.035279.112
+
 
 # Installation
 
@@ -48,7 +46,7 @@ conda activate ShortStack4
 ```
 
 ### Silicon-Mac
-Some dependencies have not been compilied for the newer Silicon-based Macs on bioconda, so we need to force conda to install the osx-64 (Intel) versions instead. Silicon Macs can run Intel code using built-in Rosetta translation.
+Some dependencies have not been compiled for the newer Silicon-based Macs on bioconda, so we need to force conda to install the osx-64 (Intel) versions instead. Silicon Macs can run Intel code using built-in Rosetta translation.
 ```
 conda create --name ShortStack4
 conda activate ShortStack4
@@ -87,7 +85,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
 ```
 
 ## Required
-- `--genomefile GENOMEFILE` : Path to the reference genome in FASTA format. Must be indexable by `samtools faidx`, or already indexed.
+- `--genomefile GENOMEFILE` : Path to the reference genome in FASTA format. Must be indexable by both `samtools faidx` and `bowtie-build`, or already indexed.
 - `(--readfile [READFILE ...] | --bamfile [BAMFILE ...])` : *Either* `--readfile` or `--bamfile` is required.
     - `--readfile [READFILE ...]` : Path(s) to one or more files of reads in `fastq` or `fasta` format. May be `gzip` compressed. Multiple files are separated by spaces. Inputting reads triggers alignments to be performed.
     - `--bamfile [BAMFILE ...]` : Path(s) to one or more files of aligned sRNA-seq data in BAM format. Multiple files are separated by spaces. BAM files must match the reference genome given in `--genomefile`.
@@ -97,7 +95,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
 - `--outdir OUTDIR` : Specify the name of the directory that will be created for the results.
     - default: `ShortStack_[time]`, where `[time]` is the Unix time stamp according to the system when the run began.
 - `--autotrim` : This is strongly recommended **when supplying untrimmed reads via `--readfile`**. The `autotrim` method automatically infers the 3' adapter sequence of the untrimmed reads, and the uses that to coordinate read trimming. However, do **not** use `--autotrim` if your input reads have already been trimmed!
-    - Note: mutually exlcusive with `--adapter`.
+    - Note: mutually exclusive with `--adapter`.
 - `--threads THREADS` : Set the number of threads to use. More threads = faster completion.
     - default: 1
 
@@ -154,7 +152,7 @@ fasterq-dump SRR3222444
 prefetch SRR3222445
 fasterq-dump SRR3222445
 ```
-You will now have 3 `.fastq` files of raw (untrimmed) sRNA-seq reads. These data are derived from Col-0 *Arabidopsis thaliana* from immature inflorescence tissues (see Wang et al. 2017 <https://doi.org/10.1111/tpj.13463>)
+You will now have 3 `.fastq` files of raw (untrimmed) sRNA-seq reads. These data are derived from Col-0 *Arabidopsis thaliana* immature inflorescence tissues (see Wang et al. 2017 <https://doi.org/10.1111/tpj.13463>)
 
 ### Known RNAs
 To get a list of known RNAs, we will use all [miRBase](https://www.mirbase.org) annotated mature miRNAs from miRBase. First, download the `mature.fa` file from miRBase at <https://www.mirbase.org/ftp.shtml>. Then filter it to get only the `ath` ones (*e.g.* the ones from *A. thaliana*).
@@ -164,7 +162,7 @@ grep -A 1 '>ath' mature.fa | grep -v '\-\-' > ath_known_RNAs.fasta
 ```
 
 ## Example Run
-This example is a full run. It takes 3 raw (untrimmed) readfiles, identifies the adapters, trims the reads, indexes the genome, aligns the reads, discovers small RNA loci, and annotates high-confidence *MIRNA* loci. The examples uses 6 threads; this can be adjusted up or down depending on your system's configuration; more threads decrease execution time but the response is non-linear (diminishing returns with very high thread numbers). The examples uses the test data described above.
+This example is a full run. It takes 3 raw (untrimmed) readfiles, identifies the adapters, trims the reads, indexes the genome, aligns the reads, discovers small RNA loci, and annotates high-confidence *MIRNA* loci. The example uses 6 threads; this can be adjusted up or down depending on your system's configuration; more threads decrease execution time but the response is non-linear (diminishing returns with very high thread numbers). The examples uses the test data described above.
 
 ```
 ShortStack --genomefile Arabidopsis_thalianaTAIR10.fa --readfile SRR3222443.fastq SRR3222444.fastq SRR3222445.fastq --autotrim --threads 6 --outdir ExampleShortStackRun --knownRNAs ath_known_RNAs.fasta
@@ -218,7 +216,7 @@ When the user provides known RNA sequences via `--knownRNAs`, they are aligned t
 **Important** : knownRNAs are aligned and shown in the `knownRNAs.gff3` file regardless of whether any empirical small RNA-seq data are found. Thus, expect to find entries with a score of 0; these are cases where no instances of the given knownRNA were aligned to that location in the genome.
 
 ## strucVis/
-The directory `strucVis/` contains visualizations of each locus that was annotated as a *MIRNA* locus. For each locus there is a postscript file and a plain-text file. Both show the coverage of aligned small RNA-seq data as a function of position, aligned with the predicted RNA secondary structure of the inferred *MIRNA* hairpin precursor. These files are meant for manual inspection of *MIRNA* loci.
+The directory `strucVis/` contains visualizations of each locus that was annotated as a *MIRNA* locus. These are made by the script [strucVis](https://github.com/MikeAxtell/strucVis). For each locus there is a postscript file and a plain-text file. Both show the coverage of aligned small RNA-seq data as a function of position, aligned with the predicted RNA secondary structure of the inferred *MIRNA* hairpin precursor. These files are meant for manual inspection of *MIRNA* loci.
 
 ## .fastq(.gz) file(s)
 If raw reads were trimmed by ShortStack, the trimmed fastq files will be found. The names will have a lower-cased 't' appended to the front to signify "trimmed". If the input files were .gz compressed, then the trimmed files will be too.
@@ -235,14 +233,52 @@ Types of bigwig files produced by ShortStack:
     - y : Either 'p' or 'm' for the plus or minus genomic strand.
 - readgroup: Only produced when there are multiple samples in the alignment. A set of n `.bw` files, with one per read-group. Because values are normalized to reads-per-million, these tracks are directly comparable to each other.
 
-The README for [ShortTracks](https://github.com/MikeAxtell/ShortTracks) has details about how to load these data onto [JBrowse2](https://jbrowse.org/jb2/) using multi-line tracks for nice visualization of sRNA-seq data.
+The README for [ShortTracks](https://github.com/MikeAxtell/ShortTracks) has details about how to load these data onto [JBrowse2](https://jbrowse.org/jb2/) using "multi-wiggle" tracks for nice visualization of sRNA-seq data.
 
 # Visualizing Results
+
+Loci annotated as *MIRNA* can be visualized from the `srucVis/` files. These show the predicted RNA secondary structures with the small RNA-seq read depth coverage.
+
+## Genome Browsers
+The output of ShortStack is designed to work with genome browsers. Specifically, the files `Results.gff3`, `knownRNAs.gff3`, the `.bam` files, and the `.bw` files can be directly visualized on either major genome browser (IGV, JBrowse).
+
+[JBrowse2](https://jbrowse.org/jb2/) has the ability to create "multi-wiggle" tracks. These tracks show multiple quantitative data tracks at once, bound to a common quantitative axis. The `.bw` bigwig files created by ShortStack & ShortTracks are normalized to reads-per-million, allowing direct comparisons in a multi-wiggle track. This allows visualization of size, coverage, and strandedness of the data. See the README for [ShortTracks](https://github.com/MikeAxtell/ShortTracks) for details. I recommend using the Desktop version of [JBrowse2](https://jbrowse.org/jb2/).
 
 # Overview of Methods
 
 # ShortStack version 4 Major Changes
+ShortStack version 4 is a major update. The major changes are:
+## Major Changes
+
+- Completeley re-written in `python3`.
+- Streamlined installation using a `conda` recipe hosted on bioconda.
+- All compute-intensive processes are now multi-threaded, so execution times are faster when the user specifies higher values of `--threads`.
+- Much more reliance on other tools (`bedtools`, `cutadapt` for instance) .. less re-inventing of wheels.
+- Output of hairpin structure visualizations using [strucVis](https://github.com/MikeAxtell/strucVis).
+- Output of genome-browser-ready quantitative coverage tracks of aligned small RNAs using [ShortTracks](https://github.com/MikeAxtell/ShortTracks).
+- *MIRNA* locus identification has been thoroughly changed to increase sensitivity while maintaining specificity.
+- *MIRNA* locus identification can now be guided by user-provided 'known RNAs'. In contrast, truly *de novo* annotation of *MIRNA* loci, in the absence of matching the sequence of a 'known RNA' is disabled by default. This change in philosophy acknowledges that, in most well-studied organisms, most high-confidence microRNA families are already known.
+- Change the license to MIT from GPL3.
+
+## Option changes:
+- Drop support for cram format (options `--cram`, `--cramfile`  eliminated)
+- Drop support for colorspace (option `--cquals` eliminated)
+- Replace option `--bowtie_cores` with `--threads`
+- Eliminate option `--bowtie_m`. Now -k 50 is always used.
+- Eliminate option `--ranmax`. Now mmappers will always be placed (except mode u)
+- Eliminate SAM tags XY:Z:O and XY:Z:M .. no more suppression of mmap reads
+- Add SAM tag XY:Z:H .. highly repetitive read (50 or more hits, not all known).
+- Add SAM tag YS:Z .. small RNA size information
+- Eliminate option `--keep_quals`. Quality values will always be stored in the bam file if input was fastq.
+- Modify option `--locus` so that it only accepts a single locus query.
+- Eliminate option `--total_primaries` .. instead use a fast hack to rapidly calculate this.
+- Option `--locifile` now understands .bed and .gff3 formats, as well as the original simple tab-delimited format.
+- Added options `--autotrim` and `--autotrim_key`. This allows automatic detection of 3' adapters by tallying the most common sequence that occurs after a known, highly abundant small RNA (given by `autotrim_key`).
+- Add option `--knownRNAs`. Provide a FASTA file of known mature small RNA sequences to search for and to nucleate searches for qualifying *MIRNA* loci.
+- Add option `--dn_mirna`. The `--dn_mirna` activates a *de novo* search for *MIRNA* loci independent of those that align to the 'known RNAs' provided by the user. By default, `--dn_mirna` is not active.
+
 
 # Issues
+Please post issues, comments, bug reports, questions, etc. to the project github page at <https://github.com/MikeAxtell/ShortStack>.
 
 # FAQ
