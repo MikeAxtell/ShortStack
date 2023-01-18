@@ -698,7 +698,7 @@ def align(args, fai, trimmed_files):
             with mp.Pool(args.threads) as pool:
                 rs2_results = pool.starmap(al_pass_2, 
                 tqdm(rs2_iter, total=len(rs1_sam_files), desc='Chunks sent', 
-                unit=' Chunk', leave=None))
+                unit=' Chunk', leave=None, disable=None))
             rs2_files, all_counters = zip(*rs2_results)
             # merge counters
             lib_counts = Counter()
@@ -982,7 +982,7 @@ def al_pass_1(t_file, args):
 
     # parse alignments as they come, and print to SAM
     for samline in tqdm(bt1.stdout, unit=' bowtie output lines',
-    leave=None):
+    leave=None, disable=None):
         # Processing alignment lines
         if not samline.startswith('@'):
             # split the line
@@ -1278,7 +1278,7 @@ def find_adapter(fqfile, prefix, n):
         fqhandle = open(fqfile, "rt")
     for title, seq, qual in tqdm(FastqGeneralIterator(fqhandle),
         position=n, leave=None, unit_scale=0.25, desc=fqfile,
-        unit='reads', mininterval=1):
+        unit='reads', mininterval=1, disable=None):
         seqcount += 1
         if(seq.startswith(prefix)) :
             prefixcount += 1
@@ -1329,6 +1329,12 @@ def trimmer(fqfile, adapter, args):
     tfile = args.outdir + '/t' + tail
     
     # 2. build the cutadapt call
+    
+    ca_args = ['cutadapt']
+    # check if stderr is tty. If it is, set option --quiet so that progress 
+    #  bars aren't printed to a file or stream or whatever.
+    if sys.stderr.isatty():
+        ca_args.append('--quiet')
     ca_args = (['cutadapt', '-a', adapter, '-o', tfile, '-j', str(args.threads),
     '--discard-untrimmed', '-m', '12', '--report', 'minimal', fqfile
     ])
@@ -1629,7 +1635,7 @@ def quant(args, merged_bam, cluster_bed):
     with open(cluster_bed) as fh:
         bedlines = fh.readlines()
     
-    for bedline in tqdm(bedlines, position=n, leave=None):
+    for bedline in tqdm(bedlines, position=n, leave=None, disable=None):
     
 
     #time_file = args.outdir + '/times.csv'
@@ -2048,7 +2054,7 @@ def mirna(args, merged_bam, fai, pmir_bedfile):
             with mp.Pool(args.threads) as pool:
                 user_mloci1 = pool.starmap(mir_analysis,
                 tqdm(mir_iter, total=len(bedlines),
-                desc = 'Candidates examined', leave=None),
+                desc = 'Candidates examined', leave=None, disable=None),
                 chunksize=1)
             # user_mloci1 is returned from above
             # Unpack it
@@ -2116,7 +2122,7 @@ def mirna(args, merged_bam, fai, pmir_bedfile):
                 with mp.Pool(args.threads) as pool:
                     denovo_mloci1 = pool.starmap(mir_analysis,
                     tqdm(mir_iter, total=len(bedlines),
-                    desc = 'Candidates examined', leave=None),
+                    desc = 'Candidates examined', leave=None, disable=None),
                     chunksize=1)
                 # denovo_mloci1 is returned from above
                 # Unpack it
@@ -2889,7 +2895,7 @@ def call_strucVis(bed, args, bam):
         for line in f:
             bedlines.append(line.rstrip())
     
-    for line in (tqdm(bedlines, desc='Loci processed', leave=None)):
+    for line in (tqdm(bedlines, desc='Loci processed', leave=None, disable=None)):
         bedfields = line.rstrip().split('\t')
 
         # Build strucVis command
