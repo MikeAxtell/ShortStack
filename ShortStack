@@ -319,11 +319,15 @@ def valid_knownRNAs(x):
     return x
 
 def valid_mincov(x):
-    mc = int(x)
-    if mc < 1:
-        msg = 'Invalid mincov {0} : Must be integer of 1 or more'.format(mc)
+    if isinstance(x, float):
+        if x > 0:
+            return x
+        else:
+            msg = 'Invalid mincov {0} : Must be greaten than 0'.format(x)
+            sys.exit(msg)
+    else:
+        msg = 'Invalid mincov {0} : Must be floating point number > 0'.format(x)
         sys.exit(msg)
-    return mc
 
 def valid_pad(x):
     pad = int(x)
@@ -593,10 +597,11 @@ def ShortStack_argparse(ss_version):
                         ' Default: 0.8.')
     parser.add_argument('--mincov',
         type=valid_mincov,
-        default=5,
+        default=0.5,
         help='Minimum alignment depth required to nucleate a ' +
         'small RNA cluster during de novo cluster search.' +
-        ' Must be an integer >=1. Default: 5')
+        ' In units or reads per million.' +
+        ' Must be a floating point number. Default: 0.5')
     parser.add_argument('--pad',
         type=valid_pad,
         default=200,
@@ -667,7 +672,9 @@ def align(args, fai, trimmed_files):
         # Could still need bowtie indices if knownRNAs is provided
         if args.knownRNAs is not None:
             bowtie_indices(args)
-        return bam
+        # Still need to compute number of primary reads in the file
+        n_reads = count_reads(bam, args.threads)
+        return bam, n_reads
     else:
         # Alignments imminent. Need to check for bowtie indices.
         bowtie_indices(args)
@@ -777,13 +784,16 @@ def align(args, fai, trimmed_files):
         print('Creating browser tracks by readlength and strand using ShortTracks')
         callShortTracks(mb, 'readlength', True)
 
-        return mb
+        n_reads = count_reads(mb, args.threads)
+        return mb, n_reads
     else:
         # ShortTracks x 1 : mode readlength
         print('')
         print('Creating browser tracks by readlength and strand using ShortTracks')
         callShortTracks(final_bams[0], 'readlength', True)
-        return final_bams[0]
+
+        n_reads = count_reads(final_bams[0], args.threads)
+        return final_bams[0], n_reads
 
 def callShortTracks(bamfile, mode, stranded):
     cmd = f'ShortTracks --mode {mode} --bamfile {bamfile}'
@@ -1488,7 +1498,7 @@ def get_trimmed(args):
     else:
         sys.exit('Fatal: function get_trimmed must be called as __main__')
 
-def denovo_chrom(chrom, bamfile, args):
+def denovo_chrom(chrom, bamfile, args, min_reads):
     #print(f'chrom {chrom} bamfile {bamfile}')
     #print(f'Starting to work on chrom {chrom}')
     st_depth_args = (['samtools', 'depth', '-a', '-r', chrom,
@@ -1506,7 +1516,7 @@ def denovo_chrom(chrom, bamfile, args):
     # Get the array indices that correspond to depth positions
     #  above the threshold. These correspond to 0-based chromosome
     #  coordinates.
-    high_pos = np.where(depth_np >= args.mincov)[0]
+    high_pos = np.where(depth_np >= min_reads)[0]
 
     # Find the consecutive groups
     # https://stackoverflow.com/questions/7352684/how-to-find-the-groups-of-consecutive-elements-in-a-numpy-array
@@ -1524,7 +1534,7 @@ def denovo_chrom(chrom, bamfile, args):
     # return file name
     return peaksbed
     
-def denovo_clusters(bamfile, args, fai, loci):
+def denovo_clusters(bamfile, args, fai, loci, read_count):
     """Find clusters based on depth threshold and merging
     Inputs:
     - bamfile : path to indexed bamfile
@@ -1557,13 +1567,21 @@ def denovo_clusters(bamfile, args, fai, loci):
         print(time.strftime("%a %d %b %Y %H:%M:%S %z %Z", time.localtime()))
         print('Defining small RNA clusters de novo')
 
+        # compute total reads for rpm calculation
+        all_reads = read_count
+        min_reads = round(args.mincov * (all_reads / 1E6))
+
+        print(f'With {all_reads} total reads and mincov of {str(args.mincov)} ' +
+            f'reads per million, the min read depth is {min_reads}')
+
         # loop through each chromosome using multithreading
         chroms = []
         for chrom in fai:
             chroms.append(chrom)
         #chroms = fai.keys()
         dn_iter = list(zip(chroms, [bamfile] * len(chroms),
-            [args] * len(chroms)))
+            [args] * len(chroms),
+            [min_reads] * len(chroms)))
         #print(f'chroms: {chroms} dn_iter: {dn_iter}')
         with mp.Pool(args.threads) as pool:
             Ref_peak_beds = pool.starmap(denovo_chrom, dn_iter)
@@ -1593,7 +1611,7 @@ def denovo_clusters(bamfile, args, fai, loci):
     # return file name
     return cluster_bed
 
-def quant(args, merged_bam, cluster_bed):
+def quant(args, merged_bam, cluster_bed, mir_cutoff):
     """Calculate ShortStack quantification metrics from bed file
 
     Input:
@@ -1716,7 +1734,7 @@ def quant(args, merged_bam, cluster_bed):
             #view_elapsed_time = view_done_time - start_time
             # filter the possible mirs based on mincov
         for m in mir_count:
-            if mir_count[m] >= args.mincov:
+            if mir_count[m] >= mir_cutoff:
                     # add the read count into the 'score' location
                 newm = (m[0], m[1], m[2], m[3], str(mir_count[m]), m[5])
                 newm_string = '\t'.join(newm)
@@ -1822,7 +1840,7 @@ def revcomp(seq):
     reverse_complement = "".join(complement.get(base, base) for base in reversed(seq))
     return reverse_complement
 
-def quant_controller (args, merged_bam, all_bed):
+def quant_controller (args, merged_bam, all_bed, read_count):
     """Controls quant process using multithreading
 
     Input:
@@ -1880,8 +1898,12 @@ def quant_controller (args, merged_bam, all_bed):
         #tqdm setup for mp
         tqdm.set_lock(mp.RLock())
 
+        # Determine threshold for microRNA de novo finding (if needed)
+        mir_cutoff = round(args.mincov * (read_count / 1E6))
+
         q_iter = list(zip([args] * len(chunk_files), 
-            [merged_bam] * len(chunk_files), chunk_files))
+            [merged_bam] * len(chunk_files), chunk_files,
+            [mir_cutoff] * len(chunk_files)))
         #print(q_iter)
         #sys.exit()
         with mp.Pool(processes=args.threads, 
@@ -1960,7 +1982,7 @@ def quant_controller (args, merged_bam, all_bed):
     else:
         sys.exit('Fatal: function quant_controller needs to be __main__ !')
 
-def mirna(args, merged_bam, fai, pmir_bedfile):
+def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
     """Entry point into microRNA locus annotation
 
     Input:
@@ -2171,7 +2193,7 @@ def mirna(args, merged_bam, fai, pmir_bedfile):
     call_strucVis(nr_passed_mir_bed, args, merged_bam)
 
     # call quant on the mirna loci
-    mir_qdata, junk = quant_controller(args, merged_bam, nr_passed_mir_bed)
+    mir_qdata, junk = quant_controller(args, merged_bam, nr_passed_mir_bed, read_count)
 
     # Report n found to user
     n_found = 0
@@ -3069,8 +3091,8 @@ def write_files(args, qdata, mir_qdata):
                 gline = gline + str(qdata[coords]['Reads']) + '\t'
                 gline = gline + qdata[coords]['Strand'] + '\t'
                 gline = gline + '.\t' # Phase, gff3 field 8
-                gline = gline + 'ID=' + coords  # guaranteed to be unique in scope
-                gline = gline + ';Name=' + name # not unqiue
+                gline = gline + 'ID=' + name
+                gline = gline + ';DicerCall=' + dicerCall  
                 gline = gline + ';MIRNA=N\n' # b/c we are in the non-MIRNA file
                 gff3fh.write(gline)
 
@@ -3108,6 +3130,7 @@ def write_files(args, qdata, mir_qdata):
                 rline = rline + 'Y\n'
                 resultsfh.write(rline)
 
+                dicerCall = mir_qdata[coords]['DicerCall'] 
                 # Results.gff3
                 gline = mir_qdata[coords]['chrom'] + '\t'
                 gline = gline + 'ShortStack\t'
@@ -3117,8 +3140,8 @@ def write_files(args, qdata, mir_qdata):
                 gline = gline + str(mir_qdata[coords]['Reads']) + '\t'
                 gline = gline + mir_qdata[coords]['Strand'] + '\t'
                 gline = gline + '.\t' # Phase, gff3 field 8
-                gline = gline + 'ID=' + coords  # guaranteed to be unique in scope
-                gline = gline + ';Name=' + name # not unqiue
+                gline = gline + 'ID=' + name 
+                gline = gline + ';DicerCall=' + dicerCall 
                 gline = gline + ';MIRNA=Y\n' # b/c we are in the non-MIRNA file
                 gff3fh.write(gline)
 
@@ -3136,9 +3159,8 @@ def write_files(args, qdata, mir_qdata):
                 #gline = gline + str(mir_qdata[coords]['Reads']) + '\t'
                 gline = gline + mir_qdata[coords]['Strand'] + '\t'
                 gline = gline + '.\t' # Phase, gff3 field 8
-                gline = gline + 'ID=' + coords + '.mature'  # guaranteed to be unique in scope
-                gline = gline + ';Name=' + name + '.mature_miRNA' 
-                gline = gline + f';Parent={coords}\n' # b/c we are in the non-MIRNA file
+                gline = gline + 'ID=' + name + '.mature'  
+                gline = gline + f';Parent={name}\n' # b/c we are in the non-MIRNA file
                 gff3fh.write(gline)
 
                 # Counts.txt
@@ -3220,14 +3242,13 @@ def write_files(args, qdata, mir_qdata):
                 kgff_line = kgff_line + kbed_fields[4] + '\t'  # Score (n reads)
                 kgff_line = kgff_line + kbed_fields[5] + '\t' # Strand
                 kgff_line = kgff_line + '.\t' # Phase
-                kgff_line = kgff_line + f'ID={kbed_fields[3]};Name={kbed_fields[3]}\n' # Desc
+                kgff_line = kgff_line + f'ID={kbed_fields[3]}\n' # Desc
                 k_gff_fh.write(kgff_line)
         k_gff_fh.close()
 
     # Delete bed files
     bedpath = args.outdir + '/*.bed'
     subprocess.run(f'rm -f {bedpath}', shell=True)
-
 
 def get_read_groups(bam):
     rgs = []
@@ -3247,7 +3268,12 @@ def merge_two_dicts(x, y):
     z.update(y)    # modifies z with keys and values of y
     return z
 
-
+def count_reads(bam, threads):
+    c = subprocess.run(f'samtools view --threads {threads} -c -F 256 {bam}',
+                       shell=True, text=True, capture_output=True)
+    clines = c.stdout.split('\n')
+    r = int(clines[0])
+    return r
 
 
 ## Main control / script
@@ -3275,17 +3301,17 @@ if __name__ == '__main__':
     trimmed_files = get_trimmed(args)
     
     # Alignment
-    merged_bam = align(args, fai, trimmed_files)
+    merged_bam, read_count = align(args, fai, trimmed_files)
     if args.align_only is True:
         sys.exit()
     
     # Analysis
-    cluster_bed = denovo_clusters(merged_bam, args, fai, loci) 
-    qdata, pmir_bedfile = quant_controller(args, merged_bam, cluster_bed)
+    cluster_bed = denovo_clusters(merged_bam, args, fai, loci, read_count) 
+    qdata, pmir_bedfile = quant_controller(args, merged_bam, cluster_bed, read_count)
     #pmir_bedfile = None
     
     # MIRNA search
-    mir_qdata = mirna(args, merged_bam, fai, pmir_bedfile)
+    mir_qdata = mirna(args, merged_bam, fai, pmir_bedfile, read_count)
 
     # Clean up a possible intermediate file that for some cryptic reason
     #  is not able to be deleted earlier in the script
