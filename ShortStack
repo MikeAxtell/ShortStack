@@ -3197,7 +3197,7 @@ def write_files(args, qdata, mir_qdata):
             for line in idata:
                 i_fields = line.rstrip().split('\t')
                 desc_fields = i_fields[8].split(';')
-                i_name = desc_fields[1].replace('Name=', '')
+                i_name = desc_fields[0].replace('ID=', '')
                 k_name = i_fields[12]
                 if i_name in k_hits:
                     k_hits[i_name].append(k_name)
