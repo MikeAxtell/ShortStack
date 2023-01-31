@@ -123,7 +123,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
 - `--strand_cutoff STRAND_CUTOFF` : Floating point number that sets the cutoff for standedness. Must be > 0.5 and < 1.
     - default: 0.8. Loci with >80% reads on the top genomic strand are '+' stranded, loci with <20% reads on the top genomic strand are '-' stranded, and all others are unstranded '.'
 - `--mincov MINCOV` : Minimum alignment depth, in units of reads per million, required to nucleate a small RNA cluster during *de novo* cluster search. Must be an floating point number > 0. 
-    - default: 0.5
+    - default: 2
 - `--pad PAD` : Initial peaks (continuous regions with depth exceeding argument mincov are merged if they are this distance or less from each other. Must be an integer >= 1. 
     - default: 75
 
@@ -217,6 +217,9 @@ When the user provides known RNA sequences via `--knownRNAs`, they are aligned t
 
 ## strucVis/
 The directory `strucVis/` contains visualizations of each locus that was annotated as a *MIRNA* locus. These are made by the script [strucVis](https://github.com/MikeAxtell/strucVis). For each locus there is a postscript file and a plain-text file. Both show the coverage of aligned small RNA-seq data as a function of position, aligned with the predicted RNA secondary structure of the inferred *MIRNA* hairpin precursor. These files are meant for manual inspection of *MIRNA* loci.
+
+## mir.fasta
+This is a FASTA formatted file containing hairpin, mature miRNA, and miRNA* sequences derived from ShortStack's identification of *MIRNA* loci. These are genomic sequences, and the genomic coordinates are noted in the FASTA header. ShortStack's determination of mature miRNA vs. miRNA* strands is based on abundance of alignments at that particular locus. These designations may not always be accurate for an entire *MIRNA* family .. sometimes one paralog can attract most of the true mature miRNA alignments, leaving the other paralogs with mostly true miRNA* alignments. Take care when performing annotations.
 
 ## .fastq(.gz) file(s)
 If raw reads were trimmed by ShortStack, the trimmed fastq files will be found. The names will have a lower-cased 't' appended to the front to signify "trimmed". If the input files were .gz compressed, then the trimmed files will be too.
