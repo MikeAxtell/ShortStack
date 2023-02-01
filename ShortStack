@@ -1593,10 +1593,18 @@ def denovo_clusters(bamfile, args, fai, loci, read_count):
     subprocess.run(Ref_peak_beds, stdout=all_peaks_bed_fh)
     all_peaks_bed_fh.close()
 
-    # Merge adjacent intervals with bedtools merge, according to argument pad
+    # slop the intervals according to pad
+    slopped_bed = args.outdir + '/sloppedPeaks.bed'
+    slopped_bed_fh = open(slopped_bed, "w")
+    fai_file = args.genomefile + '.fai'
+    slop_args = ['bedtools', 'slop', '-i', all_peaks_bed, '-g', fai_file, '-b', str(args.pad)]
+    subprocess.run(slop_args, stdout=slopped_bed_fh)
+    slopped_bed_fh.close()
+
+    # Merge adjacent slopped intervals with bedtools merge
     cluster_bed = args.outdir + '/deNovoClusters.bed'
     cluster_bed_fh = open(cluster_bed, "w")
-    bt_merge_args = ['bedtools', 'merge', '-d', str(args.pad), '-i', all_peaks_bed]
+    bt_merge_args = ['bedtools', 'merge', '-i', slopped_bed]
     subprocess.run(bt_merge_args, stdout=cluster_bed_fh)
     cluster_bed_fh.close()
 
@@ -1604,6 +1612,7 @@ def denovo_clusters(bamfile, args, fai, loci, read_count):
     rm_args = ['rm', '-rf', all_peaks_bed]
     rm_args.extend(list(Ref_peak_beds[1:]))  ## removes the 'cat' that was tacked on above
     subprocess.run(rm_args)
+    subprocess.run(f'rm -f {slopped_bed}', shell=True)
 
     # return file name
     return cluster_bed
