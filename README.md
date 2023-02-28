@@ -145,12 +145,8 @@ After installing the sra toolkit you should configure it .. see <https://github.
 Then you can use the standard `prefetch` and `fasterq-dump` method to retrieve the FASTQ files.
 
 ```
-prefetch SRR3222443
-fasterq-dump SRR3222443
-prefetch SRR3222444
-fasterq-dump SRR3222444
-prefetch SRR3222445
-fasterq-dump SRR3222445
+prefetch SRR3222443 SRR3222444 SRR3222445
+fasterq-dump SRR3222443 SRR3222444 SRR3222445
 ```
 You will now have 3 `.fastq` files of raw (untrimmed) sRNA-seq reads. These data are derived from Col-0 *Arabidopsis thaliana* immature inflorescence tissues (see Wang et al. 2017 <https://doi.org/10.1111/tpj.13463>)
 

@@ -594,11 +594,11 @@ def ShortStack_argparse(ss_version):
                         ' Default: 0.8.')
     parser.add_argument('--mincov',
         type=valid_mincov,
-        default=2,
+        default=1,
         help='Minimum alignment depth required to nucleate a ' +
         'small RNA cluster during de novo cluster search.' +
-        ' In units or reads per million.' +
-        ' Must be a floating point number. Default: 2')
+        ' In units of reads per million.' +
+        ' Must be a floating point number. Default: 0.5')
     parser.add_argument('--pad',
         type=valid_pad,
         default=200,
@@ -2316,7 +2316,11 @@ def mir_analysis(bedline, args, merged_bam, fai):
 
         #print(f'mirbedline is {mirbedline}')
 
-        return (new_bedline, mirbedline)
+        # exact miR* must have alignments
+        if s_exact_count > 0:
+            return (new_bedline, mirbedline)
+        else:
+            return (new_bedline, None)
     else:
         #new_bedline = new_bedline + '\tfailed_analyze_fold'
         return (new_bedline, None)
@@ -2791,7 +2795,7 @@ def compute_final_precision(merged_bam, s_gen_start, s_gen_stop, mir_locus, bedf
     if t_n == 0:
         return 0
     
-    # has to be at least one star read, regardless
+    # has to be at least one star-ish read, regardless
     s_n = int(s_count.stdout.rstrip())
     if s_n == 0:
         return 0
@@ -2881,8 +2885,8 @@ def analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args):
 def collapse_mir_loci(args, passed_mir_bed):
 
     # Testing
-    #print(f'In collapse_mir_loci received passed_mir_bed as {passed_mir_bed}')
-    #sys.exit()
+    # print(f'In collapse_mir_loci received passed_mir_bed as {passed_mir_bed}')
+    # sys.exit()
 
     # Sort the bed file and call bedtools cluster
     cmd = f'sort -k1,1 -k2,2n {passed_mir_bed} | '
@@ -2903,6 +2907,10 @@ def collapse_mir_loci(args, passed_mir_bed):
             this_clus_n = int(fields.pop())
             if this_clus_n != current_cluster:
                 if current_cluster > 0:
+                    # testing
+                    #print()
+                    #print(best_line)
+                    #print()
                     # Write results
                     out.write(best_line)
                     out.write('\n')
@@ -2912,6 +2920,8 @@ def collapse_mir_loci(args, passed_mir_bed):
             if this_score > best_score:
                 best_line = '\t'.join(fields)
                 best_score = this_score
+            # testing
+            #print(line)
 
             # increment current_cluster every time
             current_cluster = this_clus_n
