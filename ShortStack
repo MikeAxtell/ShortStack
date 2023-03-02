@@ -2937,7 +2937,7 @@ def collapse_mir_loci(args, passed_mir_bed):
     return outfile
 
 def call_strucVis(args, bam):
-
+    # Returns True if MIRNA found, False if no MIRNA in Results.gff3
     # find Results.gff3, ask if there are any MIRNA_hairpins
     resg = args.outdir + '/Results.gff3'
     m_g_lines = []
@@ -2978,6 +2978,9 @@ def call_strucVis(args, bam):
 
             # Execute the strucVis command
             subprocess.run(cmd, shell=True)
+        return True
+    else:
+        return False
     
 def write_files(args, qdata, mir_qdata):
     print('')
@@ -3326,13 +3329,14 @@ def count_reads(bam, threads):
     return r
 
 def write_mirna_files(args, merged_bam):
-    call_strucVis(args, merged_bam)
-    write_mirna_fasta(args)
-    print('<<< WARNING >>>')
-    print('Do not rely on these results alone to annotate new MIRNA loci!')
-    print('The false positive rate for de novo MIRNA identification is low, but NOT ZERO')
-    print('Insepct each mirna locus, especially the strucVis output, and see')
-    print('https://doi.org/10.1105/tpc.17.00851 , https://doi.org/10.1093/nar/gky1141')
+    is_mirna = call_strucVis(args, merged_bam)
+    if is_mirna is True:
+        write_mirna_fasta(args)
+        print('<<< WARNING >>>')
+        print('Do not rely on these results alone to annotate new MIRNA loci!')
+        print('The false positive rate for de novo MIRNA identification is low, but NOT ZERO')
+        print('Insepct each mirna locus, especially the strucVis output, and see')
+        print('https://doi.org/10.1105/tpc.17.00851 , https://doi.org/10.1093/nar/gky1141')
 
 def write_mirna_fasta(args):
     # write a temporary gff files of only the mirna annotations,
