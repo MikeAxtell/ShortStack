@@ -1,5 +1,4 @@
 # ShortStack
-
 Alignment of small RNA-seq data and annotation of small RNA-producing genes
 
 # Author
