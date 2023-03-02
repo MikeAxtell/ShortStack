@@ -1682,10 +1682,18 @@ def quant(args, merged_bam, cluster_bed, mir_cutoff):
         else:
             lname = 'NA'
 
-            # Counters
-            # Sequences
-            # strand_count
-            # Lengths
+        # also check for an already-known strand ... will happen for miRNA loci
+        # In the rare case where a quant-calculated strand differs from the miRNA strand,
+        #  we want to over-ride quant's "strand" with the miRNA strand in the eventual Results.gff3 file
+        if len(bedfields) >= 6:
+            hard_strand = bedfields[5]
+        else:
+            hard_strand = None
+
+        # Counters
+        # Sequences
+        # strand_count
+        # Lengths
 
         seqs = Counter()
         mir_count = Counter()
@@ -1779,7 +1787,9 @@ def quant(args, merged_bam, cluster_bed, mir_cutoff):
         else:
             quant_data[stcoords]['UniqueReads'] = len(seqs)
             quant_data[stcoords]['FracTop'] = strand_count['+'] / quant_data[stcoords]['Reads']
-            if quant_data[stcoords]['FracTop'] >= args.strand_cutoff:
+            if hard_strand is not None:
+                quant_data[stcoords]['Strand'] = hard_strand
+            elif quant_data[stcoords]['FracTop'] >= args.strand_cutoff:
                 quant_data[stcoords]['Strand'] = '+'
             elif quant_data[stcoords]['FracTop'] <= 1 - args.strand_cutoff:
                 quant_data[stcoords]['Strand'] = '-'
@@ -2202,9 +2212,13 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
 
     # Report n found to user
     n_found = 0
+    # testing
+    # print('Outputting nr_passed_mir_bed')
     with open(nr_passed_mir_bed) as bed:
         for line in bed:
             n_found += 1
+            # testing
+            #print(line)
     print('')
     print(f'Found a total of {n_found} MIRNA loci')
     print('')
