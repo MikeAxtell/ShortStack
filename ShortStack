@@ -1515,6 +1515,10 @@ def denovo_chrom(chrom, bamfile, args, min_reads):
     #  coordinates.
     high_pos = np.where(depth_np >= min_reads)[0]
 
+    # Check for edge case of no intervals on the chromosome that qualify
+    if not high_pos.size > 0:
+        return None
+
     # Find the consecutive groups
     # https://stackoverflow.com/questions/7352684/how-to-find-the-groups-of-consecutive-elements-in-a-numpy-array
     consec = np.split(high_pos, np.where(np.diff(high_pos) != 1)[0]+1)
@@ -1571,20 +1575,34 @@ def denovo_clusters(bamfile, args, fai, loci, read_count):
         print(f'With {all_reads} total reads and mincov of {str(args.mincov)} ' +
             f'reads per million, the min read depth is {min_reads}')
 
+        # As an aid for highly-fragmented genomes with lots of low-coverage, short contigs,
+        #  screen out any entries that simply can't qualify based on total
+        #  reads aligned to the chromosome.
+        reads_by_chrom = get_reads_by_chrom(bamfile)
+
         # loop through each chromosome using multithreading
         chroms = []
-        for chrom in fai:
-            chroms.append(chrom)
+        for chrom in reads_by_chrom:
+            if reads_by_chrom[chrom] >= min_reads:
+                chroms.append(chrom)
         #chroms = fai.keys()
         dn_iter = list(zip(chroms, [bamfile] * len(chroms),
             [args] * len(chroms),
             [min_reads] * len(chroms)))
         #print(f'chroms: {chroms} dn_iter: {dn_iter}')
         with mp.Pool(args.threads) as pool:
-            Ref_peak_beds = pool.starmap(denovo_chrom, dn_iter)
+            Ref_peak_beds = pool.starmap(denovo_chrom, 
+            tqdm(dn_iter, total=len(chroms), leave=None,
+            disable=None, desc = 'Chromosomes sent for analysis'),
+            chunksize = 1)
     else:
         sys.exit('FATAL: function align not called as __main__')
     
+    # Remove any None entries from the list of bed files.
+    # These will occur for any chromosomes with no valid intervals
+    
+    Ref_peak_beds = [x for x in Ref_peak_beds if x is not None]
+
     # cat together the peak files from each chrom
     all_peaks_bed = args.outdir + '/All_peaks.bed'
     all_peaks_bed_fh = open(all_peaks_bed, "w")
@@ -3387,6 +3405,16 @@ def write_mirna_fasta(args):
     # Clean up
     rm_cmd = f'rm -f {args.outdir}/mir.bed {args.outdir}/mir.gff3'
     subprocess.run(rm_cmd, shell=True)
+
+def get_reads_by_chrom(bamfile):
+    st_args = (['samtools', 'idxstats', bamfile])
+    st_idxstats = subprocess.Popen(st_args, stdout=subprocess.PIPE,
+        text=True, bufsize=1)
+    reader = csv.reader(st_idxstats.stdout, delimiter="\t")
+    rbc = {}
+    for row in reader:
+        rbc[row[0]] = int(row[2])
+    return(rbc)
 
 ## Main control / script
 if __name__ == '__main__':
