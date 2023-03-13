@@ -4,13 +4,11 @@ Alignment of small RNA-seq data and annotation of small RNA-producing genes
 # Author
 Michael J. Axtell, Penn State University, mja18@psu.edu
 
-# Alpha testing
-*Important* : The ShortStack 4 branch is in alpha testing mode! Not ready for production use!
-
 # Table of Contents
 - [Citations](#citations)
 - [Installation](#installation)
 - [Usage](#usage)
+- [Resources](#resources)
 - [Testing and Examples](#testing-and-examples)
 - [Outputs](#outputs)
 - [Visualizing Results](#visualizing-results)
@@ -27,12 +25,11 @@ If you use `ShortStack` in support of your work, please cite one or more of the 
 - Shahid S., Axtell MJ. (2013) Identification and annotation of small RNA genes using ShortStack. Methods doi:10.1016/j.ymeth.2013.10.004
 - Axtell MJ. (2013) ShortStack: Comprehensive annotation and quantification of small RNA genes. RNA 19:740-751. doi:10.1261/rna.035279.112
 
-
 # Installation
 
-**NOTE** This is for alpha testing! After first release there will instead be a full `conda` recipe available from bioconda which will simplify installation!
+You can either use the `conda` package manager to install from the bioconda channel, or manually set up an environment. Use of `conda`/bioconda is *highly* recommended!
 
-## Create a suitable environment
+## Install using conda (recommended)
 
 First, install `conda`, and then set it up to use the bioconda channel following the instructions at <https://bioconda.github.io>
 
@@ -40,7 +37,7 @@ Then, follow instructions below based on your system to install the dependencies
 
 ### Linux or Intel-Mac
 ```
-conda create --name ShortStack4 strucvis shorttracks bedtools biopython bowtie cutadapt numpy tqdm 
+conda create --name ShortStack4 shortstack 
 conda activate ShortStack4
 ```
 
@@ -50,26 +47,26 @@ Some dependencies have not been compiled for the newer Silicon-based Macs on bio
 conda create --name ShortStack4
 conda activate ShortStack4
 conda config --env --set subdir osx-64
-conda install strucvis shorttracks bedtools biopython bowtie cutadapt numpy tqdm
+conda install shortstack
 ```
 
-## Manually install script
-Once the environment is prepared, manually install the `ShortStack` script. Download the file (or archive) from the ShortStack4 branch on gitub at <https://github.com/MikeAxtell/ShortStack/tree/ShortStack4>. *Be sure you are using the ShortStack4 branch, not the master branch.*
+## Manual installation
 
-Place the script `ShortStack` into the correct location in your conda environment. You can find this by issuing a `conda info --envs` command to find the correct path. See example from my laptop below.
+Create an environment that contains the following packages / tools compiled and installed:
 
-```
-conda info --envs
-```
-The above command shows me the directory for my conda environment:
-```
-ShortStack4           *  /Users/mja18/miniconda3/envs/ShortStack4
-```
-Knowing this, we can install the `ShortStack` script within the `/bin/` directory of that location. 
-```
-chmod +x ShortStack
-mv ShortStack /Users/mja18/miniconda3/envs/ShortStack4/bin/
-```
+- `python` >= 3.10.8 <https://www.python.org>
+- `samtools` >= 1.16 <https://www.htslib.org>
+- `bowtie` >= 1.3.1 <https://bowtie-bio.sourceforge.net/index.shtml>
+- viennarna 2.* <https://www.tbi.univie.ac.at/RNA/documentation.html>
+- `tqdm` <https://tqdm.github.io>
+- `numpy` <https://numpy.org>
+- biopython <https://biopython.org>
+- `strucVis` <https://github.com/MikeAxtell/strucVis>
+- `ShortTracks` <https://github.com/MikeAxtell/ShortTracks>
+- `bedtools` <https://bedtools.readthedocs.io/en/latest/>
+- `cutadapt` <https://cutadapt.readthedocs.io/en/stable/>
+
+Then, download the `ShortStack` script from this github repo. Make it executable `chmod +x ShortStack` and then copy it into your environment's PATH.
 
 # Usage
 ```
@@ -125,6 +122,18 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
     - default: 2
 - `--pad PAD` : Initial peaks (continuous regions with depth exceeding argument mincov are merged if they are this distance or less from each other. Must be an integer >= 1. 
     - default: 75
+
+# Resources
+## Memory
+Peak memory (RSS) primarily scales with genome size, and especially with the size of the largest chromosomes in the genome assembly. Generally between 4-10GB memory per thread is more than enough, but very large genomes should be monitored for memory overruns and requested memory adjusted accordingly. Because of the multi-threading, it is important to scale available memory with the number of threads being used.
+
+## Disk
+During the alignment phase ShortStack will potentially write many large, but temporary, files to disk. These can easily exceed 100GB disk space especially when there are a lot of multi-mapping reads. Ensure that the location of `--outdir` has ample free disk space (plan on 200GB minimum to be safe).
+
+## CPU and running time
+All compute-intensive parts of ShortStack are now multi-threaded. Providing more threads via `--threads` generally will decrease run-times in near-linear fashion. Be sure to scale memory with thread use though .. 4-10GB RAM per thread, depending on genome size, seems usually sufficient.
+
+Read alignment is often the most time-consuming portion of the analysis. *MIRNA* identification (triggered by `--knownRNAs` and/or `--dn_mirna`) is also time-consuming. Larger genomes generally run slower compared to smaller genomes. Highly fragmented genome assemblies (*e.g.* very high numbers of chromosomes/scaffolds) can be particularly slow because of the index lookup costs associated with thousands of entries. Consider obtaining and using better genome assemblies, or removing very short scaffolds from highly fragmented genome assemblies.
 
 # Testing and Examples
 ## Gather Test Data
@@ -295,6 +304,7 @@ Please post issues, comments, bug reports, questions, etc. to the project github
 
 # FAQ
 
-- **I ran an analysis and found no loci annotated as *MIRNA* loci!** By default, ShortStack will not do a *de novo* search for loci that qualify as *MIRNA* loci. To search for *MIRNA* loci the user has to explicitly request it, using either or both of the options `--knownRNAs` and `--dn_mirna`. `knownRNAs` provides a list of known mature miRNA sequences. Places where these sequences align to the reference genome are examined to see if the small RNA alignment pattern and predicted RNA secondary structure qualifies as a *MIRNA* locus. The switch `--dn_mirna` turns on a *de novo MIRNA* search. The *de novo MIRNA* search is turned off by default to reduce false annotations.  The idea is that most mature miRNAs are known in most species by now.
+- **I ran an analysis and found no loci annotated as *MIRNA* loci!** 
+    - By default, ShortStack will not do a *de novo* search for loci that qualify as *MIRNA* loci. To search for *MIRNA* loci the user has to explicitly request it, using either or both of the options `--knownRNAs` and `--dn_mirna`. `knownRNAs` provides a list of known mature miRNA sequences. Places where these sequences align to the reference genome are examined to see if the small RNA alignment pattern and predicted RNA secondary structure qualifies as a *MIRNA* locus. The switch `--dn_mirna` turns on a *de novo MIRNA* search. The *de novo MIRNA* search is turned off by default to reduce false annotations.  The idea is that most mature miRNAs are known in most species by now.
 
 
