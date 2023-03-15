@@ -1,6 +1,8 @@
 # ShortStack
 Alignment of small RNA-seq data and annotation of small RNA-producing genes
 
+[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/shortstack/README.html)
+
 # Author
 Michael J. Axtell, Penn State University, mja18@psu.edu
 
