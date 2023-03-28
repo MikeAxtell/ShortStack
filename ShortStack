@@ -618,8 +618,8 @@ def ShortStack_argparse(ss_version):
 
     # check bamfile(s) or readfiles(s)
     if args.readfile is not None:
-        readfile_exts = ['.fq', '.fastq', 
-                         '.fq.gz', '.fastq.gz']
+        readfile_exts = ['.fq', '.fastq', '.fasta', '.fa',
+                         '.fq.gz', '.fastq.gz', '.fa.gz', '.fasta.gz']
         check_file_list_ext(args.readfile, readfile_exts)
 
     if args.bamfile is not None:
@@ -936,6 +936,7 @@ def al_pass_1(t_file, args):
 
     Input:
     - t_file : file path to trimmed fastq(gz) file of reads to align.
+      might also be a fasta file, need to check
     - args : The ShortStack arguments object.
 
     Output:
@@ -954,21 +955,34 @@ def al_pass_1(t_file, args):
 
     # guard against extensions like .fastq.gz or .fq.gz ...
     #  we don't want to name files with .fastq or .fq if they
-    #  aren't that format!
+    #  aren't that format! Same for fasta.gz or fa.gz.
 
-    fqlike = re.compile('\.fq$|\.fastq$')
+    fqlike = re.compile('\.fq$|\.fastq$|\.fasta$|\.fa$')
+    
+    fapat = re.compile('\.fasta$|\.fa$')
+
+    input_option = ''
+
     if fqlike.search(root):
         (root2, ext2) = os.path.splitext(root)
         final_root = root2
+        if fapat.search(ext2):
+            input_option = '-f'
+        else: 
+            input_option = '-q'
     else:
         final_root = root
+        if fapat.search(ext):
+            input_option = '-f'
+        else: 
+            input_option = '-q'
 
     rs1_counter = 1
     rs1_sam = args.outdir + '/' + final_root + '_' + str(rs1_counter) + '_rs1.sam'
     rs1_sam_fh = open(rs1_sam, "w")
 
     # bowtie arguments
-    bt_args = (['bowtie', '-p', str(args.threads), '-v', '1',
+    bt_args = (['bowtie', input_option, '-p', str(args.threads), '-v', '1',
         '-k', '50', '-S', '--best', '--strata', '-x',
         args.genomefile, t_file])
     
@@ -1267,7 +1281,8 @@ def find_adapter(fqfile, prefix, n):
     """Given path to fastq/fastq.gz and a prefix, find best 3' adapter.
 
     Inputs:
-    - fqfile : path to fastq or gzip-compressed fastq file
+    - fqfile : path to fastq or gzip-compressed fastq file. 
+       Can also be .fa, .fa.gz, .fasta, .fasta.gz
     - prefix : sequence to use a 'prefix' .. a common microRNA
     - n : Integer for use by tqdm for positioning progress tracker
 
@@ -1279,23 +1294,55 @@ def find_adapter(fqfile, prefix, n):
     prefixcount = 0
     seqcount = 0
     aseqs = {}
+    format = ''
+
+    # Check to see if it is fasta. If not, it must be fastq.
+    possible_fa_exts = ['.fa', '.fasta', '.fa.gz', '.fasta.gz']
+    # compile a regex of the valid exts for fasta files
+    pattern = '$|'.join(possible_fa_exts) + '$'
+    pattern = pattern.replace('.', '\.')
+    fa_exts = re.compile(pattern)
+    if fa_exts.search(fqfile):
+        format = 'fasta'
+    else:
+        format = 'fastq'
+    
     if(re.search("gz$", fqfile)):
         fqhandle = gzip.open(fqfile, "rt")
     else:
         fqhandle = open(fqfile, "rt")
-    for title, seq, qual in tqdm(FastqGeneralIterator(fqhandle),
-        position=n, leave=None, unit_scale=0.25, desc=fqfile,
-        unit='reads', mininterval=1, disable=None):
-        seqcount += 1
-        if(seq.startswith(prefix)) :
-            prefixcount += 1
-            aseq = seq[len(prefix):]
-            if(len(aseq) > 20) :
-                aseq = aseq[0:20]
-            if aseq in aseqs:
-                aseqs[aseq] += 1
-            else:
-                aseqs[aseq] = 1
+    
+    if format == 'fastq':
+        for title, seq, qual in tqdm(FastqGeneralIterator(fqhandle),
+            position=n, leave=None, unit_scale=0.25, desc=fqfile,
+            unit='reads', mininterval=1, disable=None):
+            seqcount += 1
+            if(seq.startswith(prefix)) :
+                prefixcount += 1
+                aseq = seq[len(prefix):]
+                if(len(aseq) > 20) :
+                    aseq = aseq[0:20]
+                if aseq in aseqs:
+                    aseqs[aseq] += 1
+                else:
+                    aseqs[aseq] = 1
+    elif format == 'fasta':
+        for record in tqdm(SeqIO.parse(fqhandle, "fasta"),
+            position=n, leave=None, unit_scale=0.25, desc=fqfile,
+            unit='reads', mininterval=1, disable=None
+        ):
+            seqcount += 1
+            faseq = str(record.seq)
+            if faseq.startswith(prefix):
+                prefixcount += 1
+                aseq = faseq[len(prefix):]
+                if(len(aseq) > 20) :
+                    aseq = aseq[0:20]
+                if aseq in aseqs:
+                    aseqs[aseq] += 1
+                else:
+                    aseqs[aseq] = 1
+
     fqhandle.close()
     #print("\t\tPrefix", prefix, "found", prefixcount, "times out of", seqcount,
     #    " records.")
@@ -1319,6 +1366,7 @@ def trimmer(fqfile, adapter, args):
 
     Inputs:
     - fqfile : path to the untrimmed fastq(gz) file
+       might also be fasta(gz), but cutadapt will handle it.
     - adapter : 3' adapter sequence to be used by cutadapt
     - args : ShortStack arguments
 
