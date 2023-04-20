@@ -308,5 +308,25 @@ Please post issues, comments, bug reports, questions, etc. to the project github
 
 - **I ran an analysis and found no loci annotated as *MIRNA* loci!** 
     - By default, ShortStack will not do a *de novo* search for loci that qualify as *MIRNA* loci. To search for *MIRNA* loci the user has to explicitly request it, using either or both of the options `--knownRNAs` and `--dn_mirna`. `knownRNAs` provides a list of known mature miRNA sequences. Places where these sequences align to the reference genome are examined to see if the small RNA alignment pattern and predicted RNA secondary structure qualifies as a *MIRNA* locus. The switch `--dn_mirna` turns on a *de novo MIRNA* search. The *de novo MIRNA* search is turned off by default to reduce false annotations.  The idea is that most mature miRNAs are known in most species by now.
+- **What happened to the phasing scores?**
+    - I decided to omit phasing scores as of ShortStack version 4.0. This is because I gradually have lost confidence the accuracy of genome-wide scans to provide acceptable sensitivity *and* specificity for scoring phasing. For a detailed analysis of the challenges of calling phasing of siRNA clusters in genome-wide analyses, see [Polydore et al. (2018)](https://doi.org/10.1002/pld3.101). I am considering bringing phasing scores back, but just for 21-22 nt siRNA loci, in a future release.
+- **Installation fails with conda**
+    - Many problems I've seen with installation using conda stem from incorrectly configured conda installations. It is critical to have conda configured exactly as specified by the [bionconda project](https://bioconda.github.io). Your `.condarc` file (usually found in the user's home directory) must have the channels configured with `conda-forge` as the highest priority channel, `bioconda` as the second-highest priority, and `defaults` as the lowest priority. Additionally, the 'strict' channel priority option must be enabled. See instructions at [bionconda project](https://bioconda.github.io). A correctly configured conda should have a `.condarc` file that looks like:
+```
+channels:
+    - conda-forge
+    - bioconda
+    - defaults
+channel_priority: strict
+repodata_fns:
+    - repodata.json
+```
+- **An older version of ShortStack is installed by conda**
+    - This can occur because of quirks in the way that conda searches for package updates .. sometimes it relies on the local cache of available packages instead of scanning the remotes. To overcome this, explicitly request the desired version. For instance, to get ShortStack version 4.0.1:
+```
+conda create --name ShortStack4
+conda activate ShortStack4
+conda install shortstack=4.0.1
+```
 
 

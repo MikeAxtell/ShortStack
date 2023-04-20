@@ -749,7 +749,7 @@ def align(args, fai, trimmed_files):
         subprocess.run(rm_args)
         
         # index
-        idx_args = (['samtools', 'index', '-@', str(args.threads), 
+        idx_args = (['samtools', 'index', '-c', '-@', str(args.threads), 
             final_bam])
         idx_sp = subprocess.run(idx_args)
         if idx_sp.returncode != 0:
@@ -772,7 +772,7 @@ def align(args, fai, trimmed_files):
             '-o', mb, '-r'])
         merge_args.extend(final_bams)
         subprocess.run(merge_args)
-        idx_args = ['samtools', 'index', '-@', str(args.threads), mb]
+        idx_args = ['samtools', 'index', '-c', '-@', str(args.threads), mb]
         subprocess.run(idx_args)
 
         # ShortTracks x 2 : mode readgroup and mode readlength
@@ -1089,7 +1089,7 @@ def check_user_bamfile(args, fai):
 
     # index the file. samtools index won't complain if an index already exists.
     #pysam.index(bam)
-    subprocess.run(f'samtools index {bam}', shell=True)
+    subprocess.run(f'samtools index -c {bam}', shell=True)
 
     return bam
 
