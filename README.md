@@ -102,7 +102,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
 - `--version` : Print the version and then quit.
 - `--adapter ADAPTER` : Manually specify a 3' adapter sequence to use during read trimming. Mutually exclusive with `--autotrim`. The `--adapter` option will apply the same adapter sequence to trim **all** given readfiles.
     - Note: Use of `--adapter` is discouraged. In nearly all cases, `--autotrim` is a better bet for read trimming.
-- `--autotrim_key AUTOTRIM_KEY` : A DNA sequence to use as a known suffix during the `--autotrim` procedure. ShortStack's autotrim discovers the 3' adapter by scanning for reads that begin with the sequence given by `AUTOTRIM_KEY`. This should be the sequence of a small RNA that is known to e highly abundant in all of the libraries. The default sequence is for miR166, a microRNA that is present in nearly all plants at high levels. For non-plant experiments, or if the default is not working well, consider providing an alternative to the default.
+- `--autotrim_key AUTOTRIM_KEY` : A DNA sequence to use as a known suffix during the `--autotrim` procedure. ShortStack's autotrim discovers the 3' adapter by scanning for reads that begin with the sequence given by `AUTOTRIM_KEY`. This should be the sequence of a small RNA that is known to be highly abundant in all of the libraries. The default sequence is for miR166, a microRNA that is present in nearly all plants at high levels. For non-plant experiments, or if the default is not working well, consider providing an alternative to the default.
     - default: `TCGGACCAGGCTTCATTCCCC` (miR166)
 - `--mmap {u,f,r}` : Sets the mode by which multi-mapped reads are handled. These modes are described in [Johnson et al. (2016)](https://doi.org/10.1534/g3.116.030452). The default `f` mode has the best performance.
     - `u` : Only uniquely-aligned reads are used as weights for placement of multi-mapped reads.
@@ -122,7 +122,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
     - default: 0.8. Loci with >80% reads on the top genomic strand are '+' stranded, loci with <20% reads on the top genomic strand are '-' stranded, and all others are unstranded '.'
 - `--mincov MINCOV` : Minimum alignment depth, in units of reads per million, required to nucleate a small RNA cluster during *de novo* cluster search. Must be an floating point number > 0. 
     - default: 2
-- `--pad PAD` : Initial peaks (continuous regions with depth exceeding argument mincov are merged if they are this distance or less from each other. Must be an integer >= 1. 
+- `--pad PAD` : Initial peaks (continuous regions with depth exceeding argument `--mincov`) are merged if they are this distance or less from each other. Must be an integer >= 1. 
     - default: 75
 
 # Resources
