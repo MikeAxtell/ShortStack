@@ -93,6 +93,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
 - `--outdir OUTDIR` : Specify the name of the directory that will be created for the results.
     - default: `ShortStack_[time]`, where `[time]` is the Unix time stamp according to the system when the run began.
 - `--autotrim` : This is strongly recommended **when supplying untrimmed reads via `--readfile`**. The `autotrim` method automatically infers the 3' adapter sequence of the untrimmed reads, and the uses that to coordinate read trimming. However, do **not** use `--autotrim` if your input reads have already been trimmed!
+    - Note: `autotrim` currently assumes your library strategy generated reads where nucleotide 1 of the read is the first biological / sRNA-derived nucleotide, and the 3' adapter starts immediately after the last sRNA nucleotide. It further assumes there are no random nucleotides (Ns) in the 3' adapter sequence. If your data do not meet these assumptions you cannot use `--autotrim`. Instead, remove your adapters by other appropriate methods and input the trimmed reads using `--readfile` *without* option `--autotrim`.
     - Note: mutually exclusive with `--adapter`.
 - `--threads THREADS` : Set the number of threads to use. More threads = faster completion.
     - default: 1
