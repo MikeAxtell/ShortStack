@@ -232,7 +232,7 @@ This is a FASTA formatted file containing hairpin, mature miRNA, and miRNA* sequ
 If raw reads were trimmed by ShortStack, the trimmed fastq files will be found. The names will have a lower-cased 't' appended to the front to signify "trimmed". If the input files were .gz compressed, then the trimmed files will be too.
 
 ## .bam file(s)
-If the ShortStack run was aligning reads, one or more `.bam` files will be found. The bam format stores large scale alignment data. Corresponding bam index files (`.bam.bai`) will also be found. 
+If the ShortStack run was aligning reads, one or more `.bam` files will be found. The bam format stores large scale alignment data. Corresponding bam index files (`.bam.csi`) will also be found. 
 
 ## .bw (bigwig) files
 If the ShortStack run was aligning reads, multiple `.bw` files in the [bigwig format](https://genome.ucsc.edu/goldenpath/help/bigWig.html) will be produced. These bigwig files are produced by the program [ShortTracks](https://github.com/MikeAxtell/ShortTracks) and are useful for visualizing data on genome browsers (in particular [JBrowse2](https://jbrowse.org/jb2/)). The scales of the bigwig files are normalized to reads per million; thus, multiple tracks can be compared.
