@@ -1080,7 +1080,7 @@ def check_user_bamfile(args, fai):
         # Merge the files, then make sure file exists.
         bam = args.outdir + '/merged.bam'
         #pysam.merge("-r", "-b", bflist, bam)
-        subprocess.run(f'samtools merge -b {bflist} {bam}')
+        subprocess.run(f'samtools merge -b {bflist} {bam}', shell=True)
         if os.path.exists(bam) is False:
             sys.exit("Merging of the bamfiles provided by user failed!")
     else:
