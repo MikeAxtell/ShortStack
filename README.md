@@ -72,7 +72,7 @@ Then, download the `ShortStack` script from this github repo. Make it executable
 
 # Usage
 ```
-ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
+ShortStack [-h] [--version] --genomefile GENOMEFILE [--known_miRNAs KNOWN_MIRNAS]
  (--readfile [READFILE ...] | --bamfile [BAMFILE ...]) [--outdir OUTDIR] 
  [--adapter ADAPTER | --autotrim] [--autotrim_key AUTOTRIM_KEY] [--threads THREADS]
 [--mmap {u,f,r}] [--align_only] [--show_secondaries]
@@ -89,7 +89,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
     - `--bamfile [BAMFILE ...]` : Path(s) to one or more files of aligned sRNA-seq data in BAM format. Multiple files are separated by spaces. BAM files must match the reference genome given in `--genomefile`.
 
 ## Recommended
-- `--knownRNAs KNOWNRNAS` : Path to FASTA-formatted file of known small RNAs. FASTA must be formatted such that a single RNA sequence is on one line only. ATCGUatcgu characters are acceptable. These RNAs are typically the sequences of known microRNAs; for instance, a FASTA file of mature miRNAs pulled from <https://www.mirbase.org>. Providing these data increases the accuracy of *MIRNA* locus identification.
+- `--known_miRNAs KNOWN_MIRNAS` : Path to FASTA-formatted file of known mature miRNAs. FASTA must be formatted such that a single RNA sequence is on one line only. ATCGUatcgu characters are acceptable. These RNAs are typically the sequences of known microRNAs; for instance, a FASTA file of mature miRNAs pulled from <https://www.mirbase.org>. These known miRNA sequences are aligned to the genome and used to nucleate searches for loci that meet all expression-based and secondary structure-based requirements for *MIRNA* locus identification. See also option `--dn_mirna`.
 - `--outdir OUTDIR` : Specify the name of the directory that will be created for the results.
     - default: `ShortStack_[time]`, where `[time]` is the Unix time stamp according to the system when the run began.
 - `--autotrim` : This is strongly recommended **when supplying untrimmed reads via `--readfile`**. The `autotrim` method automatically infers the 3' adapter sequence of the untrimmed reads, and the uses that to coordinate read trimming. However, do **not** use `--autotrim` if your input reads have already been trimmed!
@@ -118,7 +118,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--knownRNAs KNOWNRNAS]
 - `--locifile LOCIFILE` : Path to a file of pre-determined loci to analyze. This will prevent *de novo* discovery of small RNA loci. The file may be in gff3, bed, or simple tab-delimited format (Chr:Start-Stop[tab]Name). Mutually exclusive with `--locus`.
 - `--locus LOCUS` : A single locus to analyze, given as a string in the format Chr:Start-Stop (using one-based, inclusive numbering). This will prevent *de novo* discovery of small RNA loci. Mutually exclusive with `--locifile`.
 - `--nohp` : Switch that prevents search for microRNAs. This saves computational time, but *MIRNA* loci will not be differentiated from other types of small RNA clusters.
-- `--dn_mirna` : Switch that activates a *de novo* search for *MIRNA* loci. By default ShortStack will confine *MIRNA* analysis to loci where one or more queries from the `--knownRNAs` file are aligned to the genome. Activating *de novo* searching with `--dn_mirna` does a more comprehensive genome-wide scan for *MIRNA* loci. Loci discovered with `--dn_mirna` that do not overlap already known microRNAs should be treated with caution.
+- `--dn_mirna` : Switch that activates a *de novo* search for *MIRNA* loci. By default ShortStack will confine *MIRNA* analysis to loci where one or more queries from the `--known_miRNAs` file are aligned to the genome. Activating *de novo* searching with `--dn_mirna` does a more comprehensive genome-wide scan for *MIRNA* loci. Loci discovered with `--dn_mirna` that do not overlap already known microRNAs should be treated with caution.
 - `--strand_cutoff STRAND_CUTOFF` : Floating point number that sets the cutoff for standedness. Must be > 0.5 and < 1.
     - default: 0.8. Loci with >80% reads on the top genomic strand are '+' stranded, loci with <20% reads on the top genomic strand are '-' stranded, and all others are unstranded '.'
 - `--mincov MINCOV` : Minimum alignment depth, in units of reads per million, required to nucleate a small RNA cluster during *de novo* cluster search. Must be an floating point number > 0. 
@@ -136,7 +136,7 @@ During the alignment phase ShortStack will potentially write many large, but tem
 ## CPU and running time
 All compute-intensive parts of ShortStack are now multi-threaded. Providing more threads via `--threads` generally will decrease run-times in near-linear fashion. Be sure to scale memory with thread use though .. 4-10GB RAM per thread, depending on genome size, seems usually sufficient.
 
-Read alignment is often the most time-consuming portion of the analysis. *MIRNA* identification (triggered by `--knownRNAs` and/or `--dn_mirna`) is also time-consuming. Larger genomes generally run slower compared to smaller genomes. Highly fragmented genome assemblies (*e.g.* very high numbers of chromosomes/scaffolds) can be particularly slow because of the index lookup costs associated with thousands of entries. Consider obtaining and using better genome assemblies, or removing very short scaffolds from highly fragmented genome assemblies.
+Read alignment is often the most time-consuming portion of the analysis. *MIRNA* identification (triggered by `--known_miRNAs` and/or `--dn_mirna`) is also time-consuming. Larger genomes generally run slower compared to smaller genomes. Highly fragmented genome assemblies (*e.g.* very high numbers of chromosomes/scaffolds) can be particularly slow because of the index lookup costs associated with thousands of entries. Consider obtaining and using better genome assemblies, or removing very short scaffolds from highly fragmented genome assemblies.
 
 # Testing and Examples
 ## Gather Test Data
@@ -161,18 +161,18 @@ fasterq-dump SRR3222443 SRR3222444 SRR3222445
 ```
 You will now have 3 `.fastq` files of raw (untrimmed) sRNA-seq reads. These data are derived from Col-0 *Arabidopsis thaliana* immature inflorescence tissues (see Wang et al. 2017 <https://doi.org/10.1111/tpj.13463>)
 
-### Known RNAs
-To get a list of known RNAs, we will use all [miRBase](https://www.mirbase.org) annotated mature miRNAs from miRBase. First, download the `mature.fa` file from miRBase at <https://www.mirbase.org/ftp.shtml>. Then filter it to get only the `ath` ones (*e.g.* the ones from *A. thaliana*).
+### Known miRNAs
+To get a list of known miRNAs, we will use all [miRBase](https://www.mirbase.org) annotated mature miRNAs from miRBase. First, download the `mature.fa` file from miRBase at <https://www.mirbase.org/ftp.shtml>. Then filter it to get only the `ath` ones (*e.g.* the ones from *A. thaliana*).
 
 ```
-grep -A 1 '>ath' mature.fa | grep -v '\-\-' > ath_known_RNAs.fasta
+grep -A 1 '>ath' mature.fa | grep -v '\-\-' > ath_known_miRNAs.fasta
 ```
 
 ## Example Run
 This example is a full run. It takes 3 raw (untrimmed) readfiles, identifies the adapters, trims the reads, indexes the genome, aligns the reads, discovers small RNA loci, and annotates high-confidence *MIRNA* loci. The example uses 6 threads; this can be adjusted up or down depending on your system's configuration; more threads decrease execution time but the response is non-linear (diminishing returns with very high thread numbers). The examples uses the test data described above.
 
 ```
-ShortStack --genomefile Arabidopsis_thalianaTAIR10.fa --readfile SRR3222443.fastq SRR3222444.fastq SRR3222445.fastq --autotrim --threads 6 --outdir ExampleShortStackRun --knownRNAs ath_known_RNAs.fasta
+ShortStack --genomefile Arabidopsis_thalianaTAIR10.fa --readfile SRR3222443.fastq SRR3222444.fastq SRR3222445.fastq --autotrim --threads 6 --outdir ExampleShortStackRun --known_miRNAs ath_known_miRNAs.fasta
 ```
 
 On my laptop this completes in about 18 minutes. All results are in the directory specified by `--outdir`, "ExampleShortStackRun". The outputs are described in the section below called "Outputs".
@@ -200,7 +200,7 @@ A tab-delimited text file giving key information for all small RNA clusters. Col
 18. *24*: Number of 24 nucleotide reads aligned to the locus.
 19. *DicerCall*: If >= 80% of all aligned reads are within the boundaries of `--dicermin` and `--dicermax`, than the DicerCall gives the size of most abundant small RNA size. If < 80% of the aligned reads are in the `--dicermin` and `--dicermax` boundaries, DicerCall is set to 'N'. Loci with a DicerCall of 'N' are unlikely to be small RNAs related to the Dicer-Like/Argonaute system of gene regulation.
 20. *MIRNA*: Did the locus pass all criteria to be called a *MIRNA* locus? If so, 'Y'. If not, 'N'.
-21. *KnownRNAs*: Semicolon delimited list of user-provided known RNAs that aligned to the locus. If none, 'NA'.
+21. *Known_miRNAs*: Semicolon delimited list of user-provided known RNAs that aligned to the locus. If none, 'NA'.
 
 ## Counts.txt
 A tab-delimited text file giving the raw alignment counts for each locus in each separate sample. Only produced if there was more than one sRNA-seq file used to create alignments. This file is useful for downstream analyses, especially differential expression analysis.
@@ -217,10 +217,10 @@ A tab-delimited text file that gives details about small RNA-seq alignments as a
 ## Results.gff3
 Small RNA loci in the gff3 format. Suitable for use on genome browsers. For loci that are annotated as *MIRNAs* there will be an additional entry for the mature microRNA position. The 'score' column in the gff3 format stores the number of sRNA-seq aligned reads at that locus.
 
-## knownRNAs.gff3
-When the user provides known RNA sequences via `--knownRNAs`, they are aligned to the reference genome. Every (perfect) alignment to the reference is stored and reported in the knownRNAs.gff3 file. The score column shows the number of alignments that start and end at the exact coordinates and strand.
+## known_miRNAs.gff3
+When the user provides known RNA sequences via `--known_miRNAs`, they are aligned to the reference genome. Every (perfect) alignment to the reference is stored and reported in the known_miRNAs.gff3 file. The score column shows the number of alignments that start and end at the exact coordinates and strand.
 
-**Important** : knownRNAs are aligned and shown in the `knownRNAs.gff3` file regardless of whether any empirical small RNA-seq data are found. Thus, expect to find entries with a score of 0; these are cases where no instances of the given knownRNA were aligned to that location in the genome.
+**Important** : known_miRNAs are aligned and shown in the `known_miRNAs.gff3` file regardless of whether any empirical small RNA-seq data are found. Thus, expect to find entries with a score of 0; these are cases where no instances of the given knownRNA were aligned to that location in the genome.
 
 ## strucVis/
 The directory `strucVis/` contains visualizations of each locus that was annotated as a *MIRNA* locus. These are made by the script [strucVis](https://github.com/MikeAxtell/strucVis). For each locus there is a postscript file and a plain-text file. Both show the coverage of aligned small RNA-seq data as a function of position, aligned with the predicted RNA secondary structure of the inferred *MIRNA* hairpin precursor. These files are meant for manual inspection of *MIRNA* loci.
@@ -250,7 +250,7 @@ The README for [ShortTracks](https://github.com/MikeAxtell/ShortTracks) has deta
 Loci annotated as *MIRNA* can be visualized from the `srucVis/` files. These show the predicted RNA secondary structures with the small RNA-seq read depth coverage.
 
 ## Genome Browsers
-The output of ShortStack is designed to work with genome browsers. Specifically, the files `Results.gff3`, `knownRNAs.gff3`, the `.bam` files, and the `.bw` files can be directly visualized on either major genome browser (IGV, JBrowse).
+The output of ShortStack is designed to work with genome browsers. Specifically, the files `Results.gff3`, `known_miRNAs.gff3`, the `.bam` files, and the `.bw` files can be directly visualized on either major genome browser (IGV, JBrowse).
 
 [JBrowse2](https://jbrowse.org/jb2/) has the ability to create "multi-wiggle" tracks. These tracks show multiple quantitative data tracks at once, bound to a common quantitative axis. The `.bw` bigwig files created by ShortStack & ShortTracks are normalized to reads-per-million, allowing direct comparisons in a multi-wiggle track. This allows visualization of size, coverage, and strandedness of the data. See the README for [ShortTracks](https://github.com/MikeAxtell/ShortTracks) for details. I recommend using the Desktop version of [JBrowse2](https://jbrowse.org/jb2/).
 
@@ -268,7 +268,7 @@ Alignment of trimmed fastq data uses `bowtie`. There are usually two phases to a
 Genomic intervals where the depth of small RNA coverage, in reads-per-million, is greater than or equal to `--mincov` (1 by default) are identified. Each of these intervals are then extended in both directions by the length given by setting `--pad`. Regions that overlap after extension are merged. Note that if one or more *MIRNA* loci are later found to overlap the intial cluster, the initial cluster is removed from the output (and only the refined, trimmed *MIRNA* region(s) are reported).
 
 ## MIRNA annotation
-*MIRNA* annotation has two entry points for initial searches: Locations of aligned user-provided sequences from `--knownRNAs` and, if option `--dn_mirna` is True, any 21 or 22 nt read whose abundance exceeds the depth of `--mincov`. From these initial starting points, ShortStack first examines the local region to find miR/miR-star-like patterns of read accumulation (essentially, "two-peaks" of read coverage on the same genomic strand that might correspond to the miR/miR-star pair). If such a pattern is found, the RNA secondary structure in the local area is predicted. The sRNA-seq alignments in conjunction with the predicted RNA secondary structure are analyzed with respect to the criteria in [Axtell and Meyers, 2018](https://doi.org/10.1105/tpc.17.00851). If the criteria are met, the locus is annotated as a *MIRNA*.
+*MIRNA* annotation has two entry points for initial searches: Locations of aligned user-provided sequences from `--known_miRNAs` and, if option `--dn_mirna` is True, any 21 or 22 nt read whose abundance exceeds the depth of `--mincov`. From these initial starting points, ShortStack first examines the local region to find miR/miR-star-like patterns of read accumulation (essentially, "two-peaks" of read coverage on the same genomic strand that might correspond to the miR/miR-star pair). If such a pattern is found, the RNA secondary structure in the local area is predicted. The sRNA-seq alignments in conjunction with the predicted RNA secondary structure are analyzed with respect to the criteria in [Axtell and Meyers, 2018](https://doi.org/10.1105/tpc.17.00851). If the criteria are met, the locus is annotated as a *MIRNA*.
 
 # ShortStack version 4 Major Changes
 ShortStack version 4 is a major update. The major changes are:
@@ -298,7 +298,7 @@ ShortStack version 4 is a major update. The major changes are:
 - Eliminate option `--total_primaries` .. instead use a fast hack to rapidly calculate this.
 - Option `--locifile` now understands .bed and .gff3 formats, as well as the original simple tab-delimited format.
 - Added options `--autotrim` and `--autotrim_key`. This allows automatic detection of 3' adapters by tallying the most common sequence that occurs after a known, highly abundant small RNA (given by `autotrim_key`).
-- Add option `--knownRNAs`. Provide a FASTA file of known mature small RNA sequences to search for and to nucleate searches for qualifying *MIRNA* loci.
+- Add option `--known_miRNAs`. Provide a FASTA file of known mature small RNA sequences to search for and to nucleate searches for qualifying *MIRNA* loci.
 - Add option `--dn_mirna`. The `--dn_mirna` activates a *de novo* search for *MIRNA* loci independent of those that align to the 'known RNAs' provided by the user. By default, `--dn_mirna` is not active.
 
 
@@ -308,7 +308,7 @@ Please post issues, comments, bug reports, questions, etc. to the project github
 # FAQ
 
 - **I ran an analysis and found no loci annotated as *MIRNA* loci!** 
-    - By default, ShortStack will not do a *de novo* search for loci that qualify as *MIRNA* loci. To search for *MIRNA* loci the user has to explicitly request it, using either or both of the options `--knownRNAs` and `--dn_mirna`. `knownRNAs` provides a list of known mature miRNA sequences. Places where these sequences align to the reference genome are examined to see if the small RNA alignment pattern and predicted RNA secondary structure qualifies as a *MIRNA* locus. The switch `--dn_mirna` turns on a *de novo MIRNA* search. The *de novo MIRNA* search is turned off by default to reduce false annotations.  The idea is that most mature miRNAs are known in most species by now.
+    - By default, ShortStack will not do a *de novo* search for loci that qualify as *MIRNA* loci. To search for *MIRNA* loci the user has to explicitly request it, using either or both of the options `--known_miRNAs` and `--dn_mirna`. `known_miRNAs` provides a list of known mature miRNA sequences. Places where these sequences align to the reference genome are examined to see if the small RNA alignment pattern and predicted RNA secondary structure qualifies as a *MIRNA* locus. The switch `--dn_mirna` turns on a *de novo MIRNA* search. The *de novo MIRNA* search is turned off by default to reduce false annotations.  The idea is that most mature miRNAs are known in most species by now.
 - **What happened to the phasing scores?**
     - I decided to omit phasing scores as of ShortStack version 4.0. This is because I gradually have lost confidence the accuracy of genome-wide scans to provide acceptable sensitivity *and* specificity for scoring phasing. For a detailed analysis of the challenges of calling phasing of siRNA clusters in genome-wide analyses, see [Polydore et al. (2018)](https://doi.org/10.1002/pld3.101). I am considering bringing phasing scores back, but just for 21-22 nt siRNA loci, in a future release.
 - **Installation fails with conda**

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-version = '4.0.1'
+version = '4.0.2'
 
 # Main script / control is at the BOTTOM of this file
 
@@ -260,8 +260,8 @@ def check_executables(args):
         rqd.append('strucVis')
 
     # bowtie and bowtie-build are needed if --readfile is is not an empty list.
-    # OR if --knownRNAs is present
-    if (args.readfile is not None) or (args.knownRNAs is not None):
+    # OR if --known_miRNAs is present
+    if (args.readfile is not None) or (args.known_miRNAs is not None):
         rqd.append('bowtie')
         rqd.append('bowtie-build')
     
@@ -303,19 +303,19 @@ def valid_genomefile(x):
         sys.exit(msg)
     return x
 
-def valid_knownRNAs(x):
-    """Tests existence and extension of --knownRNAs
+def valid_known_miRNAs(x):
+    """Tests existence and extension of --known_miRNAs
 
-    x : string input from option --knownRNAs
+    x : string input from option --known_miRNAs
     Extension must be .fa or .fasta.
     Uses modules os and sys.
     """
     if not os.path.isfile(x):
-        msg = 'Invalid knownRNAs {0} : is not a file'.format(x)
+        msg = 'Invalid known_miRNAs {0} : is not a file'.format(x)
         sys.exit(msg)
     base,ext = os.path.splitext(x)
     if not (ext == '.fa' or ext == '.fasta'):
-        msg = ('Invalid knownRNAs {0}'.format(x) +
+        msg = ('Invalid known_miRNAs {0}'.format(x) +
                ' : does not end in .fa or .fasta'.format(x))
         sys.exit(msg)
     return x
@@ -487,8 +487,8 @@ def ShortStack_argparse(ss_version):
                         required=True,
                         type=valid_genomefile,
                         help='FASTA file of the reference genome (required)')
-    parser.add_argument('--knownRNAs',
-                        type=valid_knownRNAs,
+    parser.add_argument('--known_miRNAs',
+                        type=valid_known_miRNAs,
                         help='FASTA file of known/suspected mature microRNAs')
     parser_group = parser.add_mutually_exclusive_group(required=True)
     parser_group.add_argument('--readfile',
@@ -586,7 +586,7 @@ def ShortStack_argparse(ss_version):
                         ' search for new MIRNA loci will be performed.' +
                         ' By default, de novo MIRNA finding is not performed ' +
                         ' and MIRNA searches are limited to loci matching' +
-                        ' RNAs from --knownRNAs that align to the genome')
+                        ' RNAs from --known_miRNAs that align to the genome')
     parser.add_argument('--strand_cutoff',
                         type=valid_strand_cutoff,
                         default = 0.8,
@@ -668,8 +668,8 @@ def align(args, fai, trimmed_files):
     if args.bamfile is not None:
         # No alignment. But we need to check the user's provided file(s)
         bam = check_user_bamfile(args, fai)
-        # Could still need bowtie indices if knownRNAs is provided
-        if args.knownRNAs is not None:
+        # Could still need bowtie indices if known_miRNAs is provided
+        if args.known_miRNAs is not None:
             bowtie_indices(args)
         # Still need to compute number of primary reads in the file
         n_reads = count_reads(bam, args.threads)
@@ -1514,9 +1514,10 @@ def get_trimmed(args):
                             ' more fastq files!. Try a different autotrim_key' +
                             ' or trim your reads outside of ShortStack!')
                         sys.exit(msg)
-        print('')
-        print('Adapters:')
-        pprint.pprint(found_adapters)
+        if len(found_adapters) > 0:
+            print('')
+            print('Adapters:')
+            pprint.pprint(found_adapters)
         
         # Adapter trimming
         trimmed_files = []
@@ -2087,12 +2088,12 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
     if args.nohp is True:
         return None
     
-    # if no knownRNAs AND no de novo places to look, return nothing
-    if (args.knownRNAs is None) and (pmir_bedfile is None):
+    # if no known_miRNAs AND no de novo places to look, return nothing
+    if (args.known_miRNAs is None) and (pmir_bedfile is None):
         return None
     
-    # similarly, if no knownRNAs and de novo is turned off, return nothing
-    if (args.knownRNAs is None) and (args.dn_mirna is False):
+    # similarly, if no known_miRNAs and de novo is turned off, return nothing
+    if (args.known_miRNAs is None) and (args.dn_mirna is False):
         return None
     
     # report to user
@@ -2100,19 +2101,19 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
     print(time.strftime("%a %d %b %Y %H:%M:%S %z %Z", time.localtime()))
     print('Searching for valid microRNA loci')
 
-    if args.knownRNAs is not None:
+    if args.known_miRNAs is not None:
         # Align user's sequences to the genome
-        print('Aligning knownRNAs sequences to genome')
+        print('Aligning known_miRNAs sequences to genome')
         # we must sanitize user input .. capitalize, U to T
-        sane_knownRNAs = sanitize_knownRNAs(args)
+        sane_known_miRNAs = sanitize_known_miRNAs(args)
 
         # align using bowtie
         # "score" set to zero, reflecting unknown alignments at this point
         mir_samfile = args.outdir + '/user_mir.sam'
-        un_file = args.outdir + '/knownRNAs_unaligned.fasta'
+        un_file = args.outdir + '/known_miRNAs_unaligned.fasta'
         bt_args = ['bowtie', '-f', '-a', '-S', '-v', '0', '-p',
             str(args.threads), '--mapq', '0', '--un', un_file, '-x',  
-            args.genomefile, sane_knownRNAs, mir_samfile]
+            args.genomefile, sane_known_miRNAs, mir_samfile]
         subprocess.run(args = bt_args)
 
         # convert to bam, sort, and convert to bed
@@ -2131,8 +2132,31 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
         subprocess.run(args=bam2bed_args, stdout=user_mir_bed_fh)
         user_mir_bed_fh.close()
 
+        # testing breakpoint
+        # sys.exit()
+
+        # If user provided locus/loci, we only keep hits to those intervals.
+        # There will be a file called 'user.bed' present to screen against.
+        if (args.locifile is not None) or (args.locus is not None):
+            ub = args.outdir + '/user.bed'
+            user_mir_bed2_f = args.outdir + '/user_mir2.bed'
+            user_mir_bed2_fh = open(user_mir_bed2_f, "w")
+            bint_args = ['bedtools', 'intersect', '-u', '-a', user_mir_bed_f, '-b', ub]
+            subprocess.run(args=bint_args, stdout=user_mir_bed2_fh)
+            user_mir_bed2_fh.close()
+
+            # clean up a little
+            subprocess.run(f'rm -f {user_mir_bed_f}', shell=True)
+
+            # It's possible there were no overlaps. This will result
+            # in a file size of 0. If so, set to None
+            if os.stat(user_mir_bed2_f).st_size == 0:
+                user_mir_bed_f = None
+            else:
+                user_mir_bed_f = user_mir_bed2_f
+
         # cleanup
-        rm_args = ['rm', '-f', sane_knownRNAs, mir_samfile, 
+        rm_args = ['rm', '-f', sane_known_miRNAs, mir_samfile, 
             mir_unsortedbam, mir_bam]
         subprocess.run(args = rm_args)
     else:
@@ -2151,7 +2175,7 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
 
     if user_mir_bed_f is not None:
         print('')
-        print('Screening of possible microRNAs from user provided knownRNAs')
+        print('Screening of possible microRNAs from user provided known_miRNAs')
         if __name__ == '__main__':
             with open(user_mir_bed_f) as f:
                 bedlines = f.read().splitlines()
@@ -2167,7 +2191,7 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
             user_q_bedlines, user_locus_bedlines = zip(*user_mloci1)
 
             # Write the revised (with scores added) user_q_bedlines
-            u_q_file = args.outdir + '/knownRNAs.bed'
+            u_q_file = args.outdir + '/known_miRNAs.bed'
             u_q_fh = open(u_q_file, "w")
             for line in user_q_bedlines:
                 u_q_fh.write(line)
@@ -2659,12 +2683,12 @@ def count_exact_location(bedfields, merged_bam):
     return read_count
 
 
-def sanitize_knownRNAs(args):
+def sanitize_known_miRNAs(args):
     # sane means upper case, with Us converted to Ts
     # This is required for bowtie mapping
-    sane_filepath = args.outdir + '/user_knownRNAs.fasta'
+    sane_filepath = args.outdir + '/user_known_miRNAs.fasta'
     sane_fh = open(sane_filepath, "w")
-    for seq_record in SeqIO.parse(args.knownRNAs, "fasta"):
+    for seq_record in SeqIO.parse(args.known_miRNAs, "fasta"):
         out = ('>' + str(seq_record.id) + '\n' + 
             str(seq_record.seq.upper().back_transcribe()) + '\n')
         sane_fh.write(out)
@@ -3124,8 +3148,13 @@ def write_files(args, qdata, mir_qdata):
             bedlines = mh.readlines()
         m_bedlines = m_bedlines + bedlines
     
+    # Special case is when we have found one or more MIRNA loci
+    # from user-proided locifile or locus.
+    if (os.path.exists(u)) and (os.path.exists(m)):
+        nm_bedlines, m_bedlines = merge_locifile_mirs(args)
+
     # First make a temp bed file with all Results loci
-    #  this will be used for genome-sorting, prior to naming
+    #  this will be used for genome-sorting, prior to final naming
 
     resUnsortedBedf = args.outdir + '/ResultsUnsorted.bed'
     resUnsortedBedfh = open(resUnsortedBedf, "w")
@@ -3133,14 +3162,22 @@ def write_files(args, qdata, mir_qdata):
     if nm_bedlines:
         for line in nm_bedlines:
             f = line.rstrip().split('\t')
-            outline = f[0] + '\t' + f[1] + '\t' + f[2] + '\tnm\n'
+            outline = f[0] + '\t' + f[1] + '\t' + f[2] # + '\t' + f[3] + '\tnm\n'
+            if len(f) > 3:
+                outline = outline + '\t' + f[3] + '\tnm\n'
+            else :
+                outline = outline + '\t' + '.' + '\tnm\n'
             resUnsortedBedfh.write(outline)
     mat_lookups = {}
     star_lookups = {}
     if m_bedlines:
         for line in m_bedlines:
             f = line.rstrip().split('\t')
-            outline = f[0] + '\t' + f[1] + '\t' + f[2] + '\tm\n'
+            outline = f[0] + '\t' + f[1] + '\t' + f[2] # + '\t' + f[3] + '\tm\n'
+            if len(f) > 3:
+                outline = outline + '\t' + f[3] + '\tm\n'
+            else :
+                outline = outline + '\t' + '.' + '\tm\n'
             resUnsortedBedfh.write(outline)
             # We must also store information about the locations of the inferred
             #  mature miRNA and miRNA* from this file
@@ -3165,7 +3202,8 @@ def write_files(args, qdata, mir_qdata):
             f = line.rstrip().split('\t')
             onestart = int(f[1]) + 1
             coords = f[0] + ':' + str(onestart) + '-' + f[2]
-            dtype = f[3] ## 'nm' or 'm'
+            name_from_bed = f[3] ## needed in certain miRNA cases from locifile
+            dtype = f[4] ## 'nm' or 'm'
 
             if dtype == 'nm':
                 # name is allowed to be inherited, if it is not 'NA'
@@ -3225,10 +3263,12 @@ def write_files(args, qdata, mir_qdata):
                         cline = cline + '\n'
                         countsfh.write(cline)
             elif dtype == 'm':
-
-                # MIRNA loci are always 'de novo'
-                # So names will always be generic.
-                name = 'Cluster_' + str(clus_num)
+                # If locifile or locus was used, and we found MIRNAs,
+                #  we need to honor the original names ... if not, generic
+                if(args.locifile is not None) or (args.locus is not None):
+                    name = name_from_bed
+                else:
+                    name = 'Cluster_' + str(clus_num)
 
                 # Results.txt
                 rline = f'{coords}\t{name}\t'
@@ -3320,9 +3360,9 @@ def write_files(args, qdata, mir_qdata):
             print(dcall, tally)
     
     # Report overlaps between alignment positions of 
-    #  knownRNAs and loci in Results.gff/.txt
+    #  known_miRNAs and loci in Results.gff/.txt
     #  Do this by adding a column to Results.txt
-    k = args.outdir + '/knownRNAs.bed'
+    k = args.outdir + '/known_miRNAs.bed'
     if os.path.exists(k):
         ifile = args.outdir + '/intersect_temp.tsv'
         bicmd = f'bedtools intersect -wb -a {gff3f} -b {k} > {ifile}'
@@ -3346,7 +3386,7 @@ def write_files(args, qdata, mir_qdata):
                 line_num += 1
                 stub = oldres_line.rstrip()
                 if line_num == 1:
-                    new_line = stub + '\tKnownRNAs\n'
+                    new_line = stub + '\tknown_miRNAs\n'
                 else:
                     res_fields = stub.split('\t')
                     res_name = res_fields[1]
@@ -3362,8 +3402,8 @@ def write_files(args, qdata, mir_qdata):
         subprocess.run(mv_cmd, shell=True)
         subprocess.run(rm_cmd, shell=True)
         
-        # Reformat the knownRNAs.bed into gff3 for better browser display
-        k_gff_f = args.outdir + '/knownRNAs.gff3'
+        # Reformat the known_miRNAs.bed into gff3 for better browser display
+        k_gff_f = args.outdir + '/known_miRNAs.gff3'
         k_gff_fh = open(k_gff_f, "w")
         with open(k) as kbed:
             for kbed_line in kbed:
@@ -3466,6 +3506,54 @@ def get_reads_by_chrom(bamfile):
         rbc[row[0]] = int(row[2])
     return(rbc)
 
+def merge_locifile_mirs(args):
+    # bedtools intersect -wao -a user.bed -b passed_mir_final.bed
+    # Find overlaps between user's original intervals and passed MIRNA loci
+    wao_file = args.outdir + '/wao.bed'
+    wao_fh = open(wao_file, "w")
+    user_bed_path = args.outdir + '/user.bed'
+    passed_mir_path = args.outdir + '/passed_mir_final.bed'
+    wao_args = ['bedtools', 'intersect', '-wao', '-a', user_bed_path, '-b', passed_mir_path]
+    subprocess.run(wao_args, stdout=wao_fh)
+    wao_fh.close()
+
+    # Scan the wao file. Cases with no hit need no action.
+    # Cases with overlap: Remove the user's originial from the 'nm_bedlines',
+    #  and replace the name in the m_bedlines.
+    # By definition every line in m_bedline will have one (or more) overlaps with user.bed / nm_bedlines.
+
+    # example nm_bedlines entry: chr11   15721625        15721756        ccm-MIR5226
+    # example m_bedline entry: chr1    1692111 1692238 ccm-IIM-70-mature5p     1327    -       1692197 1692218 1692131 1692152 45
+
+    new_m_bedlines = []
+    new_nm_bedlines = []
+
+    with open(wao_file) as wao_fh:
+        for wao_line in wao_fh:
+            wao_fields = wao_line.rstrip().split('\t')
+            if wao_fields[4] != '.':
+                new_m_fields = wao_fields[4:]
+                # replace the name with the user's name
+                new_m_fields[3] = wao_fields[3]
+                new_m_line = '\t'.join(new_m_fields)
+                new_m_bedlines.append(new_m_line)
+            else:
+                new_nm_fields = wao_fields[:4]
+                new_nm_line = '\t'.join(new_nm_fields)
+                new_nm_bedlines.append(new_nm_line)
+    # testing
+    #for x in new_m_bedlines:
+    #    print(x)
+    #for y in new_nm_bedlines:
+    #    print(y)
+    #sys.exit()
+
+    # cleanup
+    rm_args = ['rm', '-f', wao_file]
+    subprocess.run(rm_args)
+    # return
+    return(new_nm_bedlines, new_m_bedlines)
+
 ## Main control / script
 if __name__ == '__main__':
     # Process command line, setting and checking options.
@@ -3508,6 +3596,9 @@ if __name__ == '__main__':
     todel = args.outdir + '/possible_mirs_clean.bed'
     if os.path.exists(todel):
         subprocess.run(f'rm {todel}', shell=True)
+
+    # breakpoint for testing
+    # sys.exit()
 
     # Write most final files
     write_files(args, qdata, mir_qdata)
