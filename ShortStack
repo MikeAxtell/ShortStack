@@ -2302,18 +2302,18 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
     # call quant on the mirna loci
     mir_qdata, junk = quant_controller(args, merged_bam, nr_passed_mir_bed, read_count)
 
-    # Report n found to user
-    n_found = 0
+    # Report n found to user NO NOT YET!
+    # n_found = 0
     # testing
     # print('Outputting nr_passed_mir_bed')
-    with open(nr_passed_mir_bed) as bed:
-        for line in bed:
-            n_found += 1
-            # testing
-            #print(line)
-    print('')
-    print(f'Found a total of {n_found} MIRNA loci')
-    print('')
+    # with open(nr_passed_mir_bed) as bed:
+    #    for line in bed:
+    #        n_found += 1
+    #        # testing
+    #        # print(line)
+    #print('')
+    #print(f'Found a total of {n_found} MIRNA loci')
+    #print('')
 
     # Look for file of denovo, if found, filter it
     # .. this removes any de-novo loci that overlap with 
@@ -3151,7 +3151,17 @@ def write_files(args, qdata, mir_qdata):
     # Special case is when we have found one or more MIRNA loci
     # from user-proided locifile or locus.
     if (os.path.exists(u)) and (os.path.exists(m)):
+        # testing
+        #x = len(m_bedlines)
+        #y = len(nm_bedlines)
+        #print(f'Before m_bedlines was {x} and nm_bedlines was {y}')
+        
         nm_bedlines, m_bedlines = merge_locifile_mirs(args)
+        
+        # testing
+        #x = len(m_bedlines)
+        #y = len(nm_bedlines)
+        #print(f'After m_bedlines was {x} and nm_bedlines was {y}')
 
     # First make a temp bed file with all Results loci
     #  this will be used for genome-sorting, prior to final naming
@@ -3352,6 +3362,13 @@ def write_files(args, qdata, mir_qdata):
     if rgs:
         if len(rgs) > 1:
             countsfh.close()
+    # report tally of MIRNA loci
+    if m_bedlines:
+        x = len(m_bedlines)
+        print('')
+        print(f'Found a total of {x} MIRNA loci')
+        print('')
+   
     # report tally of non-MIRNA loci by DicerCall
     if nm_bedlines:
         print('')
@@ -3507,6 +3524,8 @@ def get_reads_by_chrom(bamfile):
     return(rbc)
 
 def merge_locifile_mirs(args):
+    # testing
+    # sys.exit()
     # bedtools intersect -wao -a user.bed -b passed_mir_final.bed
     # Find overlaps between user's original intervals and passed MIRNA loci
     wao_file = args.outdir + '/wao.bed'
@@ -3537,10 +3556,16 @@ def merge_locifile_mirs(args):
                 new_m_fields[3] = wao_fields[3]
                 new_m_line = '\t'.join(new_m_fields)
                 new_m_bedlines.append(new_m_line)
+                # testing
+                # print('added to new_m_bedlines:')
+                # print(f' {new_m_line}')
             else:
                 new_nm_fields = wao_fields[:4]
                 new_nm_line = '\t'.join(new_nm_fields)
                 new_nm_bedlines.append(new_nm_line)
+                # testing
+                # print('added to new_nm_bedlines:')
+                # print(f' {new_nm_line}')
     # testing
     #for x in new_m_bedlines:
     #    print(x)
