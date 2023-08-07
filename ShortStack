@@ -2598,8 +2598,7 @@ def get_mir_locus(bedfields, fai, args, merged_bam):
     for pos in range(mir_start, mir_stop + 1):
         unstranded_auc += da[pos]
     
-    frac_correct = stranded_auc / unstranded_auc
-    if frac_correct < float(args.strand_cutoff):
+    if unstranded_auc == 0 or stranded_auc / unstranded_auc < float(args.strand_cutoff):
         #print('Failed frac correct strand')
         return None
     
