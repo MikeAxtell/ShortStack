@@ -607,7 +607,7 @@ def ShortStack_argparse(ss_version):
         help='Initial peaks (continuous regions with depth '+
         'exceeding argument mincov are merged if they are '+
         'this distance or less from each other. Must be an '+
-        'integer >= 1. Default: 75')
+        'integer >= 1. Default: 200')
 
     ### Options in perl ShortStack that are not yet implemented here
 
