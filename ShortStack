@@ -1699,7 +1699,7 @@ def quant(args, merged_bam, cluster_bed, mir_cutoff):
     Output:
     - quant_data : Formatted like quant_data['Chr1:1234-2345'][~~item~~]. 
     Items are start, end, chrom,
-    Length, Reads, UniqueReads, FracTop, Strand, MajorRNA, MajorRNAReads,
+    Length, Reads, DistinctSequences, FracTop, Strand, MajorRNA, MajorRNAReads,
     Short, Long, ~~inclusive sizes~~, DicerCall
     - possible_mirs : Set of 21 and 22nt reads that originated from
     within a cluster and were >= mincov. A list, with entries like
@@ -1831,7 +1831,7 @@ def quant(args, merged_bam, cluster_bed, mir_cutoff):
             #for uniqseq in set(seqs):
             #    seqdict[uniqseq] = seqs.count(uniqseq)
             
-            # Name, Locus, Length, Reads, UniqueReads, FracTop, Strand, MajorRNA, MajorRNAReads, DicerCall, Short, Long, [..sizes..]
+            # Name, Locus, Length, Reads, DistinctSequences, FracTop, Strand, MajorRNA, MajorRNAReads, DicerCall, Short, Long, [..sizes..]
         quant_data[stcoords] = {}
         quant_data[stcoords]['Name'] = lname
         quant_data[stcoords]['start'] = sstart
@@ -1842,7 +1842,7 @@ def quant(args, merged_bam, cluster_bed, mir_cutoff):
 
         if len(seqs) == 0:
                 # no reads in the interval
-            quant_data[stcoords]['UniqueReads'] = 0
+            quant_data[stcoords]['DistinctSequences'] = 0
             quant_data[stcoords]['FracTop'] = 'NA'
             quant_data[stcoords]['Strand'] = '.'
             quant_data[stcoords]['MajorRNA'] = 'NA'
@@ -1856,7 +1856,7 @@ def quant(args, merged_bam, cluster_bed, mir_cutoff):
                 for rg in rgs:
                     quant_data[stcoords][rg] = 0
         else:
-            quant_data[stcoords]['UniqueReads'] = len(seqs)
+            quant_data[stcoords]['DistinctSequences'] = len(seqs)
             quant_data[stcoords]['FracTop'] = strand_count['+'] / quant_data[stcoords]['Reads']
             if hard_strand is not None:
                 quant_data[stcoords]['Strand'] = hard_strand
@@ -1938,7 +1938,7 @@ def quant_controller (args, merged_bam, all_bed, read_count):
     Output:
     - qdata : Formatted like quant_data['Chr1:1234-2345'][~~item~~]. 
     Items are start, end, chrom,
-    Length, Reads, UniqueReads, FracTop, Strand, MajorRNA, MajorRNAReads,
+    Length, Reads, DistinctSequences, FracTop, Strand, MajorRNA, MajorRNAReads,
     Short, Long, ~~inclusive sizes~~, DicerCall
     - final_bed_path : Path to bedfile of possible de novo mature miRNA locations
 
@@ -3106,7 +3106,7 @@ def write_files(args, qdata, mir_qdata):
     # Results.txt file
     resultsf = args.outdir + '/Results.txt'
     resultsfh = open(resultsf, "w")
-    res_header = 'Locus\tName\tChrom\tStart\tEnd\tLength\tReads\tUniqueReads\t'
+    res_header = 'Locus\tName\tChrom\tStart\tEnd\tLength\tReads\tDistinctSequences\t'
     res_header = res_header + 'FracTop\tStrand\tMajorRNA\tMajorRNAReads\t'
     res_header = res_header + 'Short\tLong\t'
     for rlen in range(args.dicermin, args.dicermax + 1, 1):
@@ -3231,7 +3231,7 @@ def write_files(args, qdata, mir_qdata):
                 rline = rline + str(qdata[coords]['end']) + '\t'
                 rline = rline + str(qdata[coords]['Length']) + '\t'
                 rline = rline + str(qdata[coords]['Reads']) + '\t'
-                rline = rline + str(qdata[coords]['UniqueReads']) + '\t'
+                rline = rline + str(qdata[coords]['DistinctSequences']) + '\t'
                 rline = rline + str(qdata[coords]['FracTop']) + '\t'
                 rline = rline + qdata[coords]['Strand'] + '\t'
                 rline = rline + qdata[coords]['MajorRNA'] + '\t'
@@ -3289,7 +3289,7 @@ def write_files(args, qdata, mir_qdata):
                 rline = rline + str(mir_qdata[coords]['end']) + '\t'
                 rline = rline + str(mir_qdata[coords]['Length']) + '\t'
                 rline = rline + str(mir_qdata[coords]['Reads']) + '\t'
-                rline = rline + str(mir_qdata[coords]['UniqueReads']) + '\t'
+                rline = rline + str(mir_qdata[coords]['DistinctSequences']) + '\t'
                 rline = rline + str(mir_qdata[coords]['FracTop']) + '\t'
                 rline = rline + mir_qdata[coords]['Strand'] + '\t'
                 rline = rline + mir_qdata[coords]['MajorRNA'] + '\t'
