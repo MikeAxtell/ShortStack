@@ -20,6 +20,8 @@ import random
 
 from collections import Counter
 
+csv.field_size_limit(sys.maxsize)
+
 # Imports of other modules that are NOT in the Standard Library. Must check.
 ### TO DO .. WRITE A CHECK HERE FOR REQUIRED NON STANDARD MODULES!
 
