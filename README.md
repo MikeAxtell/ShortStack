@@ -161,6 +161,9 @@ fasterq-dump SRR3222443 SRR3222444 SRR3222445
 ```
 You will now have 3 `.fastq` files of raw (untrimmed) sRNA-seq reads. These data are derived from Col-0 *Arabidopsis thaliana* immature inflorescence tissues (see Wang et al. 2017 <https://doi.org/10.1111/tpj.13463>)
 
+#### Alternative using SRA run browser
+Sometimes sra-tools is a pain to use. You can use the web interface at <https://trace.ncbi.nlm.nih.gov/Traces/?view=run_browser&display=metadata> to grab the example data, searching by SRR accession number.
+
 ### Known miRNAs
 To get a list of known miRNAs, we will use all [miRBase](https://www.mirbase.org) annotated mature miRNAs from miRBase. First, download the `mature.fa` file from miRBase at <https://mirbase.org/download/>. Then filter it to get only the `ath` ones (*e.g.* the ones from *A. thaliana*).
 
