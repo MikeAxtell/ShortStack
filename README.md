@@ -162,7 +162,7 @@ fasterq-dump SRR3222443 SRR3222444 SRR3222445
 You will now have 3 `.fastq` files of raw (untrimmed) sRNA-seq reads. These data are derived from Col-0 *Arabidopsis thaliana* immature inflorescence tissues (see Wang et al. 2017 <https://doi.org/10.1111/tpj.13463>)
 
 #### Alternative using SRA run browser
-Sometimes sra-tools is a pain to use. You can use the web interface at <https://trace.ncbi.nlm.nih.gov/Traces/?view=run_browser&display=metadata> to grab the example data, searching by SRR accession number.
+Sometimes sra-tools is a pain to use. Alternatively, you can use the web interface at <https://trace.ncbi.nlm.nih.gov/Traces/?view=run_browser&display=metadata> to grab the example data, searching by SRR accession number, and downloading FASTQ.
 
 ### Known miRNAs
 To get a list of known miRNAs, we will use all [miRBase](https://www.mirbase.org) annotated mature miRNAs from miRBase. First, download the `mature.fa` file from miRBase at <https://mirbase.org/download/>. Then filter it to get only the `ath` ones (*e.g.* the ones from *A. thaliana*).
@@ -190,7 +190,7 @@ A tab-delimited text file giving key information for all small RNA clusters. Col
 5. *End*: One-based end position (right-most) of the locus, inclusive.
 6. *Length*: Length of the locus (base-pairs)
 7. *Reads*: Number of aligned sRNA-seq reads that overlap this locus.
-8. *UniqueReads*: Number of uniquely aligned (*e.g.* not multi-mapping) reads that overlap this locus.
+8. *DistinctSequences*: Number of distinct sRNA sequences that overlap this locus. A single DistinctSequence can have one or more reads.
 9. *FracTop*: Fraction of Reads aligned to the top genomic strand.
 10. *Strand*: Inferred strandednes of the locus, inferred from FracTop and the `--strand_cutoff` setting.
 11. *MajorRNA*: Sequence of the single most abundant RNA sequence at the locus.
