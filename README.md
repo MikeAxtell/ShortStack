@@ -105,9 +105,9 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--known_miRNAs KNOWN_MIRNAS
     - Note: Use of `--adapter` is discouraged. In nearly all cases, `--autotrim` is a better bet for read trimming.
 - `--autotrim_key AUTOTRIM_KEY` : A DNA sequence to use as a known suffix during the `--autotrim` procedure. ShortStack's autotrim discovers the 3' adapter by scanning for reads that begin with the sequence given by `AUTOTRIM_KEY`. This should be the sequence of a small RNA that is known to be highly abundant in all of the libraries. The default sequence is for miR166, a microRNA that is present in nearly all plants at high levels. For non-plant experiments, or if the default is not working well, consider providing an alternative to the default.
     - default: `TCGGACCAGGCTTCATTCCCC` (miR166)
-- `--mmap {u,f,r}` : Sets the mode by which multi-mapped reads are handled. These modes are described in [Johnson et al. (2016)](https://doi.org/10.1534/g3.116.030452). The default `f` mode has the best performance.
-    - `u` : Only uniquely-aligned reads are used as weights for placement of multi-mapped reads.
-    - `f` : (Default) Fractional weighting scheme for placement of multi-mapped reads.
+- `--mmap {u,f,r}` : Sets the mode by which multi-mapped reads are handled. These modes are described in [Johnson et al. (2016)](https://doi.org/10.1534/g3.116.030452). The default `u` mode has the best performance.
+    - `u` : (Default) Only uniquely-aligned reads are used as weights for placement of multi-mapped reads.
+    - `f` : Fractional weighting scheme for placement of multi-mapped reads.
     - `r` : Multi-mapped read placement is random.
 - `--align_only` : This switch will cause ShortStack to terminate after the alignment phase; no analysis occurs.
 - `--show_secondaries` : If this switch is set, ShortStack will retain secondary alignments for multimapped reads. This will increase bam file size, possibly by a lot.
