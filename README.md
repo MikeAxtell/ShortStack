@@ -144,7 +144,7 @@ Read alignment is often the most time-consuming portion of the analysis. *MIRNA*
 For testing we will use the *Arabidopsis thaliana* TAIR10 genome assembly, including plastid and mitochondrial genomes. The Axtell Lab website is serving a copy of this that is easy to obtain:
 
 ```
-curl https://plantsmallrnagenes.science.psu.edu/ath-b10/Arabidopsis_thalianaTAIR10.fa -o Arabidopsis_thalianaTAIR10.fa
+curl https://plantsmallrnagenes.science.psu.edu/ath-b10/Arabidopsis_thalianaTAIR10.fa -ko Arabidopsis_thalianaTAIR10.fa
 ```
 ### Raw sRNA-seq Reads
 We can obtain some example *A. thaliana* sRNA-seq data from SRA using the SRA toolkit. If you don't already have the sra toolkit installed you can obtain it at https://github.com/ncbi/sra-tools/wiki/01.-Downloading-SRA-Toolkit
