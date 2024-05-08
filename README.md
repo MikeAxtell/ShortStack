@@ -122,7 +122,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--known_miRNAs KNOWN_MIRNAS
 - `--strand_cutoff STRAND_CUTOFF` : Floating point number that sets the cutoff for standedness. Must be > 0.5 and < 1.
     - default: 0.8. Loci with >80% reads on the top genomic strand are '+' stranded, loci with <20% reads on the top genomic strand are '-' stranded, and all others are unstranded '.'
 - `--mincov MINCOV` : Minimum alignment depth, in units of reads per million, required to nucleate a small RNA cluster during *de novo* cluster search. Must be an floating point number > 0. 
-    - default: 2
+    - default: 1
 - `--pad PAD` : Initial peaks (continuous regions with depth exceeding argument `--mincov`) are merged if they are this distance or less from each other. Must be an integer >= 1. 
     - default: 200
 
