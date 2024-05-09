@@ -267,8 +267,10 @@ def check_executables(args):
         rqd.append('bowtie')
         rqd.append('bowtie-build')
     
-    # ShortTracks is required if user is aligning reads. So, if --readfile is not empty
-    if args.readfile is not None:
+    # ShortTracks and wigToBigWig are required if user is aligning reads, 
+    # unless --no_bigwigs is set.
+    # So, if --readfile is not empty and no_bigwigs is not True
+    if (args.readfile is not None) and (args.no_bigwigs is not True):
         rqd.append('ShortTracks')
         # Check for the unique executables that ShortTracks will need
         rqd.append('wigToBigWig')
@@ -610,6 +612,11 @@ def ShortStack_argparse(ss_version):
         'exceeding argument mincov are merged if they are '+
         'this distance or less from each other. Must be an '+
         'integer >= 1. Default: 200')
+    parser.add_argument('--no_bigwigs',
+                    action='store_true',
+                    help='If this switch is set then no bigwigs' +
+                    ' will be made from alignments. This will speed' +
+                    ' up the overall run.')
 
     ### Options in perl ShortStack that are not yet implemented here
 
@@ -778,20 +785,22 @@ def align(args, fai, trimmed_files):
         subprocess.run(idx_args)
 
         # ShortTracks x 2 : mode readgroup and mode readlength
-        print('')
-        print('Creating browser tracks by readgroup using ShortTracks')
-        callShortTracks(mb, 'readgroup', False)
-        print('')
-        print('Creating browser tracks by readlength and strand using ShortTracks')
-        callShortTracks(mb, 'readlength', True)
+        if args.no_bigwigs is not True:
+            print('')
+            print('Creating browser tracks by readgroup using ShortTracks')
+            callShortTracks(mb, 'readgroup', False)
+            print('')
+            print('Creating browser tracks by readlength and strand using ShortTracks')
+            callShortTracks(mb, 'readlength', True)
 
         n_reads = count_reads(mb, args.threads)
         return mb, n_reads
     else:
-        # ShortTracks x 1 : mode readlength
-        print('')
-        print('Creating browser tracks by readlength and strand using ShortTracks')
-        callShortTracks(final_bams[0], 'readlength', True)
+        if args.no_bigwigs is not True:
+            # ShortTracks x 1 : mode readlength
+            print('')
+            print('Creating browser tracks by readlength and strand using ShortTracks')
+            callShortTracks(final_bams[0], 'readlength', True)
 
         n_reads = count_reads(final_bams[0], args.threads)
         return final_bams[0], n_reads
