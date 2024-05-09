@@ -2388,7 +2388,7 @@ def mir_analysis(bedline, args, merged_bam, fai):
     dotbracket = foldlines[2].rstrip().split(' ')[0]
 
     # Analyze the fold
-    new_locus, s_start, s_end = analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args)
+    new_locus, s_start, s_end = analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args, fai)
 
     # Will be None or not
     if new_locus is not None:
@@ -2912,7 +2912,7 @@ def compute_final_precision(merged_bam, s_gen_start, s_gen_stop, mir_locus, bedf
     precision = (q_n + s_n) / t_n
     return precision
 
-def analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args):
+def analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args, fai):
     """Assess a folded microRNA hairpin candidate  
     """
     # Get relative position of exact query on the dot brackets
@@ -2940,6 +2940,15 @@ def analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args):
     #  in size.
     new_start = min(int(bedfields[1]) - 21, s_gen_start - 20)
     new_end = max(int(bedfields[2]) + 20, s_gen_stop + 20)
+
+    # Bugfix Issue 146
+    # Sanity check on new_start and new_end. They must be valid coordinates on the reference chromosome
+    if new_start < 1:
+        return None, None, None
+    
+    if new_end > fai[bedfields[0]]:
+        return None, None, None
+
     new_locus = bedfields[0] + ':' + str(new_start) + '-' + str(new_end)
     
     # It is possible that the new locus folds differently. So, re-analyze!
