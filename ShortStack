@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-version = '4.0.3'
+version = '4.0.4'
 
 # Main script / control is at the BOTTOM of this file
 
