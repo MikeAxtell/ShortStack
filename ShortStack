@@ -1561,8 +1561,10 @@ def get_trimmed(args):
 def denovo_chrom(chrom, bamfile, args, min_reads):
     #print(f'chrom {chrom} bamfile {bamfile}')
     #print(f'Starting to work on chrom {chrom}')
-    st_depth_args = (['samtools', 'depth', '-a', '-r', chrom,
-        '-g', '256', bamfile])
+    ## Issue 151 ... the -g 256 had the OPPOSITE of my intended effect!
+    #st_depth_args = (['samtools', 'depth', '-a', '-r', chrom,
+    #    '-g', '256', bamfile])
+    st_depth_args = (['samtools', 'depth', '-a', '-r', chrom, bamfile])
     st_depth = subprocess.Popen(st_depth_args, stdout=subprocess.PIPE,
         text=True, bufsize=1)
     reader = csv.reader(st_depth.stdout, delimiter="\t")
@@ -2481,9 +2483,11 @@ def precision_test(peaks, merged_bam, args, fai):
     chrom = peaks['querySAM'][0][2] # first alignment is fine, all chrom same
     flag = peaks['querySAM'][0][1] # likewise all aligns will have same strand
     if int(flag) & 16:
-        f = '-f' # samtools view require
+        #f = '-f' # samtools view require
+        f = '-f 16 -F 256' # Issue 151
     else:
-        f = '-F' # samtools view exclude
+        #f = '-F' # samtools view exclude
+        f = '-F 272' # Issue 151
     
     # Determine the locus boundaries... just add 24nts on each side
     #  subject to chromosome edges
@@ -2492,7 +2496,8 @@ def precision_test(peaks, merged_bam, args, fai):
 
     # Count alignments, on the same strand, in the interval
     st_loc = chrom + ':' + str(loc_start) + '-' + str(loc_end)
-    st_args = ['samtools', 'view', '-c', f, str(16), merged_bam, st_loc]
+    #st_args = ['samtools', 'view', '-c', f, str(16), merged_bam, st_loc] Issue 151
+    st_args = ['samtools', 'view', '-c', f, merged_bam, st_loc]
     st = subprocess.run(args=st_args, capture_output=True, text=True)
     total_aligns = int(st.stdout.rstrip())
 
@@ -2688,9 +2693,11 @@ def count_exact_location(bedfields, merged_bam, fai):
 
     st_expr = f'\"pos == {mir_pos} && endpos == {mir_end}\"'
     if mir_strand == '+':
-        flag_filt = '-F 16'
+        #flag_filt = '-F 16'
+        flag_filt = '-F 272' # Issue 151
     else:
-        flag_filt = '-f 16'
+        #flag_filt = '-f 16'
+        flag_filt = '-f 16 -F 256' # Issue 151
     
     mb_coords = (mir_chrom + ':' + str(mir_pos) + '-' +
         str(mir_pos))
@@ -2898,9 +2905,11 @@ def compute_final_precision(merged_bam, s_gen_start, s_gen_stop, mir_locus, bedf
     s_exp = f'\"pos >= {str(s_win_start)} && endpos <= {str(s_win_stop)}\"'
 
     if bedfields[5] == '+':
-        flag_filt = '-F 16'
+        #flag_filt = '-F 16'
+        flag_filt = '-F 272' # Issue 151
     else:
-        flag_filt = '-f 16'
+        #flag_filt = '-f 16'
+        flag_filt = '-f 16 -F 256' # Issue 151
 
     # count reads in query window
     q_count = subprocess.run(f'samtools view -c -e {q_exp} {flag_filt} {merged_bam} {mir_locus}', 
@@ -2911,7 +2920,8 @@ def compute_final_precision(merged_bam, s_gen_start, s_gen_stop, mir_locus, bedf
     shell=True, capture_output=True, text=True)
 
     # count total reads
-    t_count = subprocess.run(f'samtools view -c {merged_bam} {mir_locus}',
+    # t_count = subprocess.run(f'samtools view -c {merged_bam} {mir_locus}',
+    t_count = subprocess.run(f'samtools view -c -F 256 {merged_bam} {mir_locus}', # Issue 151
     shell=True, capture_output=True, text=True)
 
     # Do the math
