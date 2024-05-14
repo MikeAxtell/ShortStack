@@ -15,6 +15,7 @@ Michael J. Axtell, Penn State University, mja18@psu.edu
 - [Outputs](#outputs)
 - [Visualizing Results](#visualizing-results)
 - [Overview of Methods](#overview-of-methods)
+- [How to go FAST](#how-to-go-fast)
 - [ShortStack Version 4 Major Changes](#shortstack-version-4-major-changes)
 - [Issues](#issues)
 - [FAQ](#faq)
@@ -73,13 +74,10 @@ Then, download the `ShortStack` script from this github repo. Make it executable
 # Usage
 ```
 ShortStack [-h] [--version] --genomefile GENOMEFILE [--known_miRNAs KNOWN_MIRNAS]
- (--readfile [READFILE ...] | --bamfile [BAMFILE ...]) [--outdir OUTDIR] 
- [--adapter ADAPTER | --autotrim] [--autotrim_key AUTOTRIM_KEY] [--threads THREADS]
-[--mmap {u,f,r}] [--align_only] [--show_secondaries]
-[--dicermin DICERMIN [--dicermax DICERMAX]
-[--locifile LOCIFILE | --locus LOCUS] [--nohp] [--dn_mirna]
-[--strand_cutoff STRAND_CUTOFF] [--mincov MINCOV] [--pad PAD]
-
+    (--readfile [READFILE ...] | --bamfile [BAMFILE ...]) [--outdir OUTDIR] [--adapter ADAPTER | --autotrim]
+    [--autotrim_key AUTOTRIM_KEY] [--threads THREADS] [--mmap {u,f,r}] [--align_only] [--show_secondaries]
+    [--dicermin DICERMIN] [--dicermax DICERMAX] [--locifile LOCIFILE | --locus LOCUS] [--nohp] [--dn_mirna]
+    [--strand_cutoff STRAND_CUTOFF] [--mincov MINCOV] [--pad PAD] [--no_bigwigs]
 ```
 
 ## Required
@@ -125,6 +123,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--known_miRNAs KNOWN_MIRNAS
     - default: 1
 - `--pad PAD` : Initial peaks (continuous regions with depth exceeding argument `--mincov`) are merged if they are this distance or less from each other. Must be an integer >= 1. 
     - default: 200
+- `--no_bigwigs` : Disable creation of bigwig files from sRNA-seq alignments. Applies only when performing alignments via input to `--readfile`.
 
 # Resources
 ## Memory
@@ -272,6 +271,11 @@ Genomic intervals where the depth of small RNA coverage, in reads-per-million, i
 
 ## MIRNA annotation
 *MIRNA* annotation has two entry points for initial searches: Locations of aligned user-provided sequences from `--known_miRNAs` and, if option `--dn_mirna` is True, any 21 or 22 nt read whose abundance exceeds the depth of `--mincov`. From these initial starting points, ShortStack first examines the local region to find miR/miR-star-like patterns of read accumulation (essentially, "two-peaks" of read coverage on the same genomic strand that might correspond to the miR/miR-star pair). If such a pattern is found, the RNA secondary structure in the local area is predicted. The sRNA-seq alignments in conjunction with the predicted RNA secondary structure are analyzed with respect to the criteria in [Axtell and Meyers, 2018](https://doi.org/10.1105/tpc.17.00851). If the criteria are met, the locus is annotated as a *MIRNA*.
+
+# How to go FAST
+- If performing alignments, set `mmap` to `r` and use option `--no_bigwigs`. Setting `mmap r` means that multi-mapped reads will just be placed using a random-guess instead of the weighted method described by [Johnson et al. (2016)](https://doi.org/10.1534/g3.116.030452). The slower, weighted methods are slower but more accurate. Setting `--no_bigwigs` prevents the use of `ShortTracks` to create genome browser track files of the sRNA-seq alignments.
+- Use more `--threads` as your system allows. Up to 10 or 20. Be sure to allocate enough total memory (about 8-10GB RAM per thread, maybe higher for large genomes).
+- Use a better reference genome: Highly fragmented genome assemblies are much slower than well-assembled genomes.
 
 # ShortStack version 4 Major Changes
 ShortStack version 4 is a major update. The major changes are:
