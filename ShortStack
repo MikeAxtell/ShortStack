@@ -3515,40 +3515,66 @@ def write_mirna_files(args, merged_bam):
         print('https://doi.org/10.1105/tpc.17.00851 , https://doi.org/10.1093/nar/gky1141')
 
 def write_mirna_fasta(args):
+    # Issue 153 - re-write to use samtools faidx to ensure that header coordinates
+    #  are in one-based, fully-closed coordinate system
+
+    mirfa = open(f'{args.outdir}/mir.fasta', "w")
+    with(open(f'{args.outdir}/Results.gff3')) as mirgff:
+        for gffline in mirgff:
+            f = gffline.rstrip().split('\t')
+            if (f[2] == 'mature_miRNA') or (f[2] == 'miRNA-star') or (f[2] == 'MIRNA_hairpin'):
+                st_coords = f[0] + ':' + f[3] + '-' + f[4]
+                clusname = f[8]
+                clusname = re.sub(';.*$', '', clusname)
+                clusname = clusname.replace('ID=', '')
+                st_cmd = f'samtools faidx --mark-strand sign'
+                if f[6] == '-':
+                    st_cmd = st_cmd + ' -i'
+                st_cmd = st_cmd + f' {args.genomefile} {st_coords}'
+                stjob = subprocess.run(st_cmd, shell=True, text=True,
+                capture_output=True)
+                falines = stjob.stdout.split('\n')
+                outhead = falines[0].replace('>','')
+                newhead = f'>{clusname}::{outhead}'
+                falines[0] = newhead
+                faout = '\n'.join(falines)
+                mirfa.write(faout)
+    mirfa.close()
+
     # write a temporary gff files of only the mirna annotations,
     #  from Results.gff3
-    grep_cmd = (f'grep -e \'\sMIRNA_hairpin\s\' -e \'\smature_miRNA\s\'' +
-    f' -e \'\smiRNA-star\s\' {args.outdir}/Results.gff3 > {args.outdir}/mir.gff3')
-    subprocess.run(grep_cmd, shell=True)
+    #grep_cmd = (f'grep -e \'\sMIRNA_hairpin\s\' -e \'\smature_miRNA\s\'' +
+    #f' -e \'\smiRNA-star\s\' {args.outdir}/Results.gff3 > {args.outdir}/mir.gff3')
+    #subprocess.run(grep_cmd, shell=True)
 
     # Make this into bed format, tweaking the names, to enable useful header
     #  names from bedtools getfasta
 
-    mirbed = open(f'{args.outdir}/mir.bed', "w")
-    with open(f'{args.outdir}/mir.gff3') as mirgff:
-        for gffline in mirgff:
-            f = gffline.rstrip().split('\t')
-            bedline = f[0] + '\t' # Chrom
-            bedstart = str(int(f[3]) - 1)
-            bedline = bedline + bedstart + '\t' # Start in 0-based
-            bedline = bedline + f[4] + '\t' # End
-            bedname = f[8]
-            bedname = re.sub(';.*$', '', bedname)
-            bedname = bedname.replace('ID=', '')
-            bedline = bedline + bedname + '\t' # Modified name
-            bedline = bedline + f[5] + '\t' # Score (n reads)
-            bedline = bedline + f[6] + '\n' # Strand
-            mirbed.write(bedline)
-    mirbed.close()
+    #mirbed = open(f'{args.outdir}/mir.bed', "w")
+    #with open(f'{args.outdir}/mir.gff3') as mirgff:
+    #    for gffline in mirgff:
+    #        f = gffline.rstrip().split('\t')
+    #        bedline = f[0] + '\t' # Chrom
+    #        bedstart = str(int(f[3]) - 1)
+    #        bedline = bedline + bedstart + '\t' # Start in 0-based
+    #        bedline = bedline + f[4] + '\t' # End
+    #        bedname = f[8]
+    #        bedname = re.sub(';.*$', '', bedname)
+    #        bedname = bedname.replace('ID=', '')
+    #        bedline = bedline + bedname + '\t' # Modified name
+    #        bedline = bedline + f[5] + '\t' # Score (n reads)
+    #        bedline = bedline + f[6] + '\n' # Strand
+    #        mirbed.write(bedline)
+    #mirbed.close()
 
     # Write the FASTA
-    getfa_cmd = (f'bedtools getfasta -s -name -fi {args.genomefile}' +
-                 f' -bed {args.outdir}/mir.bed > {args.outdir}/mir.fasta')
-    subprocess.run(getfa_cmd, shell=True)
+    #getfa_cmd = (f'bedtools getfasta -s -name -fi {args.genomefile}' +
+    #             f' -bed {args.outdir}/mir.bed > {args.outdir}/mir.fasta')
+    #subprocess.run(getfa_cmd, shell=True)
 
     # Clean up
-    rm_cmd = f'rm -f {args.outdir}/mir.bed {args.outdir}/mir.gff3'
-    subprocess.run(rm_cmd, shell=True)
+    #rm_cmd = f'rm -f {args.outdir}/mir.bed {args.outdir}/mir.gff3'
+    #subprocess.run(rm_cmd, shell=True)
 
 def get_reads_by_chrom(bamfile):
     st_args = (['samtools', 'idxstats', bamfile])
