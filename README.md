@@ -6,7 +6,7 @@ Alignment of small RNA-seq data and annotation of small RNA-producing genes
 # Author
 Michael J. Axtell, Penn State University, mja18@psu.edu
 
-# IMPORTANT CHANGE - Condsensed Reads
+# IMPORTANT CHANGE - Condensed Reads
 As of version 4.1.0 ShortStack creates and uses "condensed reads" for alignments. This speeds things up and keeps file sizes smaller. But it requires some upgrades and some understanding. Ensure that `strucVis` version is >= 0.9 and `ShortTracks` version is >= 1.2. This is enforced by bioconda but users who manually install will need to upgrade. See [Outputs](#outputs) and [Overview of Methods](#overview-of-methods) for more about condensed reads.
 
 # Table of Contents
