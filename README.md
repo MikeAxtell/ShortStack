@@ -6,6 +6,9 @@ Alignment of small RNA-seq data and annotation of small RNA-producing genes
 # Author
 Michael J. Axtell, Penn State University, mja18@psu.edu
 
+# IMPORTANT CHANGE - Condsensed Reads
+As of version 4.1.0 ShortStack creates and uses "condensed reads" for alignments. This speeds things up and keeps file sizes smaller. But it requires some upgrades and some understanding. Ensure that `strucVis` version is >= 0.9 and `ShortTracks` version is >= 1.2. This is enforced by bioconda but users who manually install will need to upgrade. See [Outputs](#outputs) and [Overview of Methods](#overview-of-methods) for more about condensed reads.
+
 # Table of Contents
 - [Citations](#citations)
 - [Installation](#installation)
@@ -55,29 +58,25 @@ conda install shortstack
 
 ## Manual installation
 
-Create an environment that contains the following packages / tools compiled and installed:
+Create an environment that contains the following packages / tools compiled and installed. *Make note of required versions! (last updated for ShortStack release 4.1.0)*
 
-- `python` >= 3.10.8 <https://www.python.org>
-- `samtools` >= 1.16 <https://www.htslib.org>
+- `python` >= 3.12.3 <https://www.python.org>
+- `samtools` >= 1.20 <https://www.htslib.org>
 - `bowtie` >= 1.3.1 <https://bowtie-bio.sourceforge.net/index.shtml>
 - viennarna 2.* <https://www.tbi.univie.ac.at/RNA/documentation.html>
 - `tqdm` <https://tqdm.github.io>
 - `numpy` <https://numpy.org>
 - biopython <https://biopython.org>
-- `strucVis` <https://github.com/MikeAxtell/strucVis>
-- `ShortTracks` <https://github.com/MikeAxtell/ShortTracks>
-- `bedtools` <https://bedtools.readthedocs.io/en/latest/>
-- `cutadapt` <https://cutadapt.readthedocs.io/en/stable/>
+- `strucVis` >= 0.9 <https://github.com/MikeAxtell/strucVis>
+- `ShortTracks` >= 1.2 <https://github.com/MikeAxtell/ShortTracks>
+- `bedtools` >= 2.31.1 <https://bedtools.readthedocs.io/en/latest/>
+- `cutadapt` >= 4.9 <https://cutadapt.readthedocs.io/en/stable/>
 
 Then, download the `ShortStack` script from this github repo. Make it executable `chmod +x ShortStack` and then copy it into your environment's PATH.
 
 # Usage
 ```
-ShortStack [-h] [--version] --genomefile GENOMEFILE [--known_miRNAs KNOWN_MIRNAS]
-    (--readfile [READFILE ...] | --bamfile [BAMFILE ...]) [--outdir OUTDIR] [--adapter ADAPTER | --autotrim]
-    [--autotrim_key AUTOTRIM_KEY] [--threads THREADS] [--mmap {u,f,r}] [--align_only] [--show_secondaries]
-    [--dicermin DICERMIN] [--dicermax DICERMAX] [--locifile LOCIFILE | --locus LOCUS] [--nohp] [--dn_mirna]
-    [--strand_cutoff STRAND_CUTOFF] [--mincov MINCOV] [--pad PAD] [--no_bigwigs]
+ShortStack [-h] [--version] --genomefile GENOMEFILE [--known_miRNAs KNOWN_MIRNAS] (--readfile [READFILE ...] | --bamfile [BAMFILE ...]) [--outdir OUTDIR] [--adapter ADAPTER | --autotrim] [--autotrim_key AUTOTRIM_KEY] [--threads THREADS] [--mmap {u,f,r}] [--align_only] [--dicermin DICERMIN] [--dicermax DICERMAX] [--locifile LOCIFILE | --locus LOCUS] [--nohp] [--dn_mirna] [--strand_cutoff STRAND_CUTOFF] [--mincov MINCOV] [--pad PAD] [--make_bigwigs]
 ```
 
 ## Required
@@ -108,7 +107,6 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--known_miRNAs KNOWN_MIRNAS
     - `f` : Fractional weighting scheme for placement of multi-mapped reads.
     - `r` : Multi-mapped read placement is random.
 - `--align_only` : This switch will cause ShortStack to terminate after the alignment phase; no analysis occurs.
-- `--show_secondaries` : If this switch is set, ShortStack will retain secondary alignments for multimapped reads. This will increase bam file size, possibly by a lot.
 - `--dicermin DICERMIN` : An integer setting the minimum size (in nucleotides) of a valid small RNA. Together with `--dicermax`, this option sets the bounds to discriminate Dicer-derived small RNA loci from other loci. >= 80% of the reads in a given cluster must be in the range indicated by `--dicermin` and `--dicermax`.
     - default: 21
 - `--dicermax DICERMAX` : An integer setting the minimum size (in nucleotides) of a valid small RNA. Together with `--dicermin`, this option sets the bounds to discriminate Dicer-derived small RNA loci from other loci. >= 80% of the reads in a given cluster must be in the range indicated by `--dicermin` and `--dicermax`.
@@ -123,7 +121,7 @@ ShortStack [-h] [--version] --genomefile GENOMEFILE [--known_miRNAs KNOWN_MIRNAS
     - default: 1
 - `--pad PAD` : Initial peaks (continuous regions with depth exceeding argument `--mincov`) are merged if they are this distance or less from each other. Must be an integer >= 1. 
     - default: 200
-- `--no_bigwigs` : Disable creation of bigwig files from sRNA-seq alignments. Applies only when performing alignments via input to `--readfile`.
+- `--make_bigwigs` : Enable creation of bigwig files from sRNA-seq alignments. Applies only when performing alignments via input to `--readfile`.
 
 # Resources
 ## Memory
@@ -177,7 +175,7 @@ This example is a full run. It takes 3 raw (untrimmed) readfiles, identifies the
 ShortStack --genomefile Arabidopsis_thalianaTAIR10.fa --readfile SRR3222443.fastq SRR3222444.fastq SRR3222445.fastq --autotrim --threads 6 --outdir ExampleShortStackRun --known_miRNAs ath_known_miRNAs.fasta
 ```
 
-On my laptop this completes in about 18 minutes. All results are in the directory specified by `--outdir`, "ExampleShortStackRun". The outputs are described in the section below called "Outputs".
+On my compute cluster using 6 threads this completes in about 9 minutes. All results are in the directory specified by `--outdir`, "ExampleShortStackRun". The outputs are described in the section below called "Outputs".
 
 # Outputs
 ## Results.txt
@@ -207,6 +205,9 @@ A tab-delimited text file giving key information for all small RNA clusters. Col
 ## Counts.txt
 A tab-delimited text file giving the raw alignment counts for each locus in each separate sample. Only produced if there was more than one sRNA-seq file used to create alignments. This file is useful for downstream analyses, especially differential expression analysis.
 
+## autotrim_details.tsv
+If ShortStack trimmed the reads, details about the trim process are stored in this file. Input_reads and Output_reads tally the total number of reads in those two categories. Reads that were NOT output were either too short after trimming or no adapter was found ("Too_short_reads" and "No_adapter_reads", respectively).
+
 ## alignment_details.tsv
 A tab-delimited text file that gives details about small RNA-seq alignments as a function of mapping type, read length, and sample. This can be useful for plotting purposes and subsequent quality control of small RNA-seq data. It is only produced if alignments are performed.
 - *mapping_type*
@@ -230,14 +231,58 @@ The directory `strucVis/` contains visualizations of each locus that was annotat
 ## mir.fasta
 This is a FASTA formatted file containing hairpin, mature miRNA, and miRNA* sequences derived from ShortStack's identification of *MIRNA* loci. These are genomic sequences, and the genomic coordinates are noted in the FASTA header. ShortStack's determination of mature miRNA vs. miRNA* strands is based on abundance of alignments at that particular locus. These designations may not always be accurate for an entire *MIRNA* family .. sometimes one paralog can attract most of the true mature miRNA alignments, leaving the other paralogs with mostly true miRNA* alignments. Take care when performing annotations.
 
-## .fastq(.gz) file(s)
-If raw reads were trimmed by ShortStack, the trimmed fastq files will be found. The names will have a lower-cased 't' appended to the front to signify "trimmed". If the input files were .gz compressed, then the trimmed files will be too.
+## Trimmed and condensed readfiles (fasta formatted)
+If raw reads were trimmed by ShortStack, they will also have been "condensed" and then written to FASTA formatted files. Read condensation writes a single unique sequence just once, regardless of how many reads had that sequence in the original input. The read depth is noted in the condensed sequence FASTA header. The names will have a lower-cased 't' appended to the front to signify "trimmed", and "_condensed" to indicate that they were condensed such that each unique sequence is only written once. If the input files were .gz compressed, then the trimmed files will be too.
+
+Example of condensed format:
+```
+>tSRR3222443_Cd1482943_509066
+TCGGACCAGGCTTCATTCCCC
+```
+
+- `tSRR3222443` : Prefix specific for the input read file. The `t` indicates trimmed.
+- `Cd1482943` : `Cd` means "condensed". The integer after is a unique integer within that file.
+- `_509066` : The trailing integer that represents the total number of reads that have this sequence. In this case, 509,066 reads with this sequence.
 
 ## .bam file(s)
 If the ShortStack run was aligning reads, one or more `.bam` files will be found. The bam format stores large scale alignment data. Corresponding bam index files (`.bam.csi`) will also be found. 
+- *IMPORTANT* : As of ShortStack release 4.1.0, bam files will be written using condensed reads. This saves file space and has other advantages during processing. HOWEVER, the bam files containing condensed reads CANNOT be used naively to calculate read depth. Each alignment of a condensed sequence has one line in the BAM file. However, that condensed sequence may have had more than one read placed at that position. See the format details below:
+
+### bam/sam format for ShortStack >= 4.1.0 condensed reads
+ShortStack and bowtie both add several optional SAM tags to alignment lines. 
+
+| Tag | Type | Source | Meaning |
+| --- | ---- | ----- | ------- | 
+| XA:i:\<int> | integer | bowtie | Aligned sequence belongs to stratum \<int> |
+| MD:Z:\<S> | string | bowtie | String representation of the mismatched reference bases in the alignment. See SAM format specification for details |
+| NM:i:\<int> | integer | bowtie | Edit distance to the reference |
+| XM:i:\<int> | integer | bowtie | For a read with no reported alignments, <N> is 0 if the read had no alignments. If -m was specified and the read’s alignments were suppressed because the -m ceiling was exceeded, <N> equals the -m ceiling + 1, to indicate that there were at least that many valid alignments (but all were suppressed). In -M mode, if the alignment was randomly selected because the -M ceiling was exceeded, <N> equals the -M ceiling + 1, to indicate that there were at least that many valid alignments (of which one was reported at random). ShortStack uses bowtie `-k` of 12 and does not set `-m`.
+| XX:i:\<int> | integer | ShortStack | Total number of possible alignment positions in this genome |
+| XY:Z:\<S> | string | ShortStack | A single letter that notes the type of placement that ShortStack made: `U`: Sequence was uniquely aligned to this location in the genome. `P`: Sequence was multimapped to the genome and at least some of it's reads were placed here using ShortStack's multi-mapping read algorithm. `R`: Sequence was multimapped to the genome and it's placements on the genome were randomly picked. `H`: Sequence was very highly multimapped to the genome (>= 20 hits). Read allocation was random and only 20 of the possible locations were even considered. `N`: Sequence was not mapped at all to the reference genome.
+| XZ:f:\<F>| floating point number | ShortStack | Fraction of the reads for this sequence that were allocated to this alignment position. For sequences with XY:Z type `P`, this reflects the multi-mapping algorithm's judgement on read allocation. For sequences with XY:Z type `R` or `H`, this is an equal split with all other alignment positions. For sequences with XY:Z type `U` or `N`, this will be 1, because 100% of the reads are allocated to this position.
+| YS:Z:\<S> | string | ShortStack | String describing the sequence length category. Possible categories are `<21` , `21`, `22`, `23`, `24`, and `>24`.
+| XW:i:\<int> | integer | ShortStack | Count of reads of this sequence that were allocated to this alignment position |
+| RG:\<Z> | string | bowtie | Read-group name. This will be set when more than one file of reads was input to alignments. |
+
+### Understanding multi-mapped condensed sequences using bam tags
+
+Here's a condensed sequence that was multimapped and positions assigned using ShortStack's multi-mapping algorithm: `tSRR3222443_Cd1482943_509066`. As described above, this sequence was observed for 509,066 of the original reads. There are 7 total lines in the bam file that list this sequence. The key information is below:
+
+| Chromosome | Position | XX:i | XY:Z | XZ:f | XW:i |
+| --- | --- | --- | --- | --- | --- | 
+| 2 | 19176241 | 7 | P | 0.995 | 506593 |
+| 3 | 22922301 | 7 | P | 0 | 73 |
+| 5 | 2838737 | 7 | P | 0 | 73 |
+| 5 | 2840708 | 7 | P | 0 | 72 |
+| 5 | 16775524 | 7 | P | 0 | 73 |
+| 5 | 17516378 | 7 | P | 0.004 | 2109 |
+| 5 | 25504882 | 7 | P | 0 | 73 |
+
+We see that this sequence had seven possbile alignment positions (XX:i = 7) and that ShortStack used it's multi-mapper algorithm to allocate the reads (XY:Z = P). ShortStack thought that most of these reads, 99.5% of them (XZ:f = 0.995), belonged at the chromosome 2 location. This is 506,593 of the reads (XW:i = 506,593). 0.04% of the reads (2109) were placed at chromosome 5:17516378, and small numbers of reads (72 to 73) allocated to the others. Note that the XZ:f numbers are rounded to three decimal places, so a value of '0' is actually a quite small fraction in this example.
+
 
 ## .bw (bigwig) files
-If the ShortStack run was aligning reads, multiple `.bw` files in the [bigwig format](https://genome.ucsc.edu/goldenpath/help/bigWig.html) will be produced. These bigwig files are produced by the program [ShortTracks](https://github.com/MikeAxtell/ShortTracks) and are useful for visualizing data on genome browsers (in particular [JBrowse2](https://jbrowse.org/jb2/)). The scales of the bigwig files are normalized to reads per million; thus, multiple tracks can be compared.
+If the ShortStack run was aligning reads AND option `--make_bigwigs` was set, multiple `.bw` files in the [bigwig format](https://genome.ucsc.edu/goldenpath/help/bigWig.html) will be produced. These bigwig files are produced by the program [ShortTracks](https://github.com/MikeAxtell/ShortTracks) and are useful for visualizing data on genome browsers (in particular [JBrowse2](https://jbrowse.org/jb2/)). The scales of the bigwig files are normalized to reads per million; thus, multiple tracks can be compared.
 
 Types of bigwig files produced by ShortStack:
 - readlength/stranded: A set of 8 `.bw` files with suffixes in the format `_x_y.bw`
@@ -252,16 +297,34 @@ The README for [ShortTracks](https://github.com/MikeAxtell/ShortTracks) has deta
 Loci annotated as *MIRNA* can be visualized from the `srucVis/` files. These show the predicted RNA secondary structures with the small RNA-seq read depth coverage.
 
 ## Genome Browsers
-The output of ShortStack is designed to work with genome browsers. Specifically, the files `Results.gff3`, `known_miRNAs.gff3`, the `.bam` files, and the `.bw` files can be directly visualized on either major genome browser (IGV, JBrowse).
+The output of ShortStack is designed to work with genome browsers. Specifically, the files `Results.gff3`, `known_miRNAs.gff3`, the `.bam` files, and the optional `.bw` files can be directly visualized on either major genome browser (IGV, JBrowse).
 
 [JBrowse2](https://jbrowse.org/jb2/) has the ability to create "multi-wiggle" tracks. These tracks show multiple quantitative data tracks at once, bound to a common quantitative axis. The `.bw` bigwig files created by ShortStack & ShortTracks are normalized to reads-per-million, allowing direct comparisons in a multi-wiggle track. This allows visualization of size, coverage, and strandedness of the data. See the README for [ShortTracks](https://github.com/MikeAxtell/ShortTracks) for details. I recommend using the Desktop version of [JBrowse2](https://jbrowse.org/jb2/).
 
 # Overview of Methods
+## Indexing
+Two types of genome indices are required. The first is an `.fai` index, created by `samtools faidx`. The second is a `bowtie` index of the genome file, which comprises several files ending with `.ebwt` or `.ebwtl`. If either index is missing, ShortStack will attempt to create it. The bowtie index is created using the `bowtie-build` executable from `bowtie` using default settings and the number of threads given by the `--threads` argument. Any index files created by ShortStack are written to the same location as the `--genomefile`.  Therefore, the `--genomefile` should be located in a writable directory if the required indices are not already built at the start of the run.
+
 ## Read trimming
 Read trimming using `--autotrim` assumes that the input FASTQ data comes from forward strand sequence reads where the first letter of the read corresponds to the first nucleotide of the sense-strand small RNA. Read trimming seeks to first identify the 3' adapter sequence used in the FASTQ file, and then to use the tool `cutadapt` to remove the adapters. Using the recommended `--autotrim` setting, the sequence of the 3' adapter is automatically detected. This is accomplished by looking for reads that begin with an `--autotrim_key`, which by default is the miR166 sequence 'TCGGACCAGGCTTCATTCCCC'. The adapter is inferred by looking at the sequences that follow the `--autotrim_key`. The `cutadapt` settings used for read trimming are `cutadapt -a [adapter] -o [tInput.fastq] -j [--threads] --discard-untrimmed -m 12 --report minimal [Input.fastq]`. These settings discard untrimmed reads (where no adapter was found), and only retained reads that, after trimming, are at least 12 nucleotides long.
 
-## Indexing
-Two types of genome indices are required. The first is an `.fai` index, created by `samtools faidx`. The second is a `bowtie` index of the genome file, which comprises several files ending with `.ebwtl`. If either index is missing, ShortStack will attempt to create it. The bowtie index is created using the `bowtie-build` executable from `bowtie` using default settings and the number of threads given by the `--threads` argument. Any index files created by ShortStack are written to the same location as the `--genomefile`.  Therefore, the `--genomefile` should be located in a writable directory if the required indices are not already built at the start of the run.
+## Read condensation
+*New as of ShortStack 4.1.0* :: Small RNA-seq data often contain multiple reads with the same sequence. These are often microRNAs or siRNAs that were highly abundant in the sample. "Read condensation" refers to the process of condensing the input for alignment such that each unique sequence is only represented once in the condensed FASTA file. Suppose the sequence TCGGACCAGGCTTCATTCCCC was the sequence for 509,066 reads. Instead of repetitively writing, and aligning, the same sequence over and over we can instead write a single FASTA entry. Example of condensed format:
+```
+>tSRR3222443_Cd1482943_509066
+TCGGACCAGGCTTCATTCCCC
+```
+
+- `tSRR3222443` : Prefix specific for the input read file. The `t` indicates trimmed.
+- `Cd1482943` : `Cd` means "condensed". The integer after is a unique integer within that file.
+- `_509066` : The trailing integer that represents the total number of reads that have this sequence. In this case, 509,066 reads with this sequence.
+
+Using read condensation has several advantages:
+- Speeds up alignments
+- Reduces file sizes of temporary files and of the final BAM files.
+
+However, there is a pitfall:
+- BAM files are *no longer* one alignment = one read. Read depth must be inferred from the XW:i tags in the bam file. Use extreme caution with analysis of these bam files made with 'condensed' reads. 
 
 ## Alignments
 Alignment of trimmed fastq data uses `bowtie`. There are usually two phases to alignment. In the first phase reads are mapped to the genome using bowtie settings `bowtie -p [--threads] -v 1 -k 50 -S --best --strata -x [--genomefile] [trimmedFASTQ]`. This allows zero or one mismatch hits, keeping only the zeroes if both zero and one-hit cases exist. All hits up to a maximum of 50 are stored for multi-mapping reads. In the second phase a single location for each of the multimapping reads is decided upon. This decision is made by one of the three possible methods set by `--mmap` : u, f, or r. Setting u uses a local weighting scheme set by only the uniquely mapping alignments in an area. Setting f uses a local weighting scheme that includes both the unique and multi-mapped possibilities in an area. Setting r just randomly takes one of the possible location as the reported one. These methods are fully described in [Johnson et al., 2016](https://doi.org/10.1534/g3.116.030452). Each individual FASTQ file is processed and converted to a sorted BAM file. If more than one FASTQ file was input, a single sorted merged file, `merged_alignments.bam` is created.
@@ -273,7 +336,8 @@ Genomic intervals where the depth of small RNA coverage, in reads-per-million, i
 *MIRNA* annotation has two entry points for initial searches: Locations of aligned user-provided sequences from `--known_miRNAs` and, if option `--dn_mirna` is True, any 21 or 22 nt read whose abundance exceeds the depth of `--mincov`. From these initial starting points, ShortStack first examines the local region to find miR/miR-star-like patterns of read accumulation (essentially, "two-peaks" of read coverage on the same genomic strand that might correspond to the miR/miR-star pair). If such a pattern is found, the RNA secondary structure in the local area is predicted. The sRNA-seq alignments in conjunction with the predicted RNA secondary structure are analyzed with respect to the criteria in [Axtell and Meyers, 2018](https://doi.org/10.1105/tpc.17.00851). If the criteria are met, the locus is annotated as a *MIRNA*.
 
 # How to go FAST
-- If performing alignments, set `mmap` to `r` and use option `--no_bigwigs`. Setting `mmap r` means that multi-mapped reads will just be placed using a random-guess instead of the weighted method described by [Johnson et al. (2016)](https://doi.org/10.1534/g3.116.030452). The slower, weighted methods are slower but more accurate. Setting `--no_bigwigs` prevents the use of `ShortTracks` to create genome browser track files of the sRNA-seq alignments.
+ShortStack is already pretty fast. But if you want more speed, try:
+- If performing alignments, set `mmap` to `r`. Setting `mmap r` means that multi-mapped reads will just be placed using a random-guess instead of the weighted method described by [Johnson et al. (2016)](https://doi.org/10.1534/g3.116.030452). The slower, weighted methods are slower but more accurate. 
 - Use more `--threads` as your system allows. Up to 10 or 20. Be sure to allocate enough total memory (about 8-10GB RAM per thread, maybe higher for large genomes).
 - Use a better reference genome: Highly fragmented genome assemblies are much slower than well-assembled genomes.
 
@@ -290,6 +354,7 @@ ShortStack version 4 is a major update. The major changes are:
 - *MIRNA* locus identification has been thoroughly changed to increase sensitivity while maintaining specificity.
 - *MIRNA* locus identification can now be guided by user-provided 'known RNAs'. In contrast, truly *de novo* annotation of *MIRNA* loci, in the absence of matching the sequence of a 'known RNA' is disabled by default. This change in philosophy acknowledges that, in most well-studied organisms, most high-confidence microRNA families are already known.
 - Change the license to MIT from GPL3.
+- (As of version 4.1.0) Implement use of condensed reads for global speed up and reduced file sizes.
 
 ## Option changes:
 - Drop support for cram format (options `--cram`, `--cramfile`  eliminated)
@@ -307,7 +372,9 @@ ShortStack version 4 is a major update. The major changes are:
 - Added options `--autotrim` and `--autotrim_key`. This allows automatic detection of 3' adapters by tallying the most common sequence that occurs after a known, highly abundant small RNA (given by `autotrim_key`).
 - Add option `--known_miRNAs`. Provide a FASTA file of known mature small RNA sequences to search for and to nucleate searches for qualifying *MIRNA* loci.
 - Add option `--dn_mirna`. The `--dn_mirna` activates a *de novo* search for *MIRNA* loci independent of those that align to the 'known RNAs' provided by the user. By default, `--dn_mirna` is not active.
-
+- Remove option `--show_secondaries` (as of 4.1.0)
+- Remove option `--no_bigwigs` (as of 4.1.0)
+- Add option `--make_bigwigs` (as of 4.1.0)
 
 # Issues
 Please post issues, comments, bug reports, questions, etc. to the project github page at <https://github.com/MikeAxtell/ShortStack>.
@@ -336,5 +403,6 @@ conda create --name ShortStack4
 conda activate ShortStack4
 conda install shortstack=4.0.1
 ```
-
+- **Strange errors**
+    - Check that all dependencies are up to date. In particular, look at `samtools`. ShortStack requires a modern `samtools` version. Use of old versions of `samtools` can cause cryptic errors. Currently, `samtools` >= 1.20 is required. This is noted here in the README. It is also enforced in the bioconda recipe. You can check the versions of dependencies that ShortStack requires at the [bioconda recipe here](https://github.com/bioconda/bioconda-recipes/blob/master/recipes/shortstack/meta.yaml).
 

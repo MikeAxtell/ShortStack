@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-version = '4.0.4'
+version = '4.1.0'
 
 # Main script / control is at the BOTTOM of this file
 
@@ -85,7 +85,7 @@ def locifile_parse(locifile, fai, ext):
     Requires modules csv, re, sys.
     """
     # comment lines, track lines, and browser lines will be silently ignored.
-    badline = re.compile('^#|^track\s|^browser\s')
+    badline = re.compile(r'^#|^track\s|^browser\s')
     # patterns used for name parsing from gff files.
     gffID = re.compile('ID=([^;]+)')
     gffName = re.compile('Name=([^;]+)')
@@ -185,7 +185,7 @@ def loc_check_core(locus, fai):
     msg - An error message if the check fails. If passed, msg is None
     Requires module re.
     """
-    loc_pattern = re.compile('(^\S+):(\d+)-(\d+)$')
+    loc_pattern = re.compile(r'(^\S+):(\d+)-(\d+)$')
     if not loc_pattern.match(locus):
         msg = 'Invalid format'
         return msg
@@ -268,9 +268,9 @@ def check_executables(args):
         rqd.append('bowtie-build')
     
     # ShortTracks and wigToBigWig are required if user is aligning reads, 
-    # unless --no_bigwigs is set.
-    # So, if --readfile is not empty and no_bigwigs is not True
-    if (args.readfile is not None) and (args.no_bigwigs is not True):
+    # if --make_bigwigs is set.
+    # So, if --readfile is not empty and make_bigwigs is True
+    if (args.readfile is not None) and (args.make_bigwigs is True):
         rqd.append('ShortTracks')
         # Check for the unique executables that ShortTracks will need
         rqd.append('wigToBigWig')
@@ -289,6 +289,59 @@ def check_executables(args):
         else:
             msg = 'Required executable {0} : Not found!'.format(excbl)
             sys.exit(msg)
+    
+    # Special cases, version checks for strucVis and ShortTracks 
+    # to prevent hidden but bad errors with condensed reads
+    if 'strucVis' in rqd:
+        sv_v = subprocess.run('strucVis -v', shell=True, text=True, capture_output=True)
+        first_line = sv_v.stdout.splitlines()[0] if sv_v.stdout else ''
+        version_pattern = r'strucVis version (\d+\.\d+)'
+        match = re.search(version_pattern, first_line)
+        if match:
+            version_str = match.group(1)
+            major, minor = map(int, version_str.split('.'))
+            
+            # Create a version tuple for comparison
+            version_tuple = (major, minor)
+            
+            # Define the minimum required version tuple
+            min_version_tuple = (0, 9)
+            
+            if version_tuple < min_version_tuple:
+                msg = f'strucVis version {version_str} is not compatbile. Upgrade strucVis to version 0.9 or higher.'
+                sys.exit(msg)
+            #else:
+                #print(f'strucVis version found to be {version_str} and that is OK')
+        else:
+            #print("Version information not found.")
+            msg = f'strucVis version was not parsed correctly from {first_line}. Require strucVis version 0.9 or higher. Fatal error'
+            sys.exit(msg)
+    
+    if 'ShortTracks' in rqd:
+        st_v = subprocess.run('ShortTracks --version', shell=True, text=True, capture_output=True)
+        first_line = st_v.stdout.splitlines()[0] if st_v.stdout else ''
+        version_pattern = r'ShortTracks (\d+\.\d+)'
+        match = re.search(version_pattern, first_line)
+        if match:
+            version_str = match.group(1)
+            major, minor = map(int, version_str.split('.'))
+            
+            # Create a version tuple for comparison
+            version_tuple = (major, minor)
+            
+            # Define the minimum required version tuple
+            min_version_tuple = (1, 2)
+            
+            if version_tuple < min_version_tuple:
+                msg = f'ShortTracks version {version_str} is not compatbile. Upgrade ShortTracks to version 1.2 or higher.'
+                sys.exit(msg)
+            #else:
+                #print(f'ShortTracks version found to be {version_str} and that is OK')
+        else:
+            #print("Version information not found.")
+            msg = f'ShortTracks version was not parsed correctly from {first_line}. Require ShortTracks version 1.2 or higher. Fatal error'
+            sys.exit(msg)
+
 
 def valid_genomefile(x):
     """Tests existence and extension of --genomefile
@@ -426,7 +479,7 @@ def valid_locus(x):
     > then start. Used during argument parsing.
     Requires modules re and sys.
     """
-    loc_pattern = re.compile('(^\S+):(\d+)-(\d+)$')
+    loc_pattern = re.compile(r'(^\S+):(\d+)-(\d+)$')
     if not loc_pattern.match(x):
         msg='Invalid locus {0} - Must be in format Chr:start-stop'.format(x)
         sys.exit(msg)
@@ -464,7 +517,7 @@ def check_file_list_ext(file_list, exts_list):
 
     # compile a regex of the valid exts
     pattern = '$|'.join(exts_list) + '$'
-    pattern = pattern.replace('.', '\.')
+    pattern = pattern.replace('.', r'\.')
     ok_exts = re.compile(pattern)
 
     # check existence of each file, and then its extension
@@ -542,12 +595,6 @@ def ShortStack_argparse(ss_version):
                         help='If this switch is set, ShortStack quits after' +
                         ' performing alignments without any analyses' +
                         ' performed.')
-    parser.add_argument('--show_secondaries',
-                        action='store_true',
-                        help='If this switch is set, ShortStack will retain' +
-                        ' secondary alignments for multimapped reads.' +
-                        ' This will' +
-                        ' increase bam file size, possibly by a lot.')
     parser.add_argument('--dicermin',
                         default=21,
                         type=valid_dicer,
@@ -612,11 +659,10 @@ def ShortStack_argparse(ss_version):
         'exceeding argument mincov are merged if they are '+
         'this distance or less from each other. Must be an '+
         'integer >= 1. Default: 200')
-    parser.add_argument('--no_bigwigs',
+    parser.add_argument('--make_bigwigs',
                     action='store_true',
-                    help='If this switch is set then no bigwigs' +
-                    ' will be made from alignments. This will speed' +
-                    ' up the overall run.')
+                    help='If this switch is set then bigwigs' +
+                    ' will be made from alignments.')
 
     ### Options in perl ShortStack that are not yet implemented here
 
@@ -657,7 +703,7 @@ def start_message(args, version):
     pp = pprint.PrettyPrinter(indent=4)
     pp.pprint(vars(args))
 
-def align(args, fai, trimmed_files):
+def align(args, fai, condensed_files):
     """Entry point for ShortStack's alignment procedures.
 
     Input:
@@ -676,16 +722,19 @@ def align(args, fai, trimmed_files):
     """
     if args.bamfile is not None:
         # No alignment. But we need to check the user's provided file(s)
-        bam = check_user_bamfile(args, fai)
+        # REVISE check_user_bamfile needs to check for BAM type, condensed or not.
+        bam, bam_type = check_user_bamfile(args, fai)
         # Could still need bowtie indices if known_miRNAs is provided
         if args.known_miRNAs is not None:
             bowtie_indices(args)
         # Still need to compute number of primary reads in the file
-        n_reads = count_reads(bam, args.threads)
-        return bam, n_reads
+        # REVISE examine this function to ensure compliance with condensed format
+        n_reads = count_reads(bam, args.threads, bam_type)
+        return bam, n_reads, bam_type
     else:
         # Alignments imminent. Need to check for bowtie indices.
         bowtie_indices(args)
+        bam_type = 'condensed'
     
     print('')
     print('Beginning alignment phase')  
@@ -693,12 +742,13 @@ def align(args, fai, trimmed_files):
     # Initiate a tsv output file with details of mappings
     map_rpt_file = init_map_rpt(args)
 
-    for t_file in trimmed_files:
+    for c_file in condensed_files:
         print('')
         print(time.strftime("%a %d %b %Y %H:%M:%S %z %Z", time.localtime()))
-        print(f'Aligning {t_file}')
+        print(f'Aligning {c_file}')
         print(f'First pass alignment with bowtie using {str(args.threads)} threads')
-        (rs1_sam_files, al_dens) = al_pass_1(t_file, args)
+        
+        (rs1_sam_files, al_dens) = al_pass_1(c_file, args)
 
         # pass 2 - place multimappers using multiprocessing.
         print(f'Second pass - placing multimappers using {str(args.threads)} threads' +
@@ -741,7 +791,11 @@ def align(args, fai, trimmed_files):
         rs2_bam = '.bam'.join(rs2_sam.rsplit('.sam', 1))
         bam_conv_args = (['samtools', 'view', '-b', '--threads',
            str(args.threads), '--output', rs2_bam, rs2_sam])
+        
+        # testing
+        #print(f'About to execute {bam_conv_args}')
         rs2_bam_sp = subprocess.run(bam_conv_args)
+        
         if rs2_bam_sp.returncode != 0:
             sys.exit('FATAL: samtools view encountered an error!')
         rm_args = ['rm', '-f', rs2_sam]
@@ -785,7 +839,7 @@ def align(args, fai, trimmed_files):
         subprocess.run(idx_args)
 
         # ShortTracks x 2 : mode readgroup and mode readlength
-        if args.no_bigwigs is not True:
+        if args.make_bigwigs is True:
             print('')
             print('Creating browser tracks by readgroup using ShortTracks')
             callShortTracks(mb, 'readgroup', False)
@@ -793,17 +847,17 @@ def align(args, fai, trimmed_files):
             print('Creating browser tracks by readlength and strand using ShortTracks')
             callShortTracks(mb, 'readlength', True)
 
-        n_reads = count_reads(mb, args.threads)
-        return mb, n_reads
+        n_reads = count_reads(mb, args.threads, bam_type)
+        return mb, n_reads, bam_type
     else:
-        if args.no_bigwigs is not True:
+        if args.make_bigwigs is True:
             # ShortTracks x 1 : mode readlength
             print('')
             print('Creating browser tracks by readlength and strand using ShortTracks')
             callShortTracks(final_bams[0], 'readlength', True)
 
-        n_reads = count_reads(final_bams[0], args.threads)
-        return final_bams[0], n_reads
+        n_reads = count_reads(final_bams[0], args.threads, bam_type)
+        return final_bams[0], n_reads, bam_type
 
 def callShortTracks(bamfile, mode, stranded):
     cmd = f'ShortTracks --mode {mode} --bamfile {bamfile}'
@@ -820,55 +874,90 @@ def mapping_rpt(lib_counts, map_rpt_file, bamfile):
     Requires: Counter from collections
     """
 
-    prefixes = ['U', 'P', 'R', 'H', 'N']
+    prefixes = ['U', 'P', 'R', 'H', 'N',]
     suffixes = ['<21', str(21), str(22), str(23), str(24), '>24']
     ks = []
-    read_total = sum(lib_counts.values()) 
+    
+    seq_total = 0
+    read_total = 0
+    # read_total = sum(lib_counts.values()) 
     with open(map_rpt_file, "a") as fh:
         for p in prefixes:
             for s in suffixes:
                 k = p + s
+                rk = 'r' + k
+                seq_total += lib_counts[k]
+                read_total += lib_counts[rk]
                 o = (bamfile + '\t' + p + '\t' + s + '\t' + 
-                    str(lib_counts[k]) + '\n')
+                    str(lib_counts[k]) + '\t' + str(lib_counts[rk]) + '\n')
                 fh.write(o)
     u_sum = 0
+    ur_sum = 0
     for s in suffixes:
         k = 'U' + s
+        rk = 'r' + k
         u_sum += lib_counts[k]
-    u_perc = round(100 * (u_sum / read_total), 1)
-    print(f'Uniquely mapped (U) reads: {u_sum}/{read_total} ({u_perc}%)')
+        ur_sum += lib_counts[rk]
+    u_perc = round(100 * (u_sum / seq_total), 1)
+    ur_perc = round(100 * (ur_sum / read_total), 1)
+    print(f'Uniquely mapped (U):\n\tsequences: {u_sum}/{seq_total} ({u_perc}%)')
+    print(f'\treads: {ur_sum}/{read_total} ({ur_perc}%)')
 
     p_sum = 0
+    pr_sum = 0
     for s in suffixes:
         k = 'P' + s
+        rk = 'r' + k
         p_sum += lib_counts[k]
-    p_perc = round(100 * (p_sum / read_total), 1)
-    print('Multi-mapped reads placed (P) with guidance:' +
-        f' {p_sum}/{read_total} ({p_perc}%)')
+        pr_sum += lib_counts[rk]
+    p_perc = round(100 * (p_sum / seq_total), 1)
+    pr_perc = round(100 * (pr_sum / read_total), 1)
+    print(f'Multi-mapped placed with guidance (P):\n\tsequences:' +
+        f' {p_sum}/{seq_total} ({p_perc}%)')
+    print(f'\treads:' +
+        f' {pr_sum}/{read_total} ({pr_perc}%)')
     
     r_sum = 0
+    rr_sum = 0
     for s in suffixes:
         k = 'R' + s
+        rk = 'r' + k
         r_sum += lib_counts[k]
-    r_perc = round(100 * (r_sum / read_total), 1)
-    print('Multi-mapped reads randomly (R) placed:' +
-        f' {r_sum}/{read_total} ({r_perc}%)')
+        rr_sum += lib_counts[rk]
+    r_perc = round(100 * (r_sum / seq_total), 1)
+    rr_perc = round(100 * (rr_sum / read_total), 1)
+    print(f'Multi-mapped randomly placed (R):\n\tsequences:' +
+        f' {r_sum}/{seq_total} ({r_perc}%)')
+    print(f'\treads:' +
+        f' {rr_sum}/{read_total} ({rr_perc}%)')
     
     h_sum = 0
+    hr_sum = 0
     for s in suffixes:
         k = 'H' + s
+        rk = 'r' + k
         h_sum += lib_counts[k]
-    h_perc = round(100 * (h_sum / read_total), 1)
-    print('Very highly (H) multi-mapped reads (>=50 hits):' +
-        f' {h_sum}/{read_total} ({h_perc}%)')
+        hr_sum += lib_counts[rk]
+    h_perc = round(100 * (h_sum / seq_total), 1)
+    hr_perc = round(100 * (hr_sum / read_total), 1)
+    print(f'Very highly multi-mapped (>=20 hits)(H):\n\tsequences:' +
+        f' {h_sum}/{seq_total} ({h_perc}%)')
+    print(f'\treads:' +
+        f' {hr_sum}/{read_total} ({hr_perc}%)')
  
     n_sum = 0
+    nr_sum = 0
     for s in suffixes:
         k = 'N' + s
+        rk = 'r' + k
         n_sum += lib_counts[k]
-    n_perc = round(100 * (n_sum / read_total), 1)
-    print('Not mapped (N) reads (no hits):' +
-        f' {n_sum}/{read_total} ({n_perc}%)')
+        nr_sum += lib_counts[rk]
+    n_perc = round(100 * (n_sum / seq_total), 1)
+    nr_perc = round(100 * (nr_sum / read_total), 1)
+    print(f'Not mapped (no hits)(N):\n\tsequences:' +
+        f' {n_sum}/{seq_total} ({n_perc}%)')
+    print(f'\treads:' +
+        f' {nr_sum}/{read_total} ({nr_perc}%)')
  
 
 def init_map_rpt(args):
@@ -876,14 +965,14 @@ def init_map_rpt(args):
 
     """
     map_rpt_file = args.outdir + '/alignment_details.tsv'
-    topline = 'readfile\tmapping_type\tread_length\tcount'
+    topline = 'readfile\tmapping_type\tsequence_length\tsequence_count\tread_count'
     fh = open(map_rpt_file, "w")
     print(topline, file=fh)
     fh.close()
     return map_rpt_file
 
 def al_pass_2(rs1_file, al_dens, args, n):
-    """Placement of multimappers from a SAM file.
+    """Placement of multimappers from a SAM file of condensed reads
     
     Requires Counter from collections
     """
@@ -944,17 +1033,15 @@ def al_pass_2(rs1_file, al_dens, args, n):
 
     return(rs2_sam, lib_counters)
  
-def al_pass_1(t_file, args):
+def al_pass_1(c_file, args):
     """First pass aligment using bowtie.
 
     Input:
-    - t_file : file path to trimmed fastq(gz) file of reads to align.
-      might also be a fasta file, need to check
+    - c_file : file path to a condensed FASTA file. Might be .gz compressed.
     - args : The ShortStack arguments object.
 
     Output:
-    - rs1_sam_files : a list of read-sorted SAM files.
-    - al_dens : alignment density dictionary
+    - ??
     
     Requires:
     os
@@ -963,16 +1050,14 @@ def al_pass_1(t_file, args):
     re
     """
     # file paths and handles
-    (head, tail) = os.path.split(t_file)
+    (head, tail) = os.path.split(c_file)
     (root, ext) = os.path.splitext(tail)
 
-    # guard against extensions like .fastq.gz or .fq.gz ...
-    #  we don't want to name files with .fastq or .fq if they
-    #  aren't that format! Same for fasta.gz or fa.gz.
+    # guard against extensions like .fasta.gz or .fa.gz ...
 
-    fqlike = re.compile('\.fq$|\.fastq$|\.fasta$|\.fa$')
+    fqlike = re.compile(r'\.fq$|\.fastq$|\.fasta$|\.fa$')
     
-    fapat = re.compile('\.fasta$|\.fa$')
+    fapat = re.compile(r'\.fasta$|\.fa$')
 
     input_option = ''
 
@@ -996,8 +1081,8 @@ def al_pass_1(t_file, args):
 
     # bowtie arguments
     bt_args = (['bowtie', input_option, '-p', str(args.threads), '-v', '1',
-        '-k', '50', '-S', '--best', '--strata', '-x',
-        args.genomefile, t_file])
+        '-k', '20', '-S', '--best', '--strata', '-x',
+        args.genomefile, c_file])
     
     # bowtie subprocess, piping stdout 
     bt1 = subprocess.Popen(bt_args, stdout=subprocess.PIPE, 
@@ -1074,6 +1159,7 @@ def check_user_bamfile(args, fai):
 
     Output:
     bam - validated single bamfile path.
+    bam_type - verbose or condensed
 
     Requires subprocess, os, sys.
     """
@@ -1103,9 +1189,37 @@ def check_user_bamfile(args, fai):
     #pysam.index(bam)
     subprocess.run(f'samtools index -c {bam}', shell=True)
 
-    return bam
+    # Check the bam file to determine if it is condensed or not.
+    cmd = f'samtools view {bam} | head -n 1'
+    cmd_response = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, 
+    stderr=subprocess.PIPE, text=True)
+    samline = cmd_response.stdout
 
-######## end of old align.py functions
+    # testing
+    # print(f'cmd: {cmd} samline: {samline}')
+    samfields = samline.rstrip().split("\t") 
+
+    # condensed will have a read name ending in _Cd\d+_\d+ and will
+    #  have custom tag XW:i:
+    readname_pat = r'_Cd\d+_\d+'
+    tag_pat = r'XW:i'
+
+    rn_match = bool(re.search(readname_pat, samfields[0]))
+    tag_match = False
+    for sf in samfields[11:]:
+        tag_match = bool(re.match(tag_pat, sf))
+        if tag_match:
+            break
+    if tag_match and rn_match:
+        bam_type = 'condensed'
+    else:
+        bam_type = 'verbose'
+    
+    # testing
+    # print(f'rn_match {rn_match} tag_match {tag_match} bam_type {bam_type}')
+    # sys.exit()
+
+    return bam, bam_type
 
 def al_block_process2(lib_counters, al_dens, alignments, args, rs_sam2_fh):
     """Decide on multimappers and output final SAM lines
@@ -1120,20 +1234,29 @@ def al_block_process2(lib_counters, al_dens, alignments, args, rs_sam2_fh):
     Output:
     - lib_counters : updated
     
-    The XX, XY, XZ, and YS tags are added to the samlines as well
+    The XX, XY, XZ, YS, and XW tags are added to the samlines as well
 
     Requires module random
 
     """
     hits = len(alignments)
     xx_i = 'XX:i:' + str(hits)
+
+    # parse readname of condensed read to find num reads
+    rn_pattern = r'_Cd\d+_(\d+)'
+    samfields = alignments[0].rstrip().split('\t')
+    match = re.search(rn_pattern, samfields[0])
+    num_reads = int(match.group(1))
+
     # One hits are easy no matter what
     if hits == 1:
         # Could be mapped or unmapped
-        samfields = alignments[0].rstrip().split('\t')
+        # line below commented out because it will already have been done above.
+        # samfields = alignments[0].rstrip().split('\t')
         ys_z_v = get_ys_tag_v(samfields[9])
         ys_z = 'YS:Z:' + ys_z_v
         xz_f = 'XZ:f:' + '1.000'
+        xw_i = 'XW:i:' + str(num_reads)
         if int(samfields[1]) & 4:
             # Unmapped
             xy_z_v = 'N'
@@ -1144,14 +1267,14 @@ def al_block_process2(lib_counters, al_dens, alignments, args, rs_sam2_fh):
             xy_z_v = 'U'
             xy_z = 'XY:Z:' + xy_z_v
         # increment counters
-        # testing
         k = xy_z_v + ys_z_v
-        #print(k)
-        #print(lib_counters)
+        # rk is the read count instead of seq count
+        rk = 'r' + xy_z_v + ys_z_v
         lib_counters[k] += 1
+        lib_counters[rk] += num_reads
         # modify the alignment and output to SAM
         al_out = (alignments[0].rstrip() + '\t' + xx_i + '\t' +
-            xy_z + '\t' + xz_f + '\t' + ys_z + '\n')
+            xy_z + '\t' + xz_f + '\t' + ys_z + '\t' + xw_i + '\n')
         # print to file
         print(al_out, end='', file=rs_sam2_fh)
     else:
@@ -1167,12 +1290,40 @@ def al_block_process2(lib_counters, al_dens, alignments, args, rs_sam2_fh):
         else:
             (probs, xy_z_v) = get_mmap_probs(alignments, al_dens)
             xy_z = 'XY:Z:' + xy_z_v
-
+        
+        # Decide on distribution of read counts to each position.
+        distribution = [int(p * num_reads) for p in probs]
+        current_sum = sum(distribution)
+        remainder = num_reads - current_sum
+        indices = np.argsort(probs)[::-1]
+        for i in range(remainder):
+            distribution[indices[i % len(probs)]] += 1
+        
         ## Make a choice, using random.choices() with weighted choice
-        chosen = random.choices(alignments, weights=probs)[0]
+        # chosen = random.choices(alignments, weights=probs)[0]
 
-        ## Output .. are secondaries being output?
+        ## Output 
+        # lib counter for sequence is just done once, not in the loop below
+        ys_z_v = get_ys_tag_v(samfields[9]) # from the first alignment of the seq.
+        k = xy_z_v + ys_z_v
+        lib_counters[k] += 1
+
         for idx, al in enumerate(alignments):
+            xw_i = 'XW:i:' + str(distribution[idx])
+            # If 0 reads allocated to this position, no output, stop here
+            if distribution[idx] > 0:
+                xz_f = 'XZ:f:' + str(probs[idx])
+                samfields = al.rstrip().split('\t')
+                ys_z_v = get_ys_tag_v(samfields[9])
+                ys_z = 'YS:Z:' + ys_z_v
+                # counter for reads uses distribution[idx]
+                rk = 'r' + xy_z_v + ys_z_v
+                lib_counters[rk] += distribution[idx]
+                al_out = ('\t'.join(samfields) + '\t' + xx_i + '\t' +
+                    xy_z + '\t' + xz_f + '\t' + ys_z + '\t' + xw_i + '\n')
+                print(al_out, end = '', file=rs_sam2_fh)
+
+            """
             if (al == chosen) or (args.show_secondaries is True):
                 # output this one
                 samfields = al.rstrip().split('\t')
@@ -1195,17 +1346,16 @@ def al_block_process2(lib_counters, al_dens, alignments, args, rs_sam2_fh):
                     xy_z + '\t' + xz_f + '\t' + ys_z +'\n')
                 # print
                 print(al_out, end = '', file=rs_sam2_fh)
+                """
 
     return lib_counters    
 
-
- 
 def get_mmap_probs(alignments, al_dens):
     """Compute multi-mapped read probabilities at each of the possible sites
 
     Uses the alignment densities (al_dens) calculated earlier.
 
-    Returns a list of probabilities  and an xy_z value or either R or P.
+    Returns a list of probabilities  and an xy_z value or either H or P.
 
     """
     counts = []
@@ -1222,7 +1372,7 @@ def get_mmap_probs(alignments, al_dens):
         total += count
     if total > 0:
         probs = [round(x / total, 3) for x in counts] 
-        if len(alignments) < 50:
+        if len(alignments) < 20:
             xy_z_v = 'P'
         else:
             xy_z_v = 'H'
@@ -1231,7 +1381,7 @@ def get_mmap_probs(alignments, al_dens):
         probs = []
         for x in range(0, len(alignments)):
             probs.append(round(1/len(alignments), 3))
-        if len(alignments) < 50:
+        if len(alignments) < 20:
             xy_z_v = 'R'
         else:
             xy_z_v = 'H'
@@ -1275,15 +1425,21 @@ def al_block_process(al_dens, alignments, args, rs_sam_fh):
 
     """
     hits = len(alignments)
-    xx_alignments = []
+    xx_alignments = []  #???
+
     for al in alignments:
         samfields = al.rstrip().split('\t')
+        # parse the number of reads represented by this sequence from the seq name
+        rpattern = r'Cd\d+_(\d+)'
+        match = re.search(rpattern, samfields[0])
+        nreads = int(match.group(1))
         # Store in density dictionary if 1 hit or if method f so long as
         #  read was truly mapped
         if ((hits == 1) or (args.mmap == 'f')) and not int(samfields[1]) & 4:
             readbin = int(samfields[3]) // 50
             dkey = samfields[2] + ':' + str(readbin)
-            to_add = 1 / hits
+            #to_add = 1 / hits
+            to_add = nreads / hits
             al_dens[dkey] = al_dens.get(dkey, 0) + to_add
 
         print(al, end='', file=rs_sam_fh)
@@ -1314,7 +1470,7 @@ def find_adapter(fqfile, prefix, n):
     possible_fa_exts = ['.fa', '.fasta', '.fa.gz', '.fasta.gz']
     # compile a regex of the valid exts for fasta files
     pattern = '$|'.join(possible_fa_exts) + '$'
-    pattern = pattern.replace('.', '\.')
+    pattern = pattern.replace('.', r'\.')
     fa_exts = re.compile(pattern)
     if fa_exts.search(fqfile):
         format = 'fasta'
@@ -1396,32 +1552,50 @@ def trimmer(fqfile, adapter, args):
     # 1. determine trimmed file path (in the SS outdir)
     (head, tail) = os.path.split(fqfile)
     tfile = args.outdir + '/t' + tail
+
+    # 1a. deterime file path for trim report to append to
+    trfile = args.outdir + '/autotrim_details.tsv'
+
+    file_exists = os.path.isfile(trfile)
+    if not file_exists:
+        with open(trfile, "w") as tr:
+            tr.write('Input_file\tTrimmed_file\tAdapter\tInput_reads\tOutput_reads\tToo_short_reads\tNo_adapter_reads\n')
     
-    # 2. build the cutadapt call
-    
-    ca_args = ['cutadapt']
-    # check if stderr is tty. If it is, set option --quiet so that progress 
-    #  bars aren't printed to a file or stream or whatever.
-    if sys.stderr.isatty():
-        ca_args.append('--quiet')
-    ca_args = (['cutadapt', '-a', adapter, '-o', tfile, '-j', str(args.threads),
-    '--discard-untrimmed', '-m', '12', '--report', 'minimal', fqfile
-    ])
-    
-    # 3. execute the cutadapt job
-    print('')
-    print(f'Trimming readfile {fqfile} ...')
-    #ca = subprocess.run(args=ca_args, capture_output=True, text=True)
-    ca = subprocess.run(args=ca_args)
-    if ca.stdout is not None:
-        print(ca.stdout)
-    if ca.stderr is not None:
-        print(ca.stderr)
-    if ca.returncode == 0:
-        print(f'  Completed. Trimmed file is {tfile}.')
-        return tfile
-    else:
-        sys.exit('  FATAL: adapter trimming with cutadapt failed!')    
+    with open(trfile, "a") as tr:
+        # 2. build the cutadapt call
+        
+        ca_args = ['cutadapt']
+        # check if stderr is tty. If it is, set option --quiet so that progress 
+        #  bars aren't printed to a file or stream or whatever.
+        #if sys.stderr.isatty():
+        #    ca_args.append('--quiet')
+        ca_args = (['cutadapt', '-a', adapter, '-o', tfile, '-j', str(args.threads),
+        '--discard-untrimmed', '-m', '12', '--report', 'minimal', fqfile
+        ])
+        
+        # 3. execute the cutadapt job
+        print('')
+        print(f'Trimming readfile {fqfile} ...')
+        #ca = subprocess.run(args=ca_args, capture_output=True, text=True)
+        ca = subprocess.run(args=ca_args, capture_output=True, text=True)
+        if ca.stdout is not None:
+            #print(ca.stdout)
+            # this should be the minimal report to be parsed.
+            ca_fields = ca.stdout.splitlines()[1].split('\t')
+            ca_in_reads = ca_fields[1]
+            ca_too_short = ca_fields[3]
+            ca_out_reads = ca_fields[6]
+            ca_w_adapters = ca_fields[7]
+            no_adapters = str(int(ca_in_reads) - int(ca_w_adapters))
+            tr_out = fqfile + '\t' + tfile + '\t' + adapter + '\t' + ca_in_reads + '\t' + ca_out_reads + '\t' + ca_too_short + '\t' + no_adapters + '\n'
+            tr.write(tr_out)
+        if ca.stderr is not None:
+            print(ca.stderr)
+        if ca.returncode == 0:
+            print(f'  Completed. Trimmed file is {tfile}.')
+            return tfile
+        else:
+            sys.exit('  FATAL: adapter trimming with cutadapt failed!')    
 
 def bowtie_indices(args):
     """Check for and if necessary build bowtie indices
@@ -1486,7 +1660,7 @@ def get_trimmed(args):
     - args : The ShortStack argument object
 
     Output:
-    - trimmed_files : List of trimmed read files
+    - trimmed_files : List of trimmed read files, or empty.
 
     Requires:
     - time
@@ -1554,23 +1728,58 @@ def get_trimmed(args):
         elif args.readfile is not None:
             # no trimming at all .. trimmed_files are the user's readfile
             trimmed_files = args.readfile
+
         return trimmed_files
     else:
         sys.exit('Fatal: function get_trimmed must be called as __main__')
 
-def denovo_chrom(chrom, bamfile, args, min_reads):
+def denovo_chrom(chrom, bamfile, args, min_reads, bam_type, fai):
     #print(f'chrom {chrom} bamfile {bamfile}')
     #print(f'Starting to work on chrom {chrom}')
     ## Issue 151 ... the -g 256 had the OPPOSITE of my intended effect!
     #st_depth_args = (['samtools', 'depth', '-a', '-r', chrom,
     #    '-g', '256', bamfile])
-    st_depth_args = (['samtools', 'depth', '-a', '-r', chrom, bamfile])
-    st_depth = subprocess.Popen(st_depth_args, stdout=subprocess.PIPE,
-        text=True, bufsize=1)
-    reader = csv.reader(st_depth.stdout, delimiter="\t")
-    depth = []
-    for row in reader:
-        depth.append(int(row[2]))
+
+    if bam_type == 'verbose':
+        st_depth_args = (['samtools', 'depth', '-a', '-r', chrom, bamfile])
+        st_depth = subprocess.Popen(st_depth_args, stdout=subprocess.PIPE,
+            text=True, bufsize=1)
+        reader = csv.reader(st_depth.stdout, delimiter="\t")
+        depth = []
+        for row in reader:
+            depth.append(int(row[2]))
+    elif bam_type == 'condensed':
+        # initialize depth list with all zeroes
+        this_chrom_len = fai[chrom]
+        depth = [0] * this_chrom_len
+
+        # go through each samline in the chrom
+        # cmd = f'samtools view -F 256 {bamfile} {chrom}'
+        cmd = ['samtools', 'view', '-F', '256', bamfile, chrom]
+        sv = subprocess.run(cmd, text=True, stdout=subprocess.PIPE)
+        if sv.returncode == 0:
+            for samline in sv.stdout.splitlines():  
+                sf = samline.rstrip().split('\t')
+                idx = int(sf[3]) - 1 # turns pos into zero-based, to match depth[]
+                xwpat = r'\tXW:i:(\d+)'
+                xwsch = re.search(xwpat, samline)
+                if xwsch:
+                    reads = int(xwsch.group(1))
+                else:
+                    print('FATAL error in denovo_chrom: Could not parse XW')
+                    sys.exit()
+                end_idx = idx + len(sf[9])
+                for i in range(idx, end_idx):
+                    depth[i] += reads
+        else:
+            print('FATAL error in denovo_chrom: could not view bamfile')
+            sys.exit()
+        
+        # testing
+        # print(f'condensed denovo_chrom at chrom {chrom}')
+        # print(depth)
+        # sys.exit()
+
     #print(f'Ingested raw data for chrom {chrom}')
     depth_np = np.array(depth)
     #print('Created np array')
@@ -1600,7 +1809,7 @@ def denovo_chrom(chrom, bamfile, args, min_reads):
     # return file name
     return peaksbed
     
-def denovo_clusters(bamfile, args, fai, loci, read_count):
+def denovo_clusters(bamfile, args, fai, loci, read_count, bam_type):
     """Find clusters based on depth threshold and merging
     Inputs:
     - bamfile : path to indexed bamfile
@@ -1619,7 +1828,7 @@ def denovo_clusters(bamfile, args, fai, loci, read_count):
         user_bed = args.outdir + '/user.bed'
         ufh = open(user_bed, "w")
         for loc in loci:
-            loc_pattern = re.compile('(^\S+):(\d+)-(\d+)$')
+            loc_pattern = re.compile(r'(^\S+):(\d+)-(\d+)$')
             chr = loc_pattern.match(loc).group(1)
             start = int(loc_pattern.match(loc).group(2))
             stop = int(loc_pattern.match(loc).group(3))
@@ -1643,17 +1852,23 @@ def denovo_clusters(bamfile, args, fai, loci, read_count):
         # As an aid for highly-fragmented genomes with lots of low-coverage, short contigs,
         #  screen out any entries that simply can't qualify based on total
         #  reads aligned to the chromosome.
-        reads_by_chrom = get_reads_by_chrom(bamfile)
+        ## Update, possibility of condensed BAMs modifies this ...
+        ##   screen out chroms with 0 sequences aligned. Too expensive to 
+        ##   count reads-by-chrom with condensed reads.
+        seqs_by_chrom = get_seqs_by_chrom(bamfile)
 
         # loop through each chromosome using multithreading
         chroms = []
-        for chrom in reads_by_chrom:
-            if reads_by_chrom[chrom] >= min_reads:
+        for chrom in seqs_by_chrom:
+            # if reads_by_chrom[chrom] >= min_reads:
+            if seqs_by_chrom[chrom] > 0:
                 chroms.append(chrom)
         #chroms = fai.keys()
         dn_iter = list(zip(chroms, [bamfile] * len(chroms),
             [args] * len(chroms),
-            [min_reads] * len(chroms)))
+            [min_reads] * len(chroms),
+            [bam_type] * len(chroms),
+            [fai] * len(chroms)))
         #print(f'chroms: {chroms} dn_iter: {dn_iter}')
         with mp.Pool(args.threads) as pool:
             Ref_peak_beds = pool.starmap(denovo_chrom, 
@@ -1691,6 +1906,9 @@ def denovo_clusters(bamfile, args, fai, loci, read_count):
     subprocess.run(bt_merge_args, stdout=cluster_bed_fh)
     cluster_bed_fh.close()
 
+    # testing
+    # sys.exit()
+
     # clean up
     rm_args = ['rm', '-rf', all_peaks_bed]
     rm_args.extend(list(Ref_peak_beds[1:]))  ## removes the 'cat' that was tacked on above
@@ -1700,7 +1918,7 @@ def denovo_clusters(bamfile, args, fai, loci, read_count):
     # return file name
     return cluster_bed
 
-def quant(args, merged_bam, cluster_bed, mir_cutoff):
+def quant(args, merged_bam, cluster_bed, mir_cutoff, bam_type):
     """Calculate ShortStack quantification metrics from bed file
 
     Input:
@@ -1790,6 +2008,21 @@ def quant(args, merged_bam, cluster_bed, mir_cutoff):
             text=True, bufsize=1)
         reader = csv.reader(sv.stdout, delimiter="\t")
         for row in reader:
+            # determine reads based on bam_type
+            if bam_type == 'condensed':
+                tag_pat = r'XW:i:(\d+)'
+                tag_match = False
+                for sf in row[11:]:
+                    tag_match = re.match(tag_pat, sf)
+                    if tag_match:
+                        break
+                if tag_match:
+                    reads_on_this_line = int(tag_match.group(1))
+                else:
+                    print('FATAL error in quant: cant find an XW line')
+                    sys.exit()
+            elif bam_type == 'verbose':
+                reads_on_this_line = 1
             flag = int(row[1])
             pos = row[3]  # keep as string
             if flag & 16:
@@ -1798,21 +2031,27 @@ def quant(args, merged_bam, cluster_bed, mir_cutoff):
             else:
                 samseq = row[9].replace("T", "U")
                 strand = '+'
-            strand_count[strand] += 1
-            seqs[samseq] += 1
+            # strand_count[strand] += 1
+            strand_count[strand] += reads_on_this_line
+            # seqs[samseq] += 1
+            seqs[samseq] += reads_on_this_line
             if len(samseq) < args.dicermin:
-                seq_lens['Short'] += 1
+                # seq_lens['Short'] += 1
+                seq_lens['Short'] += reads_on_this_line
             elif len(samseq) > args.dicermax:
-                seq_lens['Long'] += 1
+                # seq_lens['Long'] += 1
+                seq_lens['Long'] += reads_on_this_line
             else:
-                seq_lens[str(len(samseq))] += 1
+                # seq_lens[str(len(samseq))] += 1
+                seq_lens[str(len(samseq))] += reads_on_this_line
             
             # Try to find a read group
             if rgs:
                 for field in reversed(row):
                     if rg_pattern.match(field):
                         this_rg = rg_pattern.match(field).group(1)
-                        rg_counts[this_rg] += 1
+                        # rg_counts[this_rg] += 1
+                        rg_counts[this_rg] += reads_on_this_line
                         break
 
             # tracking 21 and 22 nt reads for possible mir search
@@ -1826,7 +2065,8 @@ def quant(args, merged_bam, cluster_bed, mir_cutoff):
                 score = str(0)
                 k = (chrom, bstart, bend, name, score, strand)
                     #k = str(samseq) + ',' + row[2] + ',' + pos + ',' + strand
-                mir_count[k] += 1
+                #mir_count[k] += 1
+                mir_count[k] += reads_on_this_line
             #view_done_time = time.perf_counter_ns()
             #view_elapsed_time = view_done_time - start_time
             # filter the possible mirs based on mincov
@@ -1869,7 +2109,7 @@ def quant(args, merged_bam, cluster_bed, mir_cutoff):
                     quant_data[stcoords][rg] = 0
         else:
             quant_data[stcoords]['DistinctSequences'] = len(seqs)
-            quant_data[stcoords]['FracTop'] = strand_count['+'] / quant_data[stcoords]['Reads']
+            quant_data[stcoords]['FracTop'] = round(strand_count['+'] / quant_data[stcoords]['Reads'], 3)
             if hard_strand is not None:
                 quant_data[stcoords]['Strand'] = hard_strand
             elif quant_data[stcoords]['FracTop'] >= args.strand_cutoff:
@@ -1939,7 +2179,7 @@ def revcomp(seq):
     reverse_complement = "".join(complement.get(base, base) for base in reversed(seq))
     return reverse_complement
 
-def quant_controller (args, merged_bam, all_bed, read_count):
+def quant_controller (args, merged_bam, all_bed, read_count, bam_type):
     """Controls quant process using multithreading
 
     Input:
@@ -2002,7 +2242,8 @@ def quant_controller (args, merged_bam, all_bed, read_count):
 
         q_iter = list(zip([args] * len(chunk_files), 
             [merged_bam] * len(chunk_files), chunk_files,
-            [mir_cutoff] * len(chunk_files)))
+            [mir_cutoff] * len(chunk_files),
+            [bam_type] * len(chunk_files)))
         #print(q_iter)
         #sys.exit()
         with mp.Pool(processes=args.threads, 
@@ -2081,7 +2322,7 @@ def quant_controller (args, merged_bam, all_bed, read_count):
     else:
         sys.exit('Fatal: function quant_controller needs to be __main__ !')
 
-def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
+def mirna(args, merged_bam, fai, pmir_bedfile, read_count, bam_type):
     """Entry point into microRNA locus annotation
 
     Input:
@@ -2194,7 +2435,8 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
             with open(user_mir_bed_f) as f:
                 bedlines = f.read().splitlines()
             mir_iter = list(zip(bedlines, [args] * len(bedlines),
-            [merged_bam] * len(bedlines), [fai] * len(bedlines)))
+            [merged_bam] * len(bedlines), [fai] * len(bedlines),
+            [bam_type] * len(bedlines)))
             with mp.Pool(args.threads) as pool:
                 user_mloci1 = pool.starmap(mir_analysis,
                 tqdm(mir_iter, total=len(bedlines),
@@ -2262,7 +2504,8 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
                 with open(pmir_filt_bedfile) as f:
                     bedlines = f.read().splitlines()
                 mir_iter = list(zip(bedlines, [args] * len(bedlines),
-                [merged_bam] * len(bedlines), [fai] * len(bedlines)))
+                [merged_bam] * len(bedlines), [fai] * len(bedlines),
+                [bam_type] * len(bedlines)))
                 with mp.Pool(args.threads) as pool:
                     denovo_mloci1 = pool.starmap(mir_analysis,
                     tqdm(mir_iter, total=len(bedlines),
@@ -2314,7 +2557,7 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
     # call_strucVis(nr_passed_mir_bed, args, merged_bam)
 
     # call quant on the mirna loci
-    mir_qdata, junk = quant_controller(args, merged_bam, nr_passed_mir_bed, read_count)
+    mir_qdata, junk = quant_controller(args, merged_bam, nr_passed_mir_bed, read_count, bam_type)
 
     # Report n found to user NO NOT YET!
     # n_found = 0
@@ -2345,7 +2588,7 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count):
     # return the mir_qdata
     return mir_qdata
 
-def mir_analysis(bedline, args, merged_bam, fai):
+def mir_analysis(bedline, args, merged_bam, fai, bam_type):
     """Finding valid microRNA loci
 
     Inputs:
@@ -2368,7 +2611,7 @@ def mir_analysis(bedline, args, merged_bam, fai):
     # We only need to ask this if it is as user query,
     #  in which case the score column from bed format will be 0.
     if int(bedfields[4]) == 0:
-        q_exact_count = count_exact_location(bedfields, merged_bam, fai)
+        q_exact_count = count_exact_location(bedfields, merged_bam, fai, bam_type)
     else: 
         q_exact_count = int(bedfields[4])
 
@@ -2383,7 +2626,7 @@ def mir_analysis(bedline, args, merged_bam, fai):
 
     # Get the locus to fold, if any
     # Screens rapidly for strand cutoff and two peaks
-    mir_locus = get_mir_locus(bedfields, fai, args, merged_bam)
+    mir_locus = get_mir_locus(bedfields, fai, args, merged_bam, bam_type)
     if mir_locus == None:
         #print('TEST failed get_mir_locus')
         #new_bedline = new_bedline + '\tfailed_mir_locus'
@@ -2400,7 +2643,7 @@ def mir_analysis(bedline, args, merged_bam, fai):
     dotbracket = foldlines[2].rstrip().split(' ')[0]
 
     # Analyze the fold
-    new_locus, s_start, s_end = analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args, fai)
+    new_locus, s_start, s_end = analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args, fai, bam_type)
 
     # Will be None or not
     if new_locus is not None:
@@ -2416,7 +2659,7 @@ def mir_analysis(bedline, args, merged_bam, fai):
         s_bedfields = ([bedfields[0], str(s_start - 1), str(s_end), 
                         bedfields[3], bedfields[4], bedfields[5]])
         # Get the miR* counts
-        s_exact_count = count_exact_location(s_bedfields, merged_bam, fai)
+        s_exact_count = count_exact_location(s_bedfields, merged_bam, fai, bam_type)
         
         chr, start, stop = parse_locus(new_locus)
         mirbed = []
@@ -2513,7 +2756,7 @@ def precision_test(peaks, merged_bam, args, fai):
     return precision, st_loc
 
 
-def get_mir_locus(bedfields, fai, args, merged_bam):
+def get_mir_locus(bedfields, fai, args, merged_bam, bam_type):
     """Given bedfields, compute upstream and downstream intervals for miRNA folding
     Scans for strand and peaks, based on area-under-curve counts from samtools depth
 
@@ -2543,28 +2786,54 @@ def get_mir_locus(bedfields, fai, args, merged_bam):
     down_reg_stop = region_stop
     down_reg = str(chrom) + ':' + str(down_reg_start) + '-' + str(down_reg_stop)
 
-    # Only two calls against the bam file
-    # Retrieve depths across whole region irrespective of strand
-    depths_all = subprocess.run(f'samtools depth -a -r {reg} {merged_bam}', shell=True, 
-    text=True, capture_output=True)
+    if bam_type == 'verbose':
+        # Only two calls against the bam file
+        # Retrieve depths across whole region irrespective of strand
+        depths_all = subprocess.run(f'samtools depth -a -r {reg} {merged_bam}', shell=True, 
+        text=True, capture_output=True)
 
-    # Retrieve depths across whole region for only plus strand
-    depths_plus = subprocess.run(f'samtools depth -a -G 16 -r {reg} {merged_bam}', shell=True, 
-    text=True, capture_output=True)
+        # Retrieve depths across whole region for only plus strand
+        depths_plus = subprocess.run(f'samtools depth -a -G 16 -r {reg} {merged_bam}', shell=True, 
+        text=True, capture_output=True)
 
-    # Parse into dictionaries
-    da_lines = depths_all.stdout.split('\n')
-    dp_lines = depths_plus.stdout.split('\n')
-    da = {} # position => depth
-    dp = {} # position => depth
-    for da_line in da_lines:
-        if da_line:
-            fields = da_line.split('\t')
-            da[int(fields[1])] = int(fields[2])
-    for dp_line in dp_lines:
-        if dp_line:
-            fields = dp_line.split('\t')
-            dp[int(fields[1])] = int(fields[2])
+        # Parse into dictionaries
+        da_lines = depths_all.stdout.split('\n')
+        dp_lines = depths_plus.stdout.split('\n')
+        da = {} # position => depth
+        dp = {} # position => depth
+        for da_line in da_lines:
+            if da_line:
+                fields = da_line.split('\t')
+                da[int(fields[1])] = int(fields[2])
+        for dp_line in dp_lines:
+            if dp_line:
+                fields = dp_line.split('\t')
+                dp[int(fields[1])] = int(fields[2])
+    elif bam_type == 'condensed':
+        # First, initialize the dictionaries
+        da = {} # position => depth
+        dp = {} # position => depth
+        for i in range(region_start, (region_stop + 1)):
+            da[i] = 0
+            dp[i] = 0
+        
+        # One call to samtools view, then parse line by line
+        sv = subprocess.run(f'samtools view -F 256 {merged_bam} {reg}', 
+            shell = True, text=True, capture_output=True)
+        xwpat = r'\tXW:i:(\d+)'
+        for samline in sv.stdout.splitlines():
+            xwmatch = re.search(xwpat, samline)
+            nreads = int(xwmatch.group(1))
+            sf = samline.rstrip().split('\t')
+            pos = int(sf[3])
+            end_pos = pos + len(sf[9])
+            flag = int(sf[1])
+            for i in range(pos, (end_pos + 1)):
+                if i in da:
+                    da[i] += nreads
+                    if not flag & 16:
+                        dp[i] += nreads
+
     #print('da')
     #print(da)
     #print('')
@@ -2664,7 +2933,7 @@ def get_mir_locus(bedfields, fai, args, merged_bam):
     #print('FAILED 2 peaks')
     return None
 
-def count_exact_location(bedfields, merged_bam, fai):
+def count_exact_location(bedfields, merged_bam, fai, bam_type):
     """Checks a bed position to count exact reads
 
     Inputs:
@@ -2701,10 +2970,19 @@ def count_exact_location(bedfields, merged_bam, fai):
     
     mb_coords = (mir_chrom + ':' + str(mir_pos) + '-' +
         str(mir_pos))
-    mb = subprocess.run(f'samtools view -c {flag_filt} -e {st_expr} {merged_bam} {mb_coords}',
+    mb = subprocess.run(f'samtools view {flag_filt} -e {st_expr} {merged_bam} {mb_coords}',
     shell=True, capture_output=True, text=True)
-
-    read_count = int(mb.stdout.rstrip())
+    
+    read_count = 0
+    if bam_type == 'verbose':
+        read_count += int(len(mb.stdout.splitlines()))
+    elif bam_type == 'condensed':
+        xwpat = r'\tXW:i:(\d+)'
+        for samline in mb.stdout.splitlines():
+            xwmatch = re.search(xwpat, samline)
+            # testing
+            if xwmatch:
+                read_count += int(xwmatch.group(1))
     return read_count
 
 
@@ -2751,7 +3029,7 @@ def fold_mir_locus(mir_locus, args, bedfields, precision):
 def parse_locus(locus):
     # parse a locus in the samtools / ShortStack format
     # like chr:start-stop
-    loc_pattern = re.compile('(^\S+):(\d+)-(\d+)$')
+    loc_pattern = re.compile(r'(^\S+):(\d+)-(\d+)$')
     chr = loc_pattern.match(locus).group(1)
     start = int(loc_pattern.match(locus).group(2))
     stop = int(loc_pattern.match(locus).group(3))
@@ -2895,7 +3173,8 @@ def get_star_genomic(mir_locus, bedfields, s_rel_start, s_rel_stop):
         s_g_start = stop - s_rel_stop + 1
     return s_g_start, s_g_stop
 
-def compute_final_precision(merged_bam, s_gen_start, s_gen_stop, mir_locus, bedfields):
+def compute_final_precision(merged_bam, s_gen_start, s_gen_stop, mir_locus, bedfields, bam_type):
+    ## HERE HERE HERE
     q_win_start = int(bedfields[1])  # zero to one base conversion, add 1nt slop
     q_win_end = int(bedfields[2]) + 1 # one nt slop on the other side
     q_exp = f'\"pos >= {str(q_win_start)} && endpos <= {str(q_win_end)}\"'
@@ -2912,33 +3191,59 @@ def compute_final_precision(merged_bam, s_gen_start, s_gen_stop, mir_locus, bedf
         flag_filt = '-f 16 -F 256' # Issue 151
 
     # count reads in query window
-    q_count = subprocess.run(f'samtools view -c -e {q_exp} {flag_filt} {merged_bam} {mir_locus}', 
+    q_count = subprocess.run(f'samtools view -e {q_exp} {flag_filt} {merged_bam} {mir_locus}', 
     shell=True, capture_output=True, text=True)
 
     # count reads in star window
-    s_count = subprocess.run(f'samtools view -c -e {s_exp} {flag_filt} {merged_bam} {mir_locus}', 
+    s_count = subprocess.run(f'samtools view -e {s_exp} {flag_filt} {merged_bam} {mir_locus}', 
     shell=True, capture_output=True, text=True)
 
     # count total reads
     # t_count = subprocess.run(f'samtools view -c {merged_bam} {mir_locus}',
-    t_count = subprocess.run(f'samtools view -c -F 256 {merged_bam} {mir_locus}', # Issue 151
+    t_count = subprocess.run(f'samtools view -F 256 {merged_bam} {mir_locus}', # Issue 151
     shell=True, capture_output=True, text=True)
 
-    # Do the math
-    t_n = int(t_count.stdout.rstrip())
+    xwpat = r'\tXW:i:(\d+)'
+    not_empty_pat = r'\t'
+
+    t_n = 0
+    for tline in t_count.stdout.splitlines():
+        if bam_type == 'verbose':
+            nematch = re.search(not_empty_pat, tline)
+            if nematch:
+                t_n += 1
+        elif bam_type == 'condensed':
+            xwmatch = re.search(xwpat, tline)
+            t_n += int(xwmatch.group(1))
     if t_n == 0:
         return 0
-    
-    # has to be at least one star-ish read, regardless
-    s_n = int(s_count.stdout.rstrip())
+
+    s_n = 0
+    for sline in s_count.stdout.splitlines():
+        if bam_type == 'verbose':
+            nematch = re.search(not_empty_pat, sline)
+            if nematch:
+                s_n += 1
+        elif bam_type == 'condensed':
+            xwmatch = re.search(xwpat, sline)
+            s_n += int(xwmatch.group(1))
     if s_n == 0:
         return 0
 
-    q_n = int(q_count.stdout.rstrip())
+    q_n = 0
+    for qline in q_count.stdout.splitlines():
+        if bam_type == 'verbose':
+            nematch = re.search(not_empty_pat, qline)
+            if nematch:
+                q_n += 1
+        elif bam_type == 'condensed':
+            xwmatch = re.search(xwpat, qline)
+            q_n += int(xwmatch.group(1))
+
     precision = (q_n + s_n) / t_n
     return precision
 
-def analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args, fai):
+def analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args, fai, bam_type):
     """Assess a folded microRNA hairpin candidate  
     """
     # Get relative position of exact query on the dot brackets
@@ -3011,7 +3316,7 @@ def analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args, fai):
 
     # Compute the actual precision (based on miR* and the final locus coords)
     final_precision = compute_final_precision(merged_bam, s_gen_start, 
-    s_gen_stop, new_locus, bedfields)
+    s_gen_stop, new_locus, bedfields, bam_type)
     if final_precision < 0.75:
         return None, None, None
     else:
@@ -3483,7 +3788,7 @@ def get_read_groups(bam):
     rgs = []
     rg = subprocess.run(f'samtools view -H {bam} | grep \'@RG\'', 
     shell=True, text=True, capture_output=True)
-    rgpattern = re.compile('ID:(\S+)$')
+    rgpattern = re.compile(r'ID:(\S+)$')
     rglines = rg.stdout.split('\n')
     for rgline in rglines:
         if rgline:
@@ -3497,12 +3802,27 @@ def merge_two_dicts(x, y):
     z.update(y)    # modifies z with keys and values of y
     return z
 
-def count_reads(bam, threads):
-    c = subprocess.run(f'samtools view --threads {threads} -c -F 256 {bam}',
-                       shell=True, text=True, capture_output=True)
-    clines = c.stdout.split('\n')
-    r = int(clines[0])
-    return r
+def count_reads(bam, threads, bam_type):
+    if bam_type == 'verbose':
+        c = subprocess.run(f'samtools view --threads {threads} -c -F 256 {bam}',
+                        shell=True, text=True, capture_output=True)
+        clines = c.stdout.split('\n')
+        r = int(clines[0])
+        return r
+    elif bam_type == 'condensed':
+        # testing
+        # print(f'In count_reads about to starting counting for a bam_type of condensed')
+        
+        command = f'samtools view --threads {threads} -F 256 {bam} | grep -o \'XW:i:[0-9]\\+\' | sed \'s/XW:i://\' | awk \'{{sum += $1}} END {{print sum}}\''
+        c = subprocess.run(command, shell=True, check=True, text=True, capture_output=True)
+        clines = c.stdout.split('\n')
+        r = int(clines[0])
+
+        # testing
+        # print(f'\tFound {str(r)} reads')
+        # sys.exit()
+
+        return r
 
 def write_mirna_files(args, merged_bam):
     is_mirna = call_strucVis(args, merged_bam)
@@ -3576,7 +3896,7 @@ def write_mirna_fasta(args):
     #rm_cmd = f'rm -f {args.outdir}/mir.bed {args.outdir}/mir.gff3'
     #subprocess.run(rm_cmd, shell=True)
 
-def get_reads_by_chrom(bamfile):
+def get_seqs_by_chrom(bamfile):
     st_args = (['samtools', 'idxstats', bamfile])
     st_idxstats = subprocess.Popen(st_args, stdout=subprocess.PIPE,
         text=True, bufsize=1)
@@ -3585,6 +3905,7 @@ def get_reads_by_chrom(bamfile):
     for row in reader:
         rbc[row[0]] = int(row[2])
     return(rbc)
+
 
 def merge_locifile_mirs(args):
     # testing
@@ -3642,6 +3963,109 @@ def merge_locifile_mirs(args):
     # return
     return(new_nm_bedlines, new_m_bedlines)
 
+def get_condensed(args, trimmed_files):
+    condensed_files = []
+
+    if trimmed_files:
+        # Unless they are already condensed, must condense them.
+        #  If ShortStack made the trimmed file, delete them after condensation.
+        # talk to user
+        print ('')
+        print(time.strftime("%a %d %b %Y %H:%M:%S %z %Z", time.localtime()))
+        print('Condensing reads')
+        for trimmed_file in tqdm(trimmed_files,
+        unit = ' trimmed files', leave=None, disable=None):
+            # >\S+_Cd\d+_\d+reads
+            cond_pattern = r'>\S+_Cd\d+_\d+'
+            if trimmed_file.endswith('.gz'):
+                with gzip.open(trimmed_file, 'rt') as f:
+                    first_line = f.readline()
+                    #print(f'One first_line {first_line}')
+            else:
+                with open(trimmed_file, 'r') as f:
+                    first_line = f.readline()
+                    #print(f'Two first_line {first_line}')
+            is_match = bool(re.match(cond_pattern, first_line))
+            #print(f'is_match: {is_match}')
+            if is_match:
+                # Don't condense, it's already been done.
+                condensed_files.append(trimmed_file)
+                #print('Three')
+            else:
+                # Condense.
+                condensed_file = condenser(trimmed_file, args)
+                condensed_files.append(condensed_file)
+                #print('Four')
+                # Delete trimmed file if ShortStack made it (it will be
+                #   the args.outdir)
+                od_match = bool(re.match(args.outdir, trimmed_file))
+                if od_match:
+                    subprocess.run(f'rm {trimmed_file}', shell=True)
+
+    #print(trimmed_files)
+    #print(condensed_files)
+    return condensed_files
+
+def condenser(trimmed_file, args):    
+    # determine basename
+    basename = os.path.basename(trimmed_file)
+    # Strip trailing .gz if it exists
+    if basename.endswith('.gz'):
+        basename = basename[:-3]
+    # Strip any trailing characters starting with a '.' followed by any characters
+    basename = re.sub(r'\.[^.]*$', '', basename)
+    
+    # determine file names
+    sort_file = args.outdir + '/' + basename + '_sorttemp.txt'
+    condensed_file = args.outdir + '/' + basename + '_condensed.fa'
+
+    # determine format
+    if trimmed_file.endswith('.gz'):
+        with gzip.open(trimmed_file, 'rt') as f:
+            first_line = f.readline()
+            isgz = True
+            #print(f'One first_line {first_line}')
+    else:
+        with open(trimmed_file, 'r') as f:
+            first_line = f.readline()
+            isgz = False
+            #print(f'Two first_line {first_line}')
+    
+    # use sed, sort, and uniq, depending on the format
+    if first_line.startswith('>'):
+        # FASTA
+        if isgz is True:
+            cmd = f'gzip -cd {trimmed_file} | sed -n \'2~2p\' | sort | uniq -c > {sort_file}'
+        else:
+            cmd = f'cat {trimmed_file} | sed -n \'2~2p\' | sort | uniq -c > {sort_file}'
+    elif first_line.startswith('@'):
+        # FASTQ
+        if isgz is True:
+            cmd = f'gzip -cd {trimmed_file} | sed -n \'2~4p\' | sort | uniq -c > {sort_file}'
+        else:
+            cmd = f'cat {trimmed_file} | sed -n \'2~4p\' | sort | uniq -c > {sort_file}'
+    subprocess.run(cmd, shell=True)
+
+    # counter
+    n = 0
+
+    # parse and write final condensed fa file, depeting the temp sort file after
+    with open(condensed_file, "w") as cdf:
+        with open(sort_file, 'r') as sf:
+            for sort_line in sf:
+                n += 1
+                # parse the uniq -c line
+                parts = sort_line.split()  # Split by whitespace
+                count = int(parts[0])  # The first part is the read count
+                sequence = parts[1]  # The rest is the sequence
+                # build the header >\S+_Cd\d+_\d+
+                header = f'>{basename}_Cd' + str(n) + '_' + str(count) + '\n'
+                cdf.write(header)
+                cdf.write(sequence)
+                cdf.write('\n')
+    subprocess.run(f'rm -f {sort_file}', shell=True)
+    return condensed_file
+
 ## Main control / script
 if __name__ == '__main__':
     # Process command line, setting and checking options.
@@ -3663,21 +4087,25 @@ if __name__ == '__main__':
     # Create the output directory (or die tryin)
     make_outdir(args.outdir)
 
-    # Adapter discovery and adapter trimming
+    # Adapter discovery, adapter trimming.
     trimmed_files = get_trimmed(args)
-    
+    # trimmed_files is empty if no read trimming was warranted by input.
+
+    # Read condensation
+    condensed_files = get_condensed(args, trimmed_files)
+
     # Alignment
-    merged_bam, read_count = align(args, fai, trimmed_files)
+    merged_bam, read_count, bam_type = align(args, fai, condensed_files)
     if args.align_only is True:
         sys.exit()
     
     # Analysis
-    cluster_bed = denovo_clusters(merged_bam, args, fai, loci, read_count) 
-    qdata, pmir_bedfile = quant_controller(args, merged_bam, cluster_bed, read_count)
+    cluster_bed = denovo_clusters(merged_bam, args, fai, loci, read_count, bam_type) 
+    qdata, pmir_bedfile = quant_controller(args, merged_bam, cluster_bed, read_count, bam_type)
     #pmir_bedfile = None
-    
+
     # MIRNA search
-    mir_qdata = mirna(args, merged_bam, fai, pmir_bedfile, read_count)
+    mir_qdata = mirna(args, merged_bam, fai, pmir_bedfile, read_count, bam_type)
 
     # Clean up a possible intermediate file that for some cryptic reason
     #  is not able to be deleted earlier in the script
