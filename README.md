@@ -15,6 +15,7 @@ As of version 4.1.0 ShortStack creates and uses "condensed reads" for alignments
 - [Usage](#usage)
 - [Resources](#resources)
 - [Testing and Examples](#testing-and-examples)
+- [Vignettes](#vignettes)
 - [Outputs](#outputs)
 - [Visualizing Results](#visualizing-results)
 - [Overview of Methods](#overview-of-methods)
@@ -176,6 +177,9 @@ ShortStack --genomefile Arabidopsis_thalianaTAIR10.fa --readfile SRR3222443.fast
 ```
 
 On my compute cluster using 6 threads this completes in about 9 minutes. All results are in the directory specified by `--outdir`, "ExampleShortStackRun". The outputs are described in the section below called "Outputs".
+
+# Vignettes
+More examples of common tasks can be found on the wiki at <https://github.com/MikeAxtell/ShortStack/wiki>
 
 # Outputs
 ## Results.txt
