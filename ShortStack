@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-version = '4.1.0'
+version = '4.1.1'
 
 # Main script / control is at the BOTTOM of this file
 
@@ -54,6 +54,9 @@ def loc_check(args, fai):
     Requires modules sys, os.
     """
     if (args.locus is None) and (args.locifile is None):
+        return None
+    
+    if args.autotrim_only is True:
         return None
 
     # for --locus cases:
@@ -223,6 +226,12 @@ def genome_prep(args):
     Requires python >= 3.7 to ensure insertion order of the dictionary is
     stable.
     """
+    fai_dict = {}
+
+    # Do nothing if we are just auto-trimming
+    if args.autotrim_only is True:
+        return fai_dict
+    
     # check for .fai index file. Attempt to create it if it is not there.
     fai = args.genomefile + '.fai'
     if not os.path.isfile(fai):
@@ -236,7 +245,7 @@ def genome_prep(args):
 
     # Store the chr names and lengths in a dictionary.
     # Take advantage of stable dictionary key order in python >= 3.7
-    fai_dict = {}
+    
     with open(fai) as f:
         reader = csv.reader(f, delimiter="\t")
         for row in reader:
@@ -540,10 +549,15 @@ def ShortStack_argparse(ss_version):
     parser = argparse.ArgumentParser(prog='ShortStack')
     parser.add_argument('--version', action='version',
                         version='%(prog)s {0}'.format(ss_version))
-    parser.add_argument('--genomefile',
-                        required=True,
+    parser_group_G = parser.add_mutually_exclusive_group(required=True)
+    parser_group_G.add_argument('--genomefile',
+                        #required=True,
                         type=valid_genomefile,
-                        help='FASTA file of the reference genome (required)')
+                        help='FASTA file of the reference genome')
+    parser_group_G.add_argument('--autotrim_only',
+                        action='store_true',
+                        help='If this switch is set, ShortStack quits after' +
+                        ' performing auto-trimming of input reads.')
     parser.add_argument('--known_miRNAs',
                         type=valid_known_miRNAs,
                         help='FASTA file of known/suspected mature microRNAs')
@@ -1673,6 +1687,9 @@ def get_trimmed(args):
     """
     if __name__ == '__main__':
         found_adapters = []
+        # ensure that if args.autotrim_only is set, that we autrotrim
+        if args.autotrim_only is True:
+            args.autotrim = True
         if (args.readfile is not None) and (args.autotrim is True):
             # auto-detect the 3' adapters in each readfile, using as many
             # threads as the user lets us.
@@ -4078,6 +4095,7 @@ if __name__ == '__main__':
     check_executables(args)
 
     # Genome preparation. Gives dictionary fai, which has chr names and lengths
+    # fai is empty if args.autotrim_only is True
     fai = genome_prep(args)
 
     # locus / locifile check. If neither present, the loc object is None.
@@ -4090,6 +4108,9 @@ if __name__ == '__main__':
     # Adapter discovery, adapter trimming.
     trimmed_files = get_trimmed(args)
     # trimmed_files is empty if no read trimming was warranted by input.
+
+    if args.autotrim_only is True:
+        sys.exit()
 
     # Read condensation
     condensed_files = get_condensed(args, trimmed_files)
