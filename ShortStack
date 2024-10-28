@@ -3326,15 +3326,6 @@ def analyze_fold(mir_locus, dotbracket, bedfields, merged_bam, args, fai, bam_ty
     if s_rel_start is None:
         return None, None, None
 
-    # Issue #162
-    # miRNA and miRNA* cannot overlap!
-    if s_rel_start < q_rel_start:
-        if s_rel_stop >= q_rel_start:
-            return None, None, None
-    elif q_rel_start < s_rel_start:
-        if q_rel_stop >= s_rel_start:
-            return None, None, None
-
     # Compute position of miR* in genomic coordinates given relative coordinates
     s_gen_start, s_gen_stop = get_star_genomic(new_locus, bedfields, s_rel_start, s_rel_stop)
     if s_gen_start is None:
@@ -3802,7 +3793,9 @@ def write_files(args, qdata, mir_qdata):
                 kgff_line = kgff_line + kbed_fields[4] + '\t'  # Score (n reads)
                 kgff_line = kgff_line + kbed_fields[5] + '\t' # Strand
                 kgff_line = kgff_line + '.\t' # Phase
-                kgff_line = kgff_line + f'ID={kbed_fields[3]}\n' # Desc
+                #kgff_line = kgff_line + f'ID={kbed_fields[3]}\n' # Desc
+                # Issue #160
+                kgff_line = kgff_line + f'Name={kbed_fields[3]}\n' # Desc
                 k_gff_fh.write(kgff_line)
         k_gff_fh.close()
 
