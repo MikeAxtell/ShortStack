@@ -77,11 +77,15 @@ Then, download the `ShortStack` script from this github repo. Make it executable
 
 # Usage
 ```
-ShortStack [-h] [--version] --genomefile GENOMEFILE [--known_miRNAs KNOWN_MIRNAS] (--readfile [READFILE ...] | --bamfile [BAMFILE ...]) [--outdir OUTDIR] [--adapter ADAPTER | --autotrim] [--autotrim_key AUTOTRIM_KEY] [--threads THREADS] [--mmap {u,f,r}] [--align_only] [--dicermin DICERMIN] [--dicermax DICERMAX] [--locifile LOCIFILE | --locus LOCUS] [--nohp] [--dn_mirna] [--strand_cutoff STRAND_CUTOFF] [--mincov MINCOV] [--pad PAD] [--make_bigwigs]
+ShortStack [-h] [--version] (--genomefile GENOMEFILE | --autotrim_only) [--known_miRNAs KNOWN_MIRNAS] (--readfile [READFILE ...] | --bamfile [BAMFILE ...]) [--outdir OUTDIR] [--adapter ADAPTER | --autotrim]
+                  [--autotrim_key AUTOTRIM_KEY] [--threads THREADS] [--mmap {u,f,r}] [--align_only] [--dicermin DICERMIN] [--dicermax DICERMAX] [--locifile LOCIFILE | --locus LOCUS] [--nohp] [--dn_mirna]
+                  [--strand_cutoff STRAND_CUTOFF] [--mincov MINCOV] [--pad PAD] [--make_bigwigs]
 ```
 
 ## Required
-- `--genomefile GENOMEFILE` : Path to the reference genome in FASTA format. Must be indexable by both `samtools faidx` and `bowtie-build`, or already indexed.
+- `(--genomefile GENOMEFILE | --autotrim_only)` : *Either* `--genomefile` or `--autotrim_only` is required. 
+    - `--genomefile GENOMEFILE` : Path to the reference genome in FASTA format. Must be indexable by both `samtools faidx` and `bowtie-build`, or already indexed.
+    - `--autrotrim_only` : If this switch is set, ShortStack quits after performing auto-trimming of input reads.
 - `(--readfile [READFILE ...] | --bamfile [BAMFILE ...])` : *Either* `--readfile` or `--bamfile` is required.
     - `--readfile [READFILE ...]` : Path(s) to one or more files of reads in `fastq` or `fasta` format. May be `gzip` compressed. Multiple files are separated by spaces. Inputting reads triggers alignments to be performed.
     - `--bamfile [BAMFILE ...]` : Path(s) to one or more files of aligned sRNA-seq data in BAM format. Multiple files are separated by spaces. BAM files must match the reference genome given in `--genomefile`.
