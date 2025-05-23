@@ -4054,15 +4054,19 @@ def condenser(trimmed_file, args):
     if first_line.startswith('>'):
         # FASTA
         if isgz is True:
-            cmd = f'gzip -cd {trimmed_file} | sed -n \'2~2p\' | sort | uniq -c > {sort_file}'
+            #cmd = f'gzip -cd {trimmed_file} | sed -n \'2~2p\' | sort | uniq -c > {sort_file}'
+            cmd = f'gzip -cd {trimmed_file} | awk \'NR % 2 == 0\' | sort | uniq -c > {sort_file}'
         else:
-            cmd = f'cat {trimmed_file} | sed -n \'2~2p\' | sort | uniq -c > {sort_file}'
+            #cmd = f'cat {trimmed_file} | sed -n \'2~2p\' | sort | uniq -c > {sort_file}'
+            cmd = f'cat {trimmed_file} | awk \'NR % 2 == 0\' | sort | uniq -c > {sort_file}'
     elif first_line.startswith('@'):
         # FASTQ
         if isgz is True:
-            cmd = f'gzip -cd {trimmed_file} | sed -n \'2~4p\' | sort | uniq -c > {sort_file}'
+            #cmd = f'gzip -cd {trimmed_file} | sed -n \'2~4p\' | sort | uniq -c > {sort_file}'
+            cmd = f'gzip -cd {trimmed_file} | awk \'NR % 4 == 2\' | sort | uniq -c > {sort_file}'
         else:
-            cmd = f'cat {trimmed_file} | sed -n \'2~4p\' | sort | uniq -c > {sort_file}'
+            #cmd = f'cat {trimmed_file} | sed -n \'2~4p\' | sort | uniq -c > {sort_file}'
+            cmd = f'cat {trimmed_file} | awk \'NR % 4 == 2\' | sort | uniq -c > {sort_file}'
     subprocess.run(cmd, shell=True)
 
     # counter
