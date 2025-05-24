@@ -1539,7 +1539,7 @@ def find_adapter(fqfile, prefix, n):
         return (fqfile, bestaseq) 
         
     else:
-        #print(f'Autotrim failed to find an adapter for {fqfile}!')
+        print(f'Autotrim failed to find an adapter for {fqfile}!')
         #print(f' Consider a different autotrim_key!') 
         # We don't sys.exit() here because this function may be running
         #  as one of several threads. Main script should abort instead.
@@ -1709,14 +1709,12 @@ def get_trimmed(args):
                 autotrim_iter = list(zip(args.readfile,
                     [args.autotrim_key] * len(args.readfile),
                     list(range(1, len(args.readfile) + 1))))
-                for found_adapter in pool.starmap(find_adapter, autotrim_iter):
-                    if(all(found_adapter)):
+                for (read_file, autotrim_key, index), found_adapter in zip(autotrim_iter, pool.starmap(find_adapter, autotrim_iter)):
+                    if all(found_adapter):
                         found_adapters.append(found_adapter)
                     else:
-                        msg = ('FATAL: Failed to infer an adapter from one or' +
-                            ' more fastq files!. Try a different autotrim_key' +
-                            ' or trim your reads outside of ShortStack!')
-                        sys.exit(msg)
+                        print(f"FATAL: Failed to infer adapter for input file: {read_file}")
+                        sys.exit()
         if len(found_adapters) > 0:
             print('')
             print('Adapters:')
