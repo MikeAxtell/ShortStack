@@ -2528,7 +2528,12 @@ def mirna(args, merged_bam, fai, pmir_bedfile, read_count, bam_type):
                     chunksize=1)
                 # denovo_mloci1 is returned from above
                 # Unpack it
-                dn_q_bedlines, dn_locus_bedlines = zip(*denovo_mloci1)
+                # Issue 174
+                if denovo_mloci1:
+                    dn_q_bedlines, dn_locus_bedlines = zip(*denovo_mloci1)
+                else:
+                    dn_q_bedlines, dn_locus_bedlines = [], []
+                #dn_q_bedlines, dn_locus_bedlines = zip(*denovo_mloci1)
 
                 # Don't care about dn_q_bedlines
                 # Write the dn_locus_bedlines to final file
